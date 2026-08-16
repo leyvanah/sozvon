@@ -1,0 +1,19 @@
+# Gitleaks configuration for Sozvon.
+#
+# Extends gitleaks' built-in ruleset. The allowlist below covers inherited
+# Galène unit-test fixtures (fake tokens/keys used only by tests) and
+# documentation examples — these are NOT real secrets. Real runtime secrets
+# live under data/ and groups/, which are git-ignored and never committed.
+
+title = "Sozvon gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and documentation examples (not real secrets)"
+paths = [
+    '''.*_test\.go$''',
+    '''(^|/)README$''',
+    '''galene\.md$''',
+]

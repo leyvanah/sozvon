@@ -1,0 +1,24 @@
+# Files that are executed on a Unix host must keep LF endings, whatever the
+# checkout platform.  A shell script that reaches a server with CRLF fails on
+# its own shebang ("/bin/sh^M: bad interpreter"), and a systemd unit with CRLF
+# is parsed with a stray carriage return in every value -- both are confusing
+# out of all proportion to the cause.  Sozvon is developed on Windows, so this
+# is not hypothetical.
+*.sh            text eol=lf
+contrib/**      text eol=lf
+
+# Web client assets are served verbatim; keep them stable across platforms.
+*.js            text eol=lf
+*.css           text eol=lf
+*.html          text eol=lf
+*.json          text eol=lf
+
+*.go            text eol=lf
+go.mod          text eol=lf
+go.sum          text eol=lf
+
+# Gradle wrapper and Android sources, likewise built on CI.
+*.kt            text eol=lf
+*.kts           text eol=lf
+*.xml           text eol=lf
+*.yml           text eol=lf

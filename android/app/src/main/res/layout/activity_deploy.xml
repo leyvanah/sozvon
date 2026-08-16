@@ -1,0 +1,456 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/sozvon_bg">
+
+    <!-- ===================================================== form ==== -->
+    <ScrollView
+        android:id="@+id/deploy_form"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:id="@+id/form_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/deploy_title"
+                android:textColor="@color/sozvon_text"
+                android:textSize="24sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:id="@+id/form_subtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/deploy_subtitle"
+                android:textColor="@color/sozvon_text2"
+                android:textSize="14sp"/>
+
+            <TextView style="@style/SozvonFieldLabel"
+                android:text="@string/ssh_host_label"/>
+            <EditText
+                android:id="@+id/ssh_host"
+                style="@style/SozvonField"
+                android:hint="203.0.113.10"
+                android:inputType="textUri"/>
+
+            <TextView style="@style/SozvonFieldLabel"
+                android:text="@string/ssh_port_label"/>
+            <EditText
+                android:id="@+id/ssh_port"
+                style="@style/SozvonField"
+                android:inputType="number"
+                android:text="22"/>
+
+            <TextView style="@style/SozvonFieldLabel"
+                android:text="@string/ssh_user_label"/>
+            <EditText
+                android:id="@+id/ssh_user"
+                style="@style/SozvonField"
+                android:inputType="text"
+                android:text="root"/>
+
+            <TextView style="@style/SozvonFieldLabel"
+                android:text="@string/auth_type_label"/>
+            <Spinner
+                android:id="@+id/auth_type"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
+
+            <LinearLayout
+                android:id="@+id/password_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <TextView style="@style/SozvonFieldLabel"
+                    android:text="@string/ssh_password_label"/>
+                <!-- The field and its show/hide eye.  A password typed on a
+                     phone keyboard and never shown back is a password typed
+                     wrong, and the install fails several steps later with an
+                     authentication error. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+                    <EditText
+                        android:id="@+id/ssh_password"
+                        style="@style/SozvonField"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:inputType="textPassword"/>
+                    <ImageButton
+                        android:id="@+id/ssh_password_reveal"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/password_show"
+                        android:src="@drawable/ic_eye"
+                        app:tint="@color/sozvon_text2"/>
+                </LinearLayout>
+                <TextView style="@style/SozvonHint"
+                    android:text="@string/ssh_password_hint"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/key_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+                <TextView style="@style/SozvonFieldLabel"
+                    android:text="@string/ssh_key_label"/>
+                <EditText
+                    android:id="@+id/ssh_key"
+                    style="@style/SozvonField"
+                    android:gravity="top"
+                    android:inputType="textMultiLine"
+                    android:minLines="4"/>
+                <TextView style="@style/SozvonHint"
+                    android:text="@string/ssh_key_hint"/>
+                <TextView style="@style/SozvonFieldLabel"
+                    android:text="@string/ssh_passphrase_label"/>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+                    <EditText
+                        android:id="@+id/ssh_passphrase"
+                        style="@style/SozvonField"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:inputType="textPassword"/>
+                    <ImageButton
+                        android:id="@+id/ssh_passphrase_reveal"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/password_show"
+                        android:src="@drawable/ic_eye"
+                        app:tint="@color/sozvon_text2"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Everything an install needs and a removal does not.
+                 Hidden wholesale by DeployActivity in "remove" mode. -->
+            <LinearLayout
+                android:id="@+id/install_only"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <TextView style="@style/SozvonFieldLabel"
+                    android:text="@string/tls_label"/>
+                <Spinner
+                    android:id="@+id/tls_mode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"/>
+                <TextView
+                    android:id="@+id/tls_hint"
+                    style="@style/SozvonHint"/>
+
+                <LinearLayout
+                    android:id="@+id/domain_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+                    <TextView style="@style/SozvonFieldLabel"
+                        android:text="@string/domain_label"/>
+                    <EditText
+                        android:id="@+id/ssh_domain"
+                        style="@style/SozvonField"
+                        android:hint="meet.example.com"
+                        android:inputType="textUri"/>
+                    <TextView style="@style/SozvonHint"
+                        android:text="@string/domain_hint"/>
+                </LinearLayout>
+
+                <TextView style="@style/SozvonFieldLabel"
+                    android:text="@string/room_label"/>
+                <EditText
+                    android:id="@+id/room_name"
+                    style="@style/SozvonField"
+                    android:inputType="text"
+                    android:text="meet"/>
+
+                <!-- Advanced: needed on a host whose 443 is taken, and when the
+                     server cannot reach GitHub to download the release. -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="26dp"
+                    android:text="@string/advanced_label"
+                    android:textAllCaps="true"
+                    android:textColor="@color/sozvon_text3"
+                    android:textSize="12sp"/>
+
+                <TextView style="@style/SozvonFieldLabel"
+                    android:text="@string/https_port_label"/>
+                <EditText
+                    android:id="@+id/https_port"
+                    style="@style/SozvonField"
+                    android:hint="443"
+                    android:inputType="number"/>
+                <TextView style="@style/SozvonHint"
+                    android:text="@string/https_port_hint"/>
+
+                <TextView style="@style/SozvonFieldLabel"
+                    android:text="@string/mirror_label"/>
+                <EditText
+                    android:id="@+id/mirror_url"
+                    style="@style/SozvonField"
+                    android:hint="https://example.com/sozvon"
+                    android:inputType="textUri"/>
+                <TextView style="@style/SozvonHint"
+                    android:text="@string/mirror_hint"/>
+            </LinearLayout>
+
+            <!-- Removing a server: how much of it goes. -->
+            <LinearLayout
+                android:id="@+id/remove_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+                <CheckBox
+                    android:id="@+id/purge_data"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:buttonTint="@color/sozvon_accent"
+                    android:text="@string/remove_purge"
+                    android:textColor="@color/sozvon_text"
+                    android:textSize="15sp"/>
+                <TextView
+                    android:id="@+id/remove_hint"
+                    style="@style/SozvonHint"
+                    android:text="@string/remove_keep_hint"/>
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/deploy_go"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:backgroundTint="@color/sozvon_accent"
+                android:text="@string/deploy_install"
+                android:textColor="@color/sozvon_accent_contrast"/>
+
+            <Button
+                android:id="@+id/deploy_back"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="?attr/selectableItemBackground"
+                android:text="@string/deploy_back"
+                android:textColor="@color/sozvon_text2"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ================================================= progress ==== -->
+    <ScrollView
+        android:id="@+id/deploy_progress"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/deploy_title"
+                android:textColor="@color/sozvon_text"
+                android:textSize="24sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:id="@+id/progress_sub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/sozvon_text2"
+                android:textSize="14sp"/>
+
+            <LinearLayout
+                android:id="@+id/steps"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:orientation="vertical"/>
+
+            <TextView
+                style="@style/SozvonHint"
+                android:layout_marginTop="20dp"
+                android:text="@string/deploy_patience"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ===================================================== done ==== -->
+    <ScrollView
+        android:id="@+id/deploy_done"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/deploy_done_title"
+                android:textColor="@color/sozvon_text"
+                android:textSize="24sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/deploy_done_subtitle"
+                android:textColor="@color/sozvon_text2"
+                android:textSize="14sp"/>
+
+            <TextView style="@style/SozvonFieldLabel"
+                android:text="@string/result_address"/>
+            <TextView
+                android:id="@+id/result_url"
+                style="@style/SozvonValue"/>
+
+            <TextView style="@style/SozvonFieldLabel"
+                android:text="@string/result_operator"/>
+            <TextView
+                android:id="@+id/result_user"
+                style="@style/SozvonValue"/>
+
+            <TextView style="@style/SozvonFieldLabel"
+                android:text="@string/result_password"/>
+            <!-- The password is shown once and never again, so copying it has
+                 to be one tap rather than a long-press-and-drag on a
+                 monospace string.  The row keeps the value selectable too, for
+                 anyone who would rather take part of it. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <TextView
+                    android:id="@+id/result_password"
+                    style="@style/SozvonValue"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:textIsSelectable="true"/>
+                <ImageButton
+                    android:id="@+id/result_password_copy"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="8dp"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/result_copy_password"
+                    android:src="@drawable/ic_copy"
+                    android:tint="@color/sozvon_text2"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/result_selfsigned"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/result_selfsigned"
+                    android:textColor="@color/sozvon_warn"
+                    android:textSize="13sp"/>
+                <TextView
+                    android:id="@+id/result_fingerprint"
+                    style="@style/SozvonValue"
+                    android:textIsSelectable="true"/>
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/deploy_open"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:backgroundTint="@color/sozvon_accent"
+                android:text="@string/deploy_open"
+                android:textColor="@color/sozvon_accent_contrast"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ==================================================== error ==== -->
+    <ScrollView
+        android:id="@+id/deploy_error"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/deploy_failed"
+                android:textColor="@color/sozvon_text"
+                android:textSize="24sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:id="@+id/error_message"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:textColor="@color/sozvon_error"
+                android:textSize="15sp"/>
+
+            <TextView
+                android:id="@+id/error_detail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:fontFamily="monospace"
+                android:textColor="@color/sozvon_text3"
+                android:textIsSelectable="true"
+                android:textSize="11sp"
+                android:visibility="gone"/>
+
+            <Button
+                android:id="@+id/deploy_retry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:backgroundTint="@color/sozvon_accent"
+                android:text="@string/deploy_retry"
+                android:textColor="@color/sozvon_accent_contrast"/>
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

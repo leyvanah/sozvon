@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="entry_subtitle">Видеоконференции на своём сервере</string>
+    <string name="connect">Подключиться</string>
+    <string name="error_url">Введите адрес сервера, например https://meet.example.com</string>
+    <string name="error_https">Адрес сервера должен начинаться с https://</string>
+    <string name="error_load">Не удалось подключиться к серверу</string>
+    <string name="change_server">Сменить сервер</string>
+    <string name="reset_login">Сбросить данные входа</string>
+    <string name="reset_login_done">Данные входа очищены</string>
+
+    <!-- Сохранённые серверы на экране адреса -->
+    <string name="servers_title">Сохранённые серверы</string>
+    <string name="server_actions">Действия с сервером</string>
+    <string name="server_pinned">Сертификат закреплён</string>
+    <string name="server_rename">Переименовать</string>
+    <string name="server_rename_hint">Название сервера</string>
+    <string name="server_remove">Удалить</string>
+    <string name="server_remove_confirm">Убрать %1$s из списка?</string>
+    <string name="server_reinstall">Переустановить на сервере…</string>
+    <string name="server_clean">Чистая переустановка…</string>
+    <string name="server_delete">Удалить с сервера…</string>
+
+    <!-- Управление установленным сервером по SSH -->
+    <string name="reinstall_title">Переустановка</string>
+    <string name="reinstall_subtitle">Установщик запускается поверх: обновит версию или починит остановившийся сервер. Комнаты, ссылки и пароль оператора сохраняются.</string>
+    <string name="reinstall_go">Переустановить</string>
+    <string name="reinstall_confirm">Переустановить на %1$s?\n\nСертификат: %2$s\nКомната: %3$s\nПорт: %4$s\n\nКомнаты, ссылки и пароль оператора сохранятся.</string>
+    <string name="reinstall_prefilled">Поля заполнены тем, с чем этот сервер был установлен. Меняя их, вы меняете сервер.</string>
+    <string name="clean_title">Чистая переустановка</string>
+    <string name="clean_subtitle">Сервер удаляется целиком, затем ставится заново, как на чистую машину. Комнаты, ссылки и сертификаты пропадут, у оператора будет новый пароль.</string>
+    <string name="clean_go">Снести и поставить</string>
+    <string name="clean_confirm">Всё, что SOZVON хранит на %1$s, будет удалено, а затем поставлено с нуля. Комнаты, ссылки и пароль оператора не сохранятся. Продолжить?</string>
+    <string name="remove_title">Удалить сервер</string>
+    <string name="remove_subtitle">SOZVON снимается с машины по SSH. Ничего другого на сервере не затрагивается.</string>
+    <string name="remove_go">Удалить</string>
+    <string name="remove_purge">Удалить вместе с данными</string>
+    <string name="remove_keep_hint">Сервис останавливается и снимается; комнаты, операторские учётки, ссылки и сертификаты остаются на диске — при повторной установке они подхватятся.</string>
+    <string name="remove_purge_hint">Удаляется всё: комнаты, операторские учётки, персональные ссылки, сертификаты и записи. Резервных копий не остаётся.</string>
+    <string name="remove_confirm_keep">Снять SOZVON с %1$s? Комнаты и учётки останутся на диске.</string>
+    <string name="remove_confirm_purge">Удалить SOZVON с %1$s вместе со всеми комнатами, операторскими учётками, ссылками и сертификатами? Отменить это будет нельзя.</string>
+    <string name="remove_done_keep">Сервер снят. Данные остались на машине — повторная установка их подхватит.</string>
+    <string name="remove_done_purge">Сервер и все его данные удалены.</string>
+    <string name="remove_done_toast">Удалён с сервера</string>
+    <string name="phase_removing">Удаляем сервер…</string>
+    <string name="common_save">Сохранить</string>
+    <string name="leave_server_in_call">Идёт звонок. Выйти из него и вернуться к списку серверов?</string>
+    <string name="leave_server">Выйти</string>
+    <string name="leave_server_background">Остаться в звонке</string>
+
+    <!-- Развёртывание сервера на VPS по SSH -->
+    <string name="deploy_cta">Нет сервера? Развернуть свой на VPS</string>
+    <string name="deploy_title">Развернуть свой сервер</string>
+    <string name="deploy_subtitle">SOZVON будет установлен на ваш VPS по SSH. Нужен чистый сервер с Debian или Ubuntu и доступ с правами root.</string>
+    <string name="ssh_host_label">Адрес сервера</string>
+    <string name="ssh_port_label">Порт SSH</string>
+    <string name="ssh_user_label">Пользователь</string>
+    <string name="auth_type_label">Вход по</string>
+    <string name="ssh_password_label">Пароль SSH</string>
+    <string name="ssh_password_hint">Используется только на время установки и никуда не сохраняется.</string>
+    <string name="password_show">Показать пароль</string>
+    <string name="password_hide">Скрыть пароль</string>
+    <string name="ssh_key_label">Приватный ключ</string>
+    <string name="ssh_key_hint">Вставьте содержимое файла ключа.</string>
+    <string name="ssh_passphrase_label">Пароль ключа (если есть)</string>
+    <string name="tls_label">Сертификат</string>
+    <string name="domain_label">Домен</string>
+    <string name="domain_hint">A-запись домена уже должна указывать на этот сервер.</string>
+    <string name="room_label">Название комнаты</string>
+    <string name="deploy_install">Установить</string>
+    <string name="deploy_back">Назад</string>
+    <string name="deploy_connecting">Подключаемся к серверу…</string>
+    <string name="deploy_step_of">Шаг %1$d из %2$d</string>
+    <string name="deploy_patience">Обычно занимает 2–5 минут. Установка идёт на сервере сама по себе: если связь оборвётся, приложение переподключится и продолжит следить.</string>
+    <string name="deploy_failed">Установка не удалась.</string>
+    <string name="deploy_retry">Назад к настройкам</string>
+    <string name="deploy_done_title">Сервер готов</string>
+    <string name="deploy_done_subtitle">Запишите пароль — он показывается только один раз.</string>
+    <string name="result_address">Адрес</string>
+    <string name="result_operator">Оператор</string>
+    <string name="result_password">Пароль</string>
+    <string name="result_password_unchanged">(не изменён)</string>
+    <string name="result_copy_password">Скопировать пароль</string>
+    <string name="result_copied">Пароль скопирован</string>
+    <string name="result_selfsigned">Сертификат самоподписанный: обычный браузер откажется открывать этот адрес, работать будет только приложение.</string>
+    <string name="deploy_open">Открыть комнату</string>
+
+    <string name="tls_hint_sslip">Имя будет получено из IP сервера через sslip.io, сертификат — от Let\'s Encrypt. Ничего настраивать не нужно, работает в любом браузере.</string>
+    <string name="tls_hint_domain">Самый независимый вариант: имя ваше, сторонних сервисов в цепочке нет.</string>
+    <string name="tls_hint_selfsigned">Не нужен ни домен, ни доступ к Let\'s Encrypt. Но браузеры такой сертификат отвергнут — подключаться можно будет только из приложения.</string>
+
+    <string name="hostkey_title">Проверьте отпечаток сервера</string>
+    <string name="hostkey_new">Вы подключаетесь к %1$s впервые.</string>
+    <string name="hostkey_changed">Ключ сервера %1$s изменился с прошлого раза.</string>
+    <string name="hostkey_previous">Было раньше:</string>
+    <string name="hostkey_warning">Сверьте его с тем, что показывает панель управления вашего хостинга. Если отпечаток не совпадает, кто-то может выдавать себя за ваш сервер — а вы собираетесь дать ему пароль root.</string>
+    <string name="hostkey_trust">Доверять</string>
+    <string name="common_cancel">Отмена</string>
+
+    <string name="stage_preflight">Проверяем систему</string>
+    <string name="stage_user">Создаём служебную учётную запись</string>
+    <string name="stage_fetch">Скачиваем SOZVON</string>
+    <string name="stage_tls">Готовим сертификат</string>
+    <string name="stage_config">Пишем конфигурацию</string>
+    <string name="stage_firewall">Открываем порты</string>
+    <string name="stage_service">Ставим службу</string>
+    <string name="stage_verify">Ждём ответа сервера</string>
+    <string name="stage_done">Завершаем</string>
+
+    <string name="phase_checking">Проверяем права доступа…</string>
+    <string name="phase_uploading">Передаём установщик…</string>
+    <string name="phase_starting">Запускаем установку…</string>
+    <string name="phase_installing">Идёт установка…</string>
+
+    <string name="advanced_label">Дополнительно</string>
+    <string name="https_port_label">Порт HTTPS</string>
+    <string name="https_port_hint">Пусто — 443. Другой порт нужен, если 443 уже занят, но Let\'s Encrypt работает только на 443 — используйте его вместе с самоподписанным сертификатом.</string>
+    <string name="mirror_label">Зеркало для загрузки</string>
+    <string name="mirror_hint">Пусто — качать с GitHub. Укажите, если сервер до GitHub не достучится.</string>
+    <string name="error_cert_untrusted">Сертификат сервера не является доверенным. Так можно открыть только сервер, развёрнутый из этого приложения с самоподписанным сертификатом.</string>
+    <string name="error_cert_changed">Сертификат сервера изменился с момента установки. Подключение отклонено.</string>
+
+    <string-array name="tls_modes">
+        <item>Автоматически, без домена (sslip.io + Let\'s Encrypt)</item>
+        <item>Свой домен (Let\'s Encrypt)</item>
+        <item>Самоподписанный (только из приложения)</item>
+    </string-array>
+    <string-array name="auth_types">
+        <item>паролю</item>
+        <item>ключу</item>
+    </string-array>
+</resources>

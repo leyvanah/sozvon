@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copy to the clipboard: the two-sheets glyph this action wears everywhere.
+     The back sheet is drawn as an outline so the two read apart at 20dp; a
+     pair of filled rectangles at this size merges into one blob. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- The sheet behind, open at the front sheet's corner. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M15,1H4C2.9,1 2,1.9 2,3v13h2V3h11V1z"/>
+    <!-- The sheet in front. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M19,5H8C6.9,5 6,5.9 6,7v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7C21,5.9 20.1,5 19,5zM19,21H8V7h11V21z"/>
+</vector>

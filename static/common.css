@@ -1,0 +1,441 @@
+/*
+ * Sozvon design tokens + base styles.  Shared by every page.
+ *
+ * The palette is monochrome by design: black, white and a grey ramp, with
+ * exactly three status colours reserved for state.  Nothing in the interface
+ * is coloured for decoration, so every token below is either a neutral or a
+ * status.  Stylesheets should reference these tokens and never a literal
+ * colour — that is what lets a deployment reskin from static/theme/theme.css
+ * and what lets the light scale below drop in wholesale.
+ *
+ * The dark scale is the one in :root, so it is what any page gets before a
+ * line of script runs.  The light one lives in a single [data-theme="light"]
+ * block, which theme-init.js stamps on <html> before first paint — including
+ * when the preference is "system" and the system asks for light.  That keeps
+ * one source of truth per value; the cost is that with scripting disabled the
+ * interface stays dark, which is the documented default anyway.
+ *
+ * Sozvon is a fork of Galène (MIT); see LICENCE.
+ */
+
+:root {
+    color-scheme: dark;
+
+    /* Native controls (range, checkbox, radio, progress) paint themselves with
+       the UA accent — a blue that no stylesheet rule touches — so it has to be
+       set here or the volume slider stays blue in a monochrome interface.
+       accent-color inherits, so declaring it once on the root is enough. */
+    accent-color: var(--accent);
+
+    /* Surfaces.  --bg is true black: the UI is AMOLED-first, so depth comes
+       from --border hairlines rather than from progressively lighter fills.
+       The --surface steps exist only where elements genuinely overlap. */
+    --bg: #000000;
+    --surface: #0A0A0A;
+    --surface-2: #141414;
+    --surface-3: #1C1C1C;
+
+    /* Text.  Ratios against --bg: 21:1, 11.2:1, 6.1:1 — all pass WCAG AA. */
+    --text: #FFFFFF;
+    --text-2: #BDBDBD;
+    --text-3: #8A8A8A;
+
+    /* Emphasis.  The palette is monochrome, so "accent" is not a hue: an
+       emphasised control inverts (fill --accent, text --accent-contrast)
+       instead of turning a different colour. */
+    --accent: #FFFFFF;
+    --accent-contrast: #000000;
+    /* Hover for emphasis fills.  --accent is already the brightest value the
+       palette has, so an emphasised control cannot get brighter on hover — it
+       dims instead.  Black text on it is 14.4:1. */
+    --accent-hover: #D6D6D6;
+    --accent-soft: rgba(255, 255, 255, 0.12);
+    --focus-ring: rgba(255, 255, 255, 0.55);
+
+    /* Lines & overlays.  --border is the brand grey and carries structure;
+       --divider is the quieter hairline for dense lists.  #444 on black is
+       2.2:1, which is fine for a line but must never be used for text. */
+    --border: #444444;
+    --divider: rgba(255, 255, 255, 0.10);
+    --hover: rgba(255, 255, 255, 0.06);
+    --hover-strong: rgba(255, 255, 255, 0.12);
+
+    /* The control dock.  Glass rather than a surface: it floats over the
+       stage, so it is a veil the blur behind it shows through, not a fill.
+       A difference again — the dark theme thins white over black, while the
+       light theme cannot use a black veil at all, because the dock also
+       floats over other people's video and its dark glyphs have to stay
+       legible when the frame behind it is dark. */
+    --dock-bg: rgba(255, 255, 255, 0.06);
+
+    /* Printed over video.  A picture is not a surface the palette controls,
+       so unlike every other value here these two do NOT flip with the theme:
+       light-on-dark reads over any frame, in either theme. */
+    --on-video: #FFFFFF;
+    --on-video-scrim: rgba(0, 0, 0, 0.5);
+
+    /* Status — the only colour left in the interface, and only ever for
+       state (connection, encryption, destructive actions), never decoration. */
+    --danger: #E06A6A;
+    --warn: #D6B85A;
+    --ok: #6BBE8A;
+
+    /* Neutral steps for generated avatars — the monochrome replacement for
+       the old per-user hue palette. */
+    --av-0: #1C1C1C;
+    --av-1: #262626;
+    --av-2: #303030;
+    --av-3: #3A3A3A;
+    --av-4: #444444;
+
+    /* Width of the settings drawer.  Shared so the push offset on desktop is
+       exactly the drawer's width. */
+    /* The same 320px the people + chat panel takes on the other side, so the
+       call sits between two columns of one width rather than two of nearly
+       one.  Capped against the viewport for a phone, where the drawer is an
+       overlay and 320px would be most of the screen. */
+    --drawer-w: min(320px, 86vw);
+    /* How much the drawer displaces the call area.  Zero unless the drawer is
+       open on a desktop-width viewport, where it pushes rather than covers. */
+    --drawer-offset: 0px;
+
+    /* Shape.  Tight and geometric: the brand is drawn with spare, hard forms,
+       and generous rounding reads as soft rather than minimal.  Four steps,
+       and a pill for the shapes that are genuinely circular. */
+    --radius-sm: 4px;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --radius-pill: 999px;
+
+    /* Elevation — contrast first, shadow only where something genuinely
+       floats.  Three steps, the same treatment the radii and font sizes got:
+       the sheets had grown seven ad-hoc shadows doing three jobs.
+         1 — chrome that sits just above the page (toasts)
+         2 — panels and menus that overlay it (drawer, nav menu, dragged tile)
+         3 — cards that take over the screen (login, operator, blocking cards)
+       Deep by design: a shadow has to read against true black. */
+    --shadow-1: 0 4px 16px rgba(0, 0, 0, 0.25);
+    --shadow-2: 0 10px 30px rgba(0, 0, 0, 0.55);
+    --shadow-3: 0 24px 60px -20px rgba(0, 0, 0, 0.65);
+
+    /* The hairline of light along a card's top edge that suggests it is lit
+       from above.  It is a *difference*, not a colour: on a light surface
+       there is nothing to lighten, so the light theme drops it entirely. */
+    --edge-highlight: rgba(255, 255, 255, 0.08);
+
+    /* The edge that sets a docked panel apart from the stage behind it.  There
+       are two of them, one down each side — people + chat on the left, the
+       settings drawer on the right whenever it is wide enough to push the call
+       aside rather than cover it — and they are the same object, so they get
+       the same edge.  A difference too, and the same argument as the shadows
+       above read backwards: the dark theme steps up from true black, so
+       --surface against --bg is separation enough and a black shadow on black
+       would draw nothing anyway.  The light theme's two fills sit within three
+       percent of each other, so there it takes a soft shadow — which is what
+       replaced the full-height hairline the panel used to be drawn with.
+       Directional: the shadow falls away from the panel, into the stage, so
+       the right-hand panel takes the flipped one. */
+    --panel-edge: none;
+    --panel-edge-flipped: none;
+
+    /* Film grain over the first screen, so a near-black field has texture.
+       Also a difference rather than a colour: the same speckle that reads as
+       texture on black reads as dust on white, so it thins out there. */
+    --grain: 0.05;
+
+    /* Legibility shadow under a name printed on a tile.  The labels over real
+       video keep a literal black shadow whatever the theme — video is not a
+       surface we control.  This one is for the picture-less placeholder tile,
+       where in a light theme dark text over a light tile needs no shadow at
+       all and gets muddy with one. */
+    --label-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+
+    /* Motion */
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --t-fast: 140ms;
+    --t-base: 240ms;
+
+    /* Type scale.  The sheets had grown twenty distinct rem sizes across 56
+       declarations — 0.9, 0.92 and 0.95rem all doing the same job.  Seven
+       steps, and nothing lands between them.
+       (px font sizes are left alone on purpose: they size icon glyphs, where
+       the exact pixel matters for optical alignment.  So are em and %, which
+       are deliberately relative to their container.) */
+    --fs-xs: 0.72rem;
+    --fs-sm: 0.82rem;
+    --fs-md: 0.92rem;
+    --fs-base: 1rem;
+    --fs-lg: 1.2rem;
+    --fs-xl: 1.5rem;
+    --fs-2xl: 2rem;
+
+    /* Type */
+    --font: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont,
+            "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif,
+            "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+}
+
+/*
+ * The light scale.  Not an inversion of the dark one: #BDBDBD reads 11.2:1 on
+ * black but 1.9:1 on white, so the two brand greys swap jobs — #444444 is the
+ * dark theme's border and the light theme's secondary text (9.7:1), #BDBDBD
+ * the reverse.  Tertiary text needs its own value, #767676 (4.5:1), because
+ * the dark theme's #8A8A8A is only 3.2:1 on white.
+ *
+ * Only values that differ are listed; everything else (shape, motion, type,
+ * and the two on-video tokens that deliberately never flip) is inherited from
+ * :root above.  Ratios in the comments are against the surface the value is
+ * actually used on.
+ */
+:root[data-theme="light"] {
+    color-scheme: light;
+
+    /* Surfaces.  The dark theme is AMOLED-first and steps *up* from true
+       black; this one steps *down* from white, by the same small amounts, so
+       overlapping panels separate without turning grey. */
+    --bg: #FFFFFF;
+    --surface: #F7F7F7;
+    --surface-2: #F0F0F0;
+    --surface-3: #E7E7E7;
+
+    /* Text.  Ratios against --bg: 21:1, 9.7:1, 4.5:1 — all pass WCAG AA. */
+    --text: #000000;
+    --text-2: #444444;
+    --text-3: #767676;
+
+    /* Emphasis still inverts rather than picking up a hue; the inversion just
+       points the other way.  Black cannot darken further on hover, so it
+       lifts — the mirror of the dark theme's dimming.  White on #333 is
+       12.6:1. */
+    --accent: #000000;
+    --accent-contrast: #FFFFFF;
+    --accent-hover: #333333;
+    --accent-soft: rgba(0, 0, 0, 0.08);
+    --focus-ring: rgba(0, 0, 0, 0.45);
+
+    /* Lines & overlays: black veils instead of white ones, at slightly lower
+       alphas — a dark film over white reads stronger than a light film over
+       black at the same value. */
+    --border: #BDBDBD;
+    --divider: rgba(0, 0, 0, 0.12);
+    --hover: rgba(0, 0, 0, 0.05);
+    --hover-strong: rgba(0, 0, 0, 0.10);
+    --dock-bg: rgba(255, 255, 255, 0.62);
+
+    /* Status.  The dark theme's pastels are 2:1 on white, so each darkens to
+       about 5:1 while keeping its hue. */
+    --danger: #B5524F;
+    --warn: #8A6D1F;
+    --ok: #2E7D50;
+
+    /* Avatars: the same five steps, walking down from white instead of up
+       from black, so the initial (--text, now black) stays legible. */
+    --av-0: #EDEDED;
+    --av-1: #E4E4E4;
+    --av-2: #DBDBDB;
+    --av-3: #D2D2D2;
+    --av-4: #C9C9C9;
+
+    /* Elevation.  Same geometry, much less ink: a 65%-black shadow that reads
+       as depth on black reads as dirt on white. */
+    --shadow-1: 0 4px 16px rgba(0, 0, 0, 0.08);
+    --shadow-2: 0 10px 30px rgba(0, 0, 0, 0.12);
+    --shadow-3: 0 24px 60px -20px rgba(0, 0, 0, 0.20);
+
+    /* The differences rather than colours: there is nothing to lighten on a
+       white card, dark text on a light tile needs no shadow, and grain that
+       gives black a texture only makes white look dirty. */
+    --edge-highlight: transparent;
+    --label-shadow: none;
+    --grain: 0.02;
+    --panel-edge: 2px 0 18px rgba(0, 0, 0, 0.07);
+    --panel-edge-flipped: -2px 0 18px rgba(0, 0, 0, 0.07);
+}
+
+/* Set on <html> for one frame while the theme swaps; see stamp() in
+   theme-init.js for why nothing may animate across that boundary. */
+:root.theme-switching *,
+:root.theme-switching *::before,
+:root.theme-switching *::after {
+    transition: none !important;
+}
+
+h1 {
+    font-size: 160%;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.inline {
+    display: inline;
+}
+
+.signature {
+    border-top: 1px solid var(--divider);
+    padding-top: 0;
+    clear: both;
+    min-height: 3.125rem;
+    text-align: center;
+    color: var(--text-3);
+}
+
+.signature a {
+    color: var(--text-2);
+}
+
+.signature a:hover {
+    color: var(--accent);
+}
+
+body, html {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    overflow-x: hidden;
+    font-family: var(--font);
+    font-size: var(--fs-base);
+    font-weight: 400;
+    line-height: 1.6;
+    letter-spacing: 0.01em;
+    color: var(--text);
+    text-align: left;
+    background-color: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+*, :after, :before {
+    box-sizing: border-box;
+}
+
+textarea {
+    font-family: var(--font);
+    font-size: var(--fs-base);
+    font-weight: 400;
+    line-height: 1.5;
+}
+
+/* Shared brand lockup: wordmark, then mark.  The identity draws the SOZ/VON
+   letterforms in Inter Light, so the live-text wordmark matches at 300.
+
+   The mark trails the word rather than leading it.  Leading, it read as an
+   icon announcing a name — the shape you scan past on the way to the words;
+   trailing, the name is what you meet first and the handset closes it, which
+   is the way a signature works.  It is one lockup in three sizes and all
+   three follow: join screen, settings drawer, landing page.
+
+   Trailing, the gap has a job it did not have before: it has to be clearly
+   wider than the tracking, or the handset joins the word as a seventh letter.
+   Roughly twice, which is what this is at the drawer's 0.22em — the two larger
+   lockups restate it against their own. */
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    white-space: nowrap;
+}
+
+/* The mark is painted as a CSS mask rather than drawn as an <img>, so it takes
+   currentColor: one asset serves both themes and the interim desaturation hack
+   the old blue artwork needed is gone.  The glyph is a handset standing on
+   end, so it is sized by height and keeps its own proportion — the box is
+   218:590, the artwork's own, leaving `contain` nothing to letterbox. */
+.brand-mark {
+    width: 10px;
+    height: 26px;
+    flex: none;
+    background: currentColor;
+    -webkit-mask: url("/sozvon-mark.svg") center / contain no-repeat;
+    mask: url("/sozvon-mark.svg") center / contain no-repeat;
+}
+
+/* Tracking is a custom property because the mark now sits on the side the
+   tracking is added to: letter-spacing follows the last letter as well as the
+   ones between, so a trailing mark would stand one whole step further off than
+   the gap says.  Declaring the value once lets the margin take exactly it
+   back, and a lockup that wants different tracking sets the property rather
+   than the two rules. */
+.brand-word {
+    --brand-tracking: 0.22em;
+    font-weight: 300;
+    font-size: var(--fs-lg);
+    letter-spacing: var(--brand-tracking);
+    margin-right: calc(-1 * var(--brand-tracking));
+    text-transform: uppercase;
+    color: var(--text);
+    line-height: 1;
+}
+
+/* Selection inverts rather than tints — there is no accent hue to tint with. */
+::selection {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+
+/* Quiet scrollbars */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--hover-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: var(--hover-strong);
+    border-radius: var(--radius-pill);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--border);
+    background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/*
+ * Sozvon: full-screen loading overlay — the FOUC guard.
+ * The strict CSP (style-src falls back to default-src 'self') forbids inline
+ * <style>, so the guard lives here in an external sheet.  common.css is small
+ * and loads before the large galene.css, so the overlay (#app-loading, in
+ * galene.html) is painted over the page during the brief window before
+ * galene.css applies and the raw DOM would otherwise flash as plain text.
+ * galene.js removes the overlay on window 'load'.
+ */
+html {
+    background: var(--bg);
+}
+
+#app-loading {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 2147483647;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+}
+
+.app-spinner {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 3px solid var(--hover-strong);
+    border-top-color: var(--accent);
+    animation: app-spin 0.8s linear infinite;
+}
+
+@keyframes app-spin {
+    to { transform: rotate(360deg); }
+}

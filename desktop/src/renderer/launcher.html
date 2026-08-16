@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>SOZVON</title>
+  <style>
+    /*
+     * The client's own palette (static/common.css), restated because this
+     * page is served from the filesystem and never sees the server's
+     * stylesheets.  Monochrome: black, a grey ramp, three status colours for
+     * state.  "Accent" is not a hue — an emphasised control inverts, which is
+     * why anything printed on an accent fill takes --accent-contrast.
+     *
+     * Dark is the base, as in the client.  The light half arrives through
+     * prefers-color-scheme, which Electron drives from nativeTheme — so this
+     * window follows whatever the user chose in the web client, by way of the
+     * SozvonApp bridge, with no script here.
+     */
+    :root {
+      color-scheme: dark;
+      --bg: #000000;
+      --surface: #0A0A0A;
+      --surface-2: #141414;
+      --text: #FFFFFF;
+      --text-2: #BDBDBD;
+      --text-3: #8A8A8A;
+      --accent: #FFFFFF;
+      --accent-contrast: #000000;
+      --accent-hover: #D6D6D6;
+      --border: #444444;
+      --divider: rgba(255, 255, 255, 0.10);
+      --hover: rgba(255, 255, 255, 0.06);
+      --danger: #E06A6A;
+      --ok: #6BBE8A;
+      --shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.65);
+      --radius-sm: 4px;
+      --radius: 8px;
+      --radius-lg: 12px;
+      --radius-pill: 999px;
+      --font: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        color-scheme: light;
+        --bg: #FFFFFF;
+        --surface: #F7F7F7;
+        --surface-2: #F0F0F0;
+        --text: #000000;
+        --text-2: #444444;
+        --text-3: #767676;
+        --accent: #000000;
+        --accent-contrast: #FFFFFF;
+        --accent-hover: #333333;
+        --border: #BDBDBD;
+        --divider: rgba(0, 0, 0, 0.12);
+        --hover: rgba(0, 0, 0, 0.05);
+        --danger: #B5524F;
+        --ok: #2E7D50;
+        --shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.20);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--divider);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      width: 100%;
+      max-width: 520px;
+      box-shadow: var(--shadow);
+    }
+    /* The wordmark, set as the identity sets it: light weight, wide tracking,
+       upper case — the same treatment .brand-word gets in the web client. */
+    h1 {
+      margin: 0 0 10px;
+      font-size: 24px;
+      font-weight: 300;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    .subtitle { margin: 0 0 24px; color: var(--text-3); font-size: 13px; }
+    label { display: block; margin: 16px 0 6px; font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px; }
+    .optional { text-transform: none; letter-spacing: 0; color: var(--text-3); }
+    .load-error {
+      margin: 0 0 18px;
+      padding: 10px 12px;
+      border: 1px solid var(--danger);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      color: var(--danger);
+      font-size: 13px;
+    }
+    input[type="text"], input[type="url"] {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    .row-checkbox { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 13px; color: var(--text-2); }
+    button {
+      margin-top: 24px;
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: var(--accent-contrast);
+      border: none;
+      border-radius: var(--radius);
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { background: var(--surface-2); color: var(--text-3); cursor: not-allowed; }
+    .recent { margin-top: 20px; }
+    .recent-title { font-size: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .chip {
+      display: inline-block;
+      padding: 4px 10px;
+      margin: 0 6px 6px 0;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--text-2);
+    }
+    .chip:hover { border-color: var(--accent); color: var(--text); }
+    .servers { margin-top: 22px; }
+    .server-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .server-card:hover { background: var(--hover); }
+    /* The server this window is on: the accent is the only emphasis the
+       palette has, so it marks the row rather than a second border grey. */
+    .server-card.current { border-color: var(--accent); }
+    .server-main { flex: 1; min-width: 0; cursor: pointer; }
+    .server-name {
+      font-size: 14px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .server-meta {
+      margin-top: 2px;
+      font-size: 12px;
+      color: var(--text-3);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* The second line may wrap: cutting it off hides exactly the part that
+       distinguishes one saved server from another. */
+    .server-sub { white-space: normal; }
+    .server-pin { color: var(--ok); }
+    .server-actions { display: flex; gap: 6px; flex: none; }
+    .server-actions button {
+      margin: 0;
+      width: auto;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 400;
+      background: var(--surface-2);
+      color: var(--text-2);
+    }
+    .server-actions button:hover { background: var(--surface-2); color: var(--text); }
+    .server-actions button.primary { background: var(--accent); color: var(--accent-contrast); }
+    .server-actions button.primary:hover { background: var(--accent-hover); }
+    .server-rename {
+      width: 100%;
+      padding: 6px 8px;
+      background: var(--bg);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .deploy-cta { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--divider); font-size: 13px; color: var(--text-3); }
+    .deploy-cta span { color: var(--text); text-decoration: underline; cursor: pointer; }
+    .deploy-cta span:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>SOZVON</h1>
+    <p class="subtitle">Подключение к комнате</p>
+
+    <div class="load-error" id="load-error" hidden></div>
+
+    <label for="server">Сервер</label>
+    <input id="server" type="url" placeholder="https://sozvon.example.com:8443">
+
+    <label for="group">Комната <span class="optional">— оставьте пустым, чтобы открыть сам сервер</span></label>
+    <input id="group" type="text" placeholder="test" autocomplete="off">
+
+    <div class="row-checkbox">
+      <input id="insecure" type="checkbox">
+      <label for="insecure" style="margin:0; text-transform:none; letter-spacing:0; font-size:13px; color:var(--text-2);">
+        Разрешить самоподписанные сертификаты (приложение перезапустится)
+      </label>
+    </div>
+
+    <button id="join">Войти</button>
+
+    <div class="recent" id="recent-wrap" hidden>
+      <div class="recent-title">Недавние комнаты</div>
+      <div id="recent"></div>
+    </div>
+
+    <!-- Every server this client has been to, most recent first.  Laid out
+         like the invite links on the operator dashboard: a row per entry,
+         with what it is above and what to do with it on the right. -->
+    <div class="servers" id="servers-wrap" hidden>
+      <div class="recent-title">Сохранённые серверы</div>
+      <div id="servers"></div>
+    </div>
+
+    <div class="deploy-cta">
+      Нет сервера? <span id="deploy-link">Развернуть свой на VPS →</span>
+    </div>
+  </div>
+
+  <script src="launcher.js"></script>
+</body>
+</html>

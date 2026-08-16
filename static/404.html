@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title data-i18n="notfound.title">Page not found</title>
+    <meta charset="utf-8">
+    <!-- Decides light vs dark before the first paint; must stay a blocking
+         script in the head, ahead of the stylesheets.  Not to be confused
+         with the deployment theme hook in static/theme/. -->
+    <script src="/theme-init.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Deployment theme hook: repointed to the theme's icon; a no-op copy
+         the SOZVON micro icon ships in the stock distribution (see static/theme/favicon.svg). -->
+    <link rel="icon" type="image/svg+xml" href="/theme/favicon.svg"/>
+    <link rel="stylesheet" href="/common.css">
+    <link rel="stylesheet" type="text/css" href="/404.css"/>
+    <link rel="author" href="https://www.irif.fr/~jch/"/>
+    <!-- No Font Awesome here: the page's only glyph was a frown, and the
+         wordmark is a CSS mask.  Three stylesheets and a webfont for one icon
+         is a lot to ask of the page you land on when something has gone
+         wrong. -->
+    <!-- Deployment theme hook: loaded last so its rules win the cascade.
+         Empty in the stock distribution; see static/theme/theme.css. -->
+    <link rel="stylesheet" type="text/css" href="/theme/theme.css"/>
+  </head>
+
+  <body>
+    <div class="notfound">
+      <!-- Not a link: the button below is already the way back, and the
+           lockup's job here is to say where you are. -->
+      <div class="brand notfound-brand">
+        <span class="brand-word">SOZVON</span>
+        <span class="brand-mark" aria-hidden="true"></span>
+      </div>
+
+      <p class="notfound-code">404</p>
+      <h1 data-i18n="notfound.title">Page not found</h1>
+      <p class="notfound-text" data-i18n="notfound.text">
+        We can't find the page you're looking for.
+      </p>
+      <a href="/" class="home-link" data-i18n="notfound.home">Back to home</a>
+    </div>
+
+    <script src="/i18n.js"></script>
+    <!-- Deployment theme hook: a no-op in the stock distribution. -->
+    <script src="/theme/theme.js" defer></script>
+  </body>
+</html>

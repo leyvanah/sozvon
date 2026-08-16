@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/leyvanah/sozvon/security/advisories/new
+    about: Report privately through a security advisory, never as a public issue.
+  - name: Bug in the SFU core (upstream Galène)
+    url: https://github.com/jech/galene/issues
+    about: Media routing, codecs, RTP and the client protocol are upstream's; fixing them there helps every Galène user.

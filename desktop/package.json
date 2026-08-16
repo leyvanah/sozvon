@@ -1,0 +1,43 @@
+{
+  "name": "sozvon-desktop",
+  "version": "0.1.0",
+  "description": "Desktop client for Sozvon (Galène fork) video conferencing",
+  "main": "src/main.js",
+  "scripts": {
+    "sync-installer": "node scripts/sync-installer.js",
+    "prestart": "npm run sync-installer",
+    "start": "electron .",
+    "icon": "node scripts/build-icon.js",
+    "prepackage": "npm run sync-installer",
+    "package": "electron-builder --dir",
+    "predist": "npm run sync-installer",
+    "dist": "electron-builder"
+  },
+  "author": "imaprocessus",
+  "license": "MIT",
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0",
+    "sharp": "^0.35.1",
+    "to-ico": "^1.1.5"
+  },
+  "build": {
+    "appId": "ai.sozvon.desktop",
+    "productName": "Sozvon",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "resources/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    }
+  }
+}

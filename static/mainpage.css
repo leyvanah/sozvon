@@ -1,0 +1,126 @@
+body {
+    /* Used to move footer at bottom of the page */
+    display: flex;
+    flex-direction: column;
+}
+
+#errormessage {
+    color: var(--danger);
+    font-weight: bold;
+    height: 12px;
+}
+
+.groups {
+}
+
+.nogroups {
+    display: none;
+}
+
+.navbar-brand {
+  margin-bottom: 5rem;
+}
+
+.home {
+  margin-bottom: auto;
+  padding: 1.875rem;
+}
+
+#public-groups-table tr a{
+    margin-left: 0.9375rem;
+    font-weight: 700;
+}
+
+a {
+    text-decoration: none;
+    color: var(--accent);
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+label {
+    display: block;
+}
+
+@media only screen and (max-device-width: 768px) {
+    .home {
+        padding: 0.625rem;
+    }
+
+}
+
+/* ==========================================================================
+   Sozvon — landing page (dark)
+   ========================================================================== */
+.home {
+    max-width: 30rem;
+    margin: 0 auto auto;
+    padding: 4rem 1.5rem;
+    text-align: center;
+}
+
+.brand-lg {
+    justify-content: center;
+    gap: 14px;   /* ~2x this lockup's 7.2px tracking */
+    margin-bottom: 3rem;
+}
+/* Sized by height, keeping the mark's own 218:590 proportion (.brand-mark in
+   common.css).  A square box letterboxed a tall glyph, and with the mark now
+   trailing the word that padding sat between the two — a gap the lockup never
+   asked for, and one the centred landing page leaned on. */
+.brand-lg .brand-mark { width: 15px; height: 40px; }
+.brand-lg .brand-word { font-size: var(--fs-xl); --brand-tracking: 0.3em; }
+
+#groupform {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+}
+#groupform label { color: var(--text-2); }
+#group {
+    flex: 1 1 14rem;
+    min-width: 12rem;
+    color: var(--text);
+    background: var(--surface-3);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-sm);
+    padding: 0.55rem 0.8rem;
+    font-size: var(--fs-base);
+}
+#group:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.groups h2 {
+    font-size: var(--fs-base);
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: var(--text-2);
+}
+#public-groups-table { width: 100%; color: var(--text); }
+#public-groups-table tr a { color: var(--accent); }
+
+a { color: var(--accent); }
+a:hover { text-decoration: underline; }
+
+#errormessage { color: var(--danger); }
+
+/* The two page preferences, appearance and language, in the top corner.  They
+   wrap rather than run off the edge: five buttons is more than a narrow phone
+   has room for on one line. */
+.page-prefs {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}

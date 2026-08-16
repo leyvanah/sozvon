@@ -1,0 +1,4526 @@
+.nav-fixed .topnav {
+    z-index: 1039;
+}
+
+.fixed-top{
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 1030;
+}
+
+.topnav {
+    padding-left: 0;
+    height: 3.5rem;
+    z-index: 1039;
+}
+
+.navbar .form-control, .topnav {
+    font-size: var(--fs-base);
+}
+
+.form-control {
+    display: block;
+    padding: .375rem .75rem;
+    font-size: var(--fs-base);
+    line-height: 1.5;
+    color: var(--accent-contrast);
+    background-color: var(--accent);
+    background-clip: padding-box;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: border-color .15s ease-in-out,box-shadow .15s ease-in-out;
+}
+
+.form-control-inline {
+    display: inline-block;
+}
+
+.shadow {
+    box-shadow: 0 .15rem 1.75rem 0 rgba(31,45,65,.15);
+}
+.bg-white {
+    background-color: var(--accent);
+}
+
+.bg-gray {
+    background-color: var(--accent);
+}
+
+/* Identity row: avatar, who you are, and the way out.  Flex rather than the
+   floats and fixed 230px it used to use, so it fits whatever width the drawer
+   happens to have. */
+.profile {
+    width: 100%;
+    /* Who you are is its own group, so the first setting keeps its distance
+       from it — .sidenav-label-first has no top margin by definition, and the
+       camera label was landing right under the name. */
+    margin-bottom: var(--group-gap, 34px);
+}
+
+/* The flex row is .profile-user, not .profile: .profile is only a wrapper and
+   has a single child, so laying it out as a row left avatar, name and logout
+   stacked vertically inside it. */
+.profile-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.profile-logo {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    font-size: var(--fs-md);
+    color: var(--text-2);
+}
+
+.profile-info {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-3);
+}
+
+.user-logout {
+    flex: none;
+}
+
+.logout-icon {
+    display: block;
+    font-size: var(--fs-base);
+}
+
+/* The icon carries the meaning; the word stays for screen readers and for the
+   title tooltip rather than taking a line of its own under a 36px button. */
+.logout-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.profile-info span {
+    display: block;
+    line-height: 1.2;
+    text-transform: capitalize;
+}
+
+#permspan {
+    font-size: .9em;
+    color: var(--text-2);
+    font-style: italic;
+}
+
+#chpwspan a {
+    padding: 4px 0;
+    font-size: 0.9em;
+    color: var(--accent);
+}
+
+#chpwspan.invisible {
+    display: none;
+}
+
+.sidenav .user-logout a {
+    font-size: 1em;
+    padding: 7px 0 0;
+    color: var(--accent);
+    cursor: pointer;
+    line-height: .7;
+}
+
+.sidenav .user-logout a:hover {
+    color: var(--accent);
+}
+
+.navbar, .navbar .container, .navbar .container-fluid, .navbar .container-lg, .navbar .container-md, .navbar .container-sm, .navbar .container-xl {
+    display: -webkit-box;
+    display: flex;
+    flex-wrap: wrap;
+    -webkit-box-align: center;
+    align-items: center;
+    -webkit-box-pack: justify;
+    justify-content: space-between;
+    background: var(--surface-2);
+}
+.navbar {
+    position: relative;
+    padding: .1rem;
+}
+
+.topnav .navbar-brand {
+    width: 15rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    margin: 0;
+    font-size: var(--fs-base);
+    font-weight: 700;
+}
+
+.btn {
+    display: inline-block;
+    font-weight: 400;
+    font-size: 1em;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: middle;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    border: 1px solid transparent;
+    padding: 0.255rem .75rem;
+    line-height: 1.5;
+    border-radius: var(--radius-sm);
+    transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
+}
+
+.btn {
+    transition-duration: 0.4s;
+}
+
+.btn-default:hover {
+    color: var(--text);
+    background-color: var(--surface-3);
+    border-color: var(--border);
+}
+
+.btn-default {
+    color: var(--text);
+    background-color: var(--surface-3);
+    border-color: var(--border);
+}
+
+.btn:not(:disabled):not(.disabled) {
+    cursor: pointer;
+}
+
+.btn-success {
+    color: var(--accent-contrast);
+    background-color: var(--ok);
+    border-color: var(--ok);
+}
+
+.btn-success:hover {
+    color: var(--accent-contrast);
+    background-color: var(--ok);
+    border-color: var(--ok);
+}
+
+.btn-cancel {
+    color: var(--accent-contrast);
+    background-color: var(--danger);
+    border-color: var(--danger);
+}
+
+.btn-cancel:hover {
+    color: var(--accent-contrast);
+    background-color: var(--danger);
+    border-color: var(--danger);
+}
+
+.btn-blue {
+    color: var(--text);
+    background-color: var(--surface-2);
+    border-color: var(--border);
+}
+
+.btn-blue:hover {
+    color: var(--text);
+    background-color: var(--surface-2);
+    border-color: var(--border);
+}
+
+.btn-warn {
+    color: var(--warn);
+    background-color: transparent;
+    background-image: none;
+    border-color: var(--warn);
+}
+
+.btn-warn:hover {
+    color: var(--accent-contrast);
+    background-color: var(--warn);
+    border-color: var(--warn);
+}
+
+.btn-large {
+    font-size: 110%;
+}
+
+.app {
+    background-color: var(--accent);
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    box-shadow: 0 1px 1px 0 rgba(0, 0, 0, .06), 0 2px 5px 0 rgba(0, 0, 0, .2);
+}
+
+.coln-left {
+    flex: 30%;
+    padding: 0;
+    margin: 0;
+}
+
+.coln-left-hide {
+  flex: 0;
+}
+
+.coln-right {
+    flex: 70%;
+    position: relative;
+}
+
+/* Clear floats after the columns */
+.row {
+    display: flex;
+}
+
+.full-height {
+    height: calc(var(--vh, 1vh) * 100);
+}
+
+.full-width {
+    width: calc(100vw - 200px);
+    height: calc(var(--vh, 1vh) * 100);
+}
+
+.full-width-active {
+    width: 100vw;
+}
+
+.container {
+    width: 100%;
+}
+
+.users-header {
+    height: 3.5rem;
+    padding: 10px;
+    background: var(--surface-2);
+    font-size: var(--fs-md);
+    font-weight: 500;
+}
+
+.users-header:after, .profile-user:after, .users-header:before {
+    display: table;
+    content: " ";
+}
+
+.users-header:after, .profile-user:after {
+    clear: both;
+}
+
+.reply {
+    height: 53px;
+    width: 100%;
+    background-color: var(--accent);
+    padding: 10px 5px 10px 5px;
+    margin: 0;
+    z-index: 1000;
+}
+
+.reply textarea {
+    width: 100%;
+    resize: none;
+    overflow: hidden;
+    padding: 5px;
+    outline: none;
+    border: none;
+    text-indent: 5px;
+    box-shadow: none;
+    height: 100%;
+}
+
+textarea.form-reply {
+    height: 2.1em;
+    margin-right: .5em;
+}
+
+.form-reply {
+    display: block;
+    width: 100%;
+    height: 34px;
+    padding: 6px 12px;
+    font-size: var(--fs-base);
+    color: var(--accent-contrast);
+    background-color: var(--accent);
+    background-image: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: inset 0 1px 1px rgba(0,0,0,.075);
+    transition: border-color ease-in-out .15s,box-shadow ease-in-out .15s;
+}
+
+.form-reply::placeholder {
+  opacity: .7;
+}
+
+.select {
+    display: block;
+    width: 100%;
+    padding: .275rem .75rem;
+    font-size: var(--fs-base);
+    line-height: 1.5;
+    color: var(--accent-contrast);
+    background-color: var(--accent);
+    background-clip: padding-box;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: border-color .15s ease-in-out,box-shadow .15s ease-in-out;
+}
+
+.select-inline {
+    display: inline-block;
+}
+
+.message {
+    width: auto !important;
+    padding: 4px 10px 7px !important;
+    background: var(--ok);
+    font-size: 12px;
+    box-shadow: 0 1px 1px rgba(43, 43, 43, 0.16);
+    border-radius: var(--radius-sm);
+    word-wrap: break-word;
+    display: inline-block;
+    margin: 1em 0 0;
+    max-width: 90%;
+    text-align: left;
+}
+
+.message-sender {
+    background: var(--accent);
+}
+
+.message-private {
+    background: var(--accent);
+}
+
+.message-private .message-header:after {
+    content: "(private)";
+    margin-left: 1em;
+}
+
+.message-system {
+    font-size: 10px;
+    background: var(--accent);
+}
+
+.message-row:after, .message-row:before {
+    display: table;
+    content: " ";
+}
+
+.message-row:after {
+    clear: both;
+}
+
+.message-content {
+    white-space: pre-wrap;
+    margin: 0;
+    padding: 0;
+    padding-left: 5px;
+    word-wrap: break-word;
+    word-break: break-word;
+    font-weight: 400;
+    font-size: 14px;
+    color: var(--accent);
+}
+
+.message-header {
+    margin: 0;
+    font-style: italic;
+    text-shadow: none;
+}
+
+.message-footer {
+    margin: 0;
+    padding: 0;
+    margin-bottom: -5px;
+    line-height: .9;
+    text-align: right;
+}
+
+.message-time {
+    margin-left: 1em;
+}
+
+.message-me-asterisk, .message-me-user {
+    margin-right: 0.33em;
+}
+
+.message-me-content {
+    white-space: pre-wrap;
+}
+
+.video-container {
+    height: calc(var(--vh, 1vh) * 100);
+    position: relative;
+    background: var(--bg);
+    /* Display only when showing video */
+    display: block;
+}
+
+.chat-btn {
+    display: block;
+    /*on top of video peers*/
+    z-index: 1002;
+    font-size: 1.8em;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    cursor: pointer;
+}
+
+.chat-btn .icon-chat {
+    color: var(--text);
+    height: 50px;
+    padding: 10px;
+    text-shadow: 0px 0px 1px #b3adad;
+}
+
+.collapse-video {
+    left: inherit;
+    right: 30px;
+}
+
+.video-controls, .top-video-controls {
+    position: absolute;
+    width: 100%;
+    left: 0;
+    bottom: 25px;
+    text-align: center;
+    color: var(--text);
+    font-size: 1.1em;
+    opacity: 0;
+    height: 32px;
+}
+
+.video-controls:after, .top-video-controls:after {
+    clear: both;
+    display: table;
+    content: " ";
+}
+
+.top-video-controls {
+    text-align: right;
+    bottom: inherit;
+    top: 0;
+    line-height: 1.1;
+    font-size: 1.3em;
+    text-shadow: 1px 1px 2px rgb(90 86 86);
+}
+
+.controls-button {
+    padding: 3px 10px;
+    vertical-align: middle;
+    height: 100%;
+}
+
+.controls-left {
+    float: left;
+    text-align: left;
+}
+
+.controls-right {
+    float: right;
+    text-align: right;
+}
+
+/* Legibility scrim over video: black by nature, like a shadow — not a palette
+   colour.  Tokenising it turned a darkening gradient into a white wash. */
+.vc-overlay {
+    background: linear-gradient(180deg,
+        rgb(0 0 0 / 20%) 0%, rgb(0 0 0 / 50%) 0%, rgb(0 0 0 / 70%) 100%);
+}
+
+.peer:hover > .video-controls, .peer:hover > .top-video-controls {
+    opacity: 1;
+}
+
+.video-controls span, .top-video-controls span {
+    margin-right: 20px;
+    transition: opacity .7s ease-out;
+    opacity: 1;
+    cursor: pointer;
+}
+
+.video-controls span:last-child, .top-video-controls span:last-child {
+    margin-right: 0;
+}
+
+.video-controls span:hover, .top-video-controls span:hover {
+    opacity: .8;
+    transition: opacity .5s ease-out;
+}
+
+/* The hide-self button is now an eye icon (fa-eye when self is visible,
+   fa-eye-slash in the floating pill when self is hidden). The pill below
+   has its own visual treatment. (Sozvon) */
+.top-video-controls .video-hide,
+.self-controls-pill .video-hide {
+    display: inline-flex;
+    width: 1.5em;
+    height: 1.5em;
+    background: var(--hover-strong);
+    border-radius: 50%;
+    justify-content: center;
+    align-items: center;
+    color: var(--text);
+    font-size: 0.9em;
+    cursor: pointer;
+    user-select: none;
+    vertical-align: middle;
+}
+.top-video-controls .video-hide:hover,
+.self-controls-pill .video-hide:hover { opacity: .85; }
+
+.video-controls .volume {
+    display: inline-block;
+    text-align: center;
+}
+
+.video-controls .video-play {
+    font-size: 0.85em;
+}
+
+.video-controls .video-stop {
+    color: var(--danger);
+}
+
+.video-controls span.disabled, .video-controls span.disabled:hover, .top-video-controls span.disabled:hover{
+    opacity: .2;
+    color: var(--text)
+}
+
+.mobile-container {
+    display: block !important;
+}
+
+.login-container {
+    height: calc(var(--vh, 1vh) * 100);
+    position: relative;
+    display: flex;
+    justify-content: center;
+    overflow: scroll;
+}
+
+.login-box {
+    width: 20em;
+    padding: 1em;
+    margin: 5em auto;
+    height: 23em;
+    background: var(--accent);
+}
+
+.login-box .connect {
+    width: 100%;
+    text-align: center;
+}
+
+.login-box h2 {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.label-fallback {
+    opacity: 0.5;
+}
+
+.label {
+    left: 0;
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    z-index: 1;
+    text-align: center;
+    line-height: 24px;
+    color: var(--text);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+
+.nav-link {
+    padding: 0;
+    color: var(--text);
+    min-width: 30px;
+    display: block;
+    text-align: center;
+    margin: 0 10px;
+    position: relative;
+    line-height: 1.1;
+}
+
+.nav-link span {
+    display: block;
+}
+
+.nav-link label {
+    display: block;
+    cursor: pointer;
+    color: var(--text);
+    font-size: 55%;
+}
+
+.nav-link:hover {
+    color: var(--accent);
+}
+.nav-link label:hover {
+    color: var(--accent);
+}
+
+.nav-cancel, .muted, .nav-cancel label, .muted label {
+    color: var(--danger)
+}
+
+.nav-cancel:hover, .muted:hover, .nav-cancel label:hover, .muted label:hover {
+    color: var(--danger)
+}
+
+.nav-button {
+    cursor: pointer;
+    font-size: 25px;
+}
+
+.nav-more {
+    padding-top: 5px;
+    margin-left: 0;
+}
+
+.header-title {
+    float: left;
+    margin: 0;
+    font-size: var(--fs-base);
+    font-weight: 700;
+    color: var(--text);
+    line-height: 2em;
+}
+
+#title {
+    text-align: center;
+}
+
+h1 {
+    white-space: nowrap;
+}
+
+#statdiv {
+    white-space: nowrap;
+    margin-bottom: 16px;
+}
+
+#errspan {
+    margin-left: 1em;
+}
+
+.connected {
+    color: var(--ok);
+}
+
+.disconnected {
+    color: var(--danger);
+    font-weight: bold;
+}
+
+.login {
+    display: inline
+}
+
+.loginform label {
+    min-width: 3em;
+    display: inline-block;
+    padding-top: 10px;
+}
+
+.loginform input[type="text"], .loginform input[type="password"] {
+    width: 100%;
+}
+
+.switch-radio {
+    margin: 0;
+}
+
+.invisible {
+    display: none;
+}
+
+.error {
+    color: var(--danger);
+    font-weight: bold;
+}
+
+.noerror {
+    display: none;
+}
+
+.clear {
+    clear: both;
+    content: "";
+}
+
+#optionsdiv {
+    margin-bottom: 4px;
+}
+
+#optionsdiv input[type="checkbox"] {
+  vertical-align: middle;
+}
+
+#presentbutton, #unpresentbutton {
+    white-space: nowrap;
+    margin-right: 0.4em;
+    margin-top: .1em;
+    font-size: 1.1em;
+    text-align: left;
+    width: 5.8em;
+}
+
+#videoselect {
+    text-align-last: center;
+    margin-right: 0.4em;
+}
+
+#audioselect {
+    text-align-last: center;
+}
+
+#sharebutton, #unsharebutton {
+    white-space: nowrap;
+}
+
+#unsharebutton {
+    margin-right: 0.4em;
+}
+
+#filterselect {
+    text-align-last: center;
+    margin-right: 0.4em;
+}
+
+#sendselect {
+    text-align-last: center;
+    margin-right: 0.4em;
+}
+
+#simulcastselect {
+    text-align-last: center;
+    margin-right: 0.4em;
+}
+
+#requestselect {
+    text-align-last: center;
+}
+
+#chatbox {
+    height: 100%;
+    position: relative;
+}
+
+#chat {
+    padding: 0;
+    margin: 0;
+    background-color: var(--accent);
+    background-size: cover;
+    overflow-y: scroll;
+    border: none;
+    border-right: 4px solid var(--border);
+    /* force to fill height */
+    height: 100% !important;
+    width: 100%;
+    min-width: 300px;
+    overflow: hidden;
+}
+
+#inputform {
+    display: flex;
+}
+
+#box {
+    overflow: auto;
+    height: calc(100% - 53px);
+    padding: 10px;
+}
+
+.close-chat {
+    position: absolute;
+    top: 2px;
+    right: 14px;
+    width: 25px;
+    font-size: 1em;
+    text-align: center;
+    font-weight: 700;
+    color: var(--text-3);
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+
+.close-chat:hover, .close-chat:active {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+#connectbutton {
+    margin-top: 1em;
+    padding: 0.37rem 1.5rem;
+}
+
+#input {
+    width: 100%;
+    border: none;
+    resize: none;
+    overflow-y: hidden;
+}
+
+#input:focus {
+    outline: none;
+}
+
+#inputbutton:focus {
+    outline: none;
+}
+
+#resizer {
+    width: 4px;
+    margin-left: -4px;
+    z-index: 1000;
+}
+
+#resizer:hover {
+    cursor: ew-resize;
+}
+
+#peers {
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    grid-template-rows: repeat(1, auto);
+    row-gap: 5px;
+    column-gap: 10px;
+    position: absolute;
+    top: 0;
+    right: 0; 
+    bottom: 0;
+    min-width: 100%; 
+    min-height: 100%;
+    width: auto; 
+    height: auto; 
+    z-index: 1000;
+    background-size: cover;
+    overflow: hidden;
+    vertical-align: top!important;
+}
+
+.peer {
+    margin-top: auto;
+    margin-bottom: auto;
+    position: relative;
+    /* Transparent on purpose: this reserves the 2px that .peer-active paints
+       when someone starts speaking, so the grid does not jump.  It must stay
+       invisible — a visible colour here boxes every tile in grey. */
+    border: 2px solid transparent;
+    background: var(--hover);
+}
+
+.peer-active {
+    border: 2px solid var(--border);
+}
+
+.peer-hidden {
+    display: none;
+}
+
+.media {
+    width: 100%;
+    max-height: calc(var(--vh, 1vh) * 100 - 76px);
+    padding-bottom: 20px;
+    object-fit: contain;
+}
+
+.media-failed {
+    filter: grayscale(0.5) contrast(0.5);
+}
+
+.mirror {
+    transform: scaleX(-1);
+}
+
+#inputform {
+    width: 100%;
+}
+
+.sidenav {
+    background-color: var(--surface-2);
+    box-shadow: 0 0 24px 0 rgba(71,77,86,.1), 0 1px 0 0 rgba(71,77,86,.08);
+    display: block;
+    position: fixed;
+    -webkit-transition: width var(--t-base) var(--ease);
+    transition: width var(--t-base) var(--ease);
+    width: 0px;
+    /* on top of everything */
+    z-index: 2999;
+    top: 0;
+    right: 0;
+    height: calc(var(--vh, 1vh) * 100);
+    overflow-x: hidden;
+    overflow-y: hidden;
+}
+
+.sidenav a {
+    padding: 10px 20px;
+    text-decoration: none;
+    font-size: 30px;
+    color: var(--text);
+    display: block;
+    transition: 0.3s;
+    line-height: 1.0;
+}
+
+.sidenav a:hover {
+    color: var(--accent);
+}
+
+.sidenav .closebtn {
+    cursor: pointer;
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 56px;
+}
+
+/* Field labels are metadata, not headings: quiet, and close to the control
+   they name, so the drawer reads as a list of settings rather than a stack of
+   announcements.  Close to *their own* control, that is: the gap above a label
+   is what tells you where the previous setting ended, so it is several times
+   the gap below it.  Both gaps come from the drawer's two spacing steps
+   (--row-gap, --group-gap) rather than from a number chosen here, which is
+   what keeps the column even. */
+.sidenav-label,
+.sidenav-label-first {
+    display: block;
+    font-size: var(--fs-md);
+    line-height: 1.3;
+    color: var(--text-3);
+    margin-bottom: 7px;
+}
+
+.sidenav-label {
+    margin-top: var(--row-gap);
+}
+
+.sidenav-label-first {
+    margin-top: 0;
+}
+
+.sidenav form{
+    margin-top: 10px;
+}
+
+.sidenav-header {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--divider);
+}
+
+.sidenav-header h2{
+    color: var(--text);
+    padding: 10px;
+    margin: 0;
+    max-width: 70%;
+    line-height: 36px;
+}
+
+.sidenav-content {
+    /* Two steps, and everything in the drawer is spaced with one of them: one
+       setting to the next, and one group to the next.  Anything that picks its
+       own number is what makes a column of settings look uneven. */
+    --row-gap: 22px;
+    --group-gap: 34px;
+    padding: 10px 14px 28px;
+    background: var(--accent);
+    height: calc(100% - 56px);
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.sidenav-content h2 {
+    margin: 0;
+}
+
+fieldset {
+    margin: 0;
+    margin-top: 20px;
+    border: 1px solid var(--border);
+    padding: 8px;
+    border-radius: var(--radius-sm);
+}
+legend {
+    padding: 2px;
+    color: var(--accent-contrast);
+}
+
+.nav-menu {
+    margin: 0;
+    padding: 0;
+}
+
+.nav-menu li {
+    float: left;
+    max-height: 70px;
+    list-style: none;
+}
+
+.show-video {
+    position: absolute;
+    right: 30px;
+    bottom: 120px;
+    color: var(--text);
+    width: 50px;
+    height: 50px;
+    text-align: center;
+    line-height: 50px;
+    font-size: 150%;
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
+    box-shadow: 4px 4px 7px 1px rgba(0,0,0,0.16);
+}
+
+.blink {
+    -ms-animation: blink 1.0s linear infinite;
+    -o-animation: blink 1.0s linear infinite;
+    animation: blink 1.0s linear infinite;
+}
+
+@keyframes blink {
+    0% { box-shadow: 0 0 15px var(--accent-soft); }
+    50% { box-shadow: none; }
+    100% { box-shadow: 0 0 15px var(--accent-soft); }
+}
+
+@-webkit-keyframes blink {
+    0% { box-shadow: 0 0 15px var(--accent-soft); }
+    50% { box-shadow: 0 0 0; }
+    100% { box-shadow: 0 0 15px var(--accent-soft); }
+}
+
+/*  Sidebar left */
+
+#left-sidebar {
+    min-width: 200px;
+    max-width: 200px;
+    /* z-index is meaningless without a non-static position; pin relative so
+       the visible panel can sit above the fixed E2EE lock (z:1041) and
+       physically cover it at the top-left. */
+    position: relative;
+    transition: min-width var(--t-base) var(--ease),
+                max-width var(--t-base) var(--ease);
+    background: var(--accent);
+    border-right: 1px solid var(--border);
+}
+
+#left-sidebar .galene-header {
+    display: inline-block;
+}
+
+header .collapse {
+    float: left;
+    text-align: center;
+    cursor: pointer;
+    font-size: 20px;
+    color: var(--text);
+    margin-right: 20px;
+    margin-left: 5px;
+}
+
+header .collapse:hover {
+    color: var(--accent);
+}
+
+.galene-header {
+    font-size: var(--fs-lg);
+    font-weight: 900;
+    color: var(--text);
+    line-height: 34px;
+}
+
+.header-sep {
+    height: 20px;
+}
+
+/* Shrinking the sidebar from 200px to 0px */
+#left-sidebar.active {
+    min-width: 0;
+    max-width: 0;
+}
+
+#left-sidebar .sidebar-header strong {
+    display: none;
+}
+#left-sidebar.active .sidebar-header h3 {
+    display: none;
+}
+#left-sidebar.active .sidebar-header strong {
+    display: block;
+}
+
+#users {
+    padding: 0;
+    margin: 0;
+    height: calc(100% - 84px);
+    width: 100%;
+    position: relative;
+    display: block;
+    background-color: var(--accent);
+    overflow-y: auto;
+    border: 1px solid var(--border);
+}
+
+#users .user-p {
+    position: relative;
+    padding: 10px !important;
+    border-bottom: 1px solid var(--border);
+    height: 40px;
+    line-height: 18px;
+    margin: 0 !important;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: pre;
+}
+
+#left-sidebar.active #users > div {
+    padding: 10px 5px !important;
+}
+
+#users > div:hover {
+    background-color: var(--accent);
+}
+
+#users .knock-p {
+    background-color: var(--warn);
+    cursor: default;
+    height: auto;
+    white-space: normal;
+}
+
+#users .knock-p .knock-label {
+    display: block;
+    font-weight: bold;
+    margin-bottom: 6px;
+}
+
+#users .knock-p button {
+    margin-right: 6px;
+    padding: 3px 10px;
+    cursor: pointer;
+}
+
+#users .knock-p .knock-admit {
+    background-color: var(--ok);
+    color: var(--accent-contrast);
+    border: none;
+    border-radius: var(--radius-sm);
+}
+
+#users .knock-p .knock-deny {
+    background-color: var(--danger);
+    color: var(--accent-contrast);
+    border: none;
+    border-radius: var(--radius-sm);
+}
+
+.lobby-note {
+    margin: 0 0 14px 0;
+    font-style: italic;
+    color: var(--accent-contrast);
+}
+
+#lobby-waiting .login-box {
+    text-align: center;
+}
+
+#lobby-waiting h2 {
+    margin-top: 0;
+}
+
+#lobby-waiting-text {
+    font-size: 1.1em;
+}
+
+#users > div::before {
+    content: "\f111";
+    font-family: 'Font Awesome 6 Free';
+    color: var(--ok);
+    margin-right: 5px;
+    font-weight: 900;
+}
+
+#users > div.user-status-raisehand::before {
+    content: "\f256";
+}
+
+#users > div::after {
+    font-family: 'Font Awesome 6 Free';
+    color: var(--text-3);
+    margin-left: 5px;
+    font-weight: 900;
+    float: right;
+}
+
+#users > div.user-status-microphone::after {
+    content: "\f130";
+}
+
+#users > div.user-status-camera::after {
+    content: "\f030";
+}
+
+/* ==========================================================================
+   Sozvon — per-user volume slider in the participant list
+   Each user row gets a small mute icon and a slider that controls the audio
+   element for that user's stream(s). The state lives in memory only (a
+   refresh resets it). The slider sits at the far right of the row alongside
+   the existing mic/cam glyph, with stopPropagation so clicking it doesn't
+   open the row's context menu. (Sozvon)
+   ========================================================================== */
+#users .user-p .up-volume {
+    float: right;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+}
+#users .user-p .up-volume .up-volume-mute {
+    cursor: pointer;
+    font-size: 0.9em;
+    width: 18px;
+    text-align: center;
+    color: var(--text-3);
+}
+#users .user-p .up-volume .up-volume-mute.muted {
+    color: var(--danger);
+}
+#users .user-p .up-volume .up-volume-slider {
+    width: 60px;
+    height: 4px;
+    cursor: pointer;
+    vertical-align: middle;
+}
+/* Dark theme: keep the slider legible. */
+@media (prefers-color-scheme: dark) {
+    #users .user-p .up-volume .up-volume-mute { color: var(--text-2); }
+    #users .user-p .up-volume .up-volume-mute.muted { color: var(--danger); }
+}
+
+.close-icon {
+    font: normal 1em/1 Arial, sans-serif;
+    display: inline-block;
+}
+
+.close-icon:before{ content: "\2715"; }
+
+/* END Sidebar Left */
+
+@media only screen and (min-width: 1025px) {
+    .coln-right .collapse-video, .coln-right .show-video {
+        display: none;
+    }
+}
+
+@media only screen and (max-width: 1024px) {
+    #presentbutton, #unpresentbutton {
+        width: auto;
+    }
+    .nav-link {
+        margin: 0 4px;
+        line-height: 1.5;
+    }
+
+    .nav-link label {
+        display: none;
+    }
+
+    .nav-text {
+        display: none;
+    }
+
+    .nav-more {
+        padding-top: 0;
+        margin-left: inherit;
+    }
+
+    .full-width {
+        height: calc(var(--vh, 1vh) * 100);
+    }
+
+    .close-chat, .show-chat {
+        display: none;
+    }
+
+    .video-container {
+        position: fixed;
+        height: calc(var(--vh, 1vh) * 100);
+        top: 0;
+        right: 0;
+        left: 0;
+    }
+
+    .top-video-controls {
+        opacity: 1;
+    }
+
+    /* No hover on touch.  The old tap-to-reveal fought the immersive tap (which
+       toggles the whole chrome): the tap that should have shown these controls
+       slid the bar away and stripped them, so volume / fullscreen / picture-in-
+       picture were effectively dead.  Show the on-video controls whenever the
+       chrome is up instead, and hide them with the chrome when going immersive
+       (body.nav-hidden) so the picture is still clean full-screen. (Sozvon) */
+    .video-controls {
+        opacity: 1;
+        pointer-events: auto;
+        transition: opacity .3s ease-out;
+    }
+    /* Immersive (chrome hidden): clear the picture of every on-video control. */
+    body.nav-hidden .video-controls,
+    body.nav-hidden .top-video-controls {
+        opacity: 0;
+        pointer-events: none;
+    }
+    .vc-overlay {
+        background: linear-gradient(180deg,
+            rgba(0, 0, 0, 0) 0%,
+            rgba(0, 0, 0, 0.4) 100%);
+        -webkit-backdrop-filter: blur(1px);
+        backdrop-filter: blur(1px);
+    }
+
+    .login-container {
+        position: fixed;
+        height: calc(var(--vh, 1vh) * 100 - 56px);
+        top: 56px;
+        right: 0;
+        left: 0;
+        background: var(--surface-2);
+    }
+
+    .login-box {
+        background: transparent;
+    }
+
+    .coln-left {
+        flex: 100%;
+        width: 100vw;
+        /* chat is always visible here */
+        display: block !important;
+    }
+
+    /* `flex: none` sized this column by its content, and its content is the
+       video grid — which is absolutely positioned, so the column measured
+       zero.  Anything that sizes itself against the column therefore
+       collapsed with it: the tiles inside the empty-stage placeholder (which
+       is `inset: 0` on this box) came out four pixels square, so a call where
+       nobody has a camera showed nothing at all below 1025px.  The grid
+       itself was unaffected — it is positioned against the viewport — which
+       is why one full-stage tile could remain while its neighbours vanished.
+       Give the column the width it is actually drawn at. (Sozvon) */
+    .coln-right {
+        flex: 1 1 100%;
+        min-width: 0;
+        position: relative;
+    }
+
+    .full-width {
+        width: 100vw;
+    }
+
+    #left-sidebar.active {
+        min-width: 200px;
+        max-width: 200px;
+        /* on top of video peers and on top of the E2EE lock (z:1041) — when
+           the panel is open it physically covers the lock, no hide/show
+           needed. */
+        z-index: 1050;
+    }
+
+    /* The people+chat panel overlays the video on mobile; the floating chat /
+       show-video buttons live in the video pane and would otherwise peek out
+       beside the open panel as an orphaned chat bubble. Hide them while the
+       panel is open. (Sozvon) */
+    #left-sidebar.active ~ .container .collapse-video,
+    #left-sidebar.active ~ .container .show-video {
+        display: none !important;
+    }
+
+    #left-sidebar {
+        min-width: 0;
+        max-width: 0;
+    }
+
+    /* Reappearing the sidebar on toggle button click */
+    #left-sidebar {
+        margin-left: 0; 
+    }
+
+    #left-sidebar .sidebar-header strong {
+        display: none;
+    }
+
+    #left-sidebar.active .sidebar-header h3 {
+        display: none;
+    }
+
+    #left-sidebar.active .sidebar-header strong {
+        display: block;
+    }
+
+    .sidenav a {padding: 10px 10px;}
+
+    .sidenav-header h2 {
+        line-height: 36px;
+    }
+
+    #peers {
+        padding: 3px;
+    }
+
+    #resizer {
+        display: none;
+    }
+
+    #chat {
+        border-right: none;
+    }
+
+    .dropdown-content {
+        margin-top: 10px;
+    }
+
+}
+
+#captions-container {
+    position: absolute;
+    bottom: 40px;
+    width: 100%;
+    pointer-events: none;
+    z-index: 1390;
+    alpha: 0;
+}
+
+#captions {
+    margin: auto;
+    padding: 0 0.4rem 0 0.4rem;
+    width: max-content;
+    font-size: var(--fs-lg);
+    text-align: center;
+    pointer-events: none;
+    background-color: var(--hover-strong);
+    color: var(--accent-contrast);
+}
+
+:root{
+    --contextualMenuBg: #eee;
+    --contextualMenuShadow: 1px 1px 1px #444; */
+    --contextualMenuRadius: 0px; */
+    --contextualMenuText: black;
+
+    --contextualSubMenuBg: #eee;
+
+    --contextualHover: #ddd;
+
+    --contextualOverflowIcon: #999;
+    --contextualSeperator: #999;
+}
+
+.contextualMenu{
+    z-index: 2999;
+}
+
+.file-progress {
+    accent-color: var(--border);
+    margin-left: 10px;
+    margin-right: 10px;
+}
+
+#invite-dialog {
+    background-color: var(--accent);
+}
+
+#invite-dialog {
+    border: solid 2px var(--border);
+}
+
+#invite-dialog button {
+    background-color: var(--surface-2);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    padding: .5em;
+    margin-top: 1em;
+    margin-bottom: 1em;
+    margin-right: 2em;
+    display: inline-block;
+    width: 7em;
+}
+
+#invite-dialog button:hover {
+   background-color: var(--surface-2);
+}
+
+#invite-dialog input {
+    margin-top: 1em;
+    width: 16em;
+    padding: .2em
+}
+
+#invite-dialog label {
+    margin-top: 1em;
+    display: inline-block;
+    width:12em;
+}
+
+/* Style for the toastify  messages shall be within a css file */
+.toastify.error {
+    background: linear-gradient(to right, var(--danger), var(--danger));
+    color: var(--text);
+}
+.toastify.error .toast-close {
+    color: var(--text);
+}
+.toastify.warning {
+    background: linear-gradient(to right, var(--surface-2), var(--surface-2));
+    color: var(--accent-contrast);
+}
+.toastify.warning .toast-close {
+    color: var(--accent-contrast);
+}
+.toastify.info {
+    background: linear-gradient(to right, var(--ok), var(--ok));
+    color: var(--accent-contrast);
+}
+.toastify.info .toast-close {
+    color: var(--accent-contrast);
+}
+
+/* ==========================================================================
+   Sozvon — dark theme + rebrand
+   --------------------------------------------------------------------------
+   This block restyles the upstream Galène UI to the Sozvon design system
+   (dark-first, blue->violet accent, soft shapes). The original rules above
+   are left untouched so that `git merge upstream/master` stays clean; this
+   section simply overrides their colours/shapes by source order. Tokens are
+   defined in common.css (:root).
+   ========================================================================== */
+
+/* --- Brand lockup (left sidebar) ----------------------------------------- */
+#left-sidebar .galene-header {
+    display: flex;
+    align-items: center;
+    color: var(--text);
+}
+
+/* --- Top bar ------------------------------------------------------------- */
+.navbar,
+.navbar .container, .navbar .container-fluid, .navbar .container-lg,
+.navbar .container-md, .navbar .container-sm, .navbar .container-xl {
+    background: var(--surface);
+}
+.topnav {
+    border-bottom: 1px solid var(--divider);
+}
+/* The room's name, not the page's heading: it stays at the body size and
+   drops to medium weight.  At 700 it was the boldest text on the call screen,
+   which put the most emphasis on the one word the people in the room already
+   know. */
+.header-title { color: var(--text); font-weight: 500; }
+header .collapse { color: var(--text-2); transition: color var(--t-fast) var(--ease); }
+header .collapse:hover { color: var(--accent); }
+
+/* --- Immersive mode (Sozvon) ----------------------------------------------- */
+/* A tap (mobile) or click (desktop) on the central video area hides the dock
+   + E2EE lock + panel-toggle; the next tap/click brings them back. The video
+   itself does NOT move: there's no top bar to clear any more (the top bar was
+   removed — its 56px strip was the source of the old up-shift on desktop and
+   the grey strip on mobile), so the picture stays anchored to the viewport.
+   Driven by the `nav-hidden` body class, toggled in galene.js. */
+
+/* ==========================================================================
+   Sozvon — bottom control dock
+   The call controls (camera / mic / share / view / more + Leave) live in a
+   floating pill at the bottom centre of the stage, like every other call app.
+   We do NOT rebuild them: the existing, already-wired .nav-menu is lifted out of
+   the top bar and re-laid-out here, so every button keeps its id and handler.
+   The top bar keeps only identity (panel toggle + E2EE lock). The dock hides
+   with the rest of the chrome in immersive mode.
+   ========================================================================== */
+.nav-menu {
+    position: fixed;
+    /* Centre with left/right:0 + margin:auto rather than left:50% +
+       translateX(-50%): the latter mis-resolved against this fixed flex pill
+       (left:50% landed at the video-area centre, not the viewport). */
+    left: 0;
+    right: 0;
+    bottom: 22px;
+    width: max-content;
+    max-width: calc(100vw - 24px);
+    margin: 0 auto;
+    z-index: 1040;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    list-style: none;
+    /* Glass, and nothing drawn around it: the pill was outlined *and* lifted
+       by a shadow, which is two ways of saying the same thing about one
+       object.  The shadow is the one that survives — it is what actually
+       makes the dock read as floating over the stage.  With the outline gone
+       the veil can also thin out (--dock-bg), so more of the picture behind
+       shows through; the blur goes up to keep the glyphs legible over a busy
+       frame.  The border stays declared, transparent, so the pill does not
+       change size, and the leave button's red outline is now the only ring
+       in the dock — which is the point of it. */
+    background: var(--dock-bg);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-2);
+    transition: opacity var(--t-base) var(--ease),
+                transform var(--t-base) var(--ease);
+}
+.nav-menu li {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    /* Every li wraps a fixed-size 50px circle; lock the li itself to its
+       content size so flex can't distribute leftover space unevenly between
+       a button and a button-with-slightly-different-content. */
+    flex: 0 0 auto;
+}
+
+/* Each control becomes a round button; the stacked text label is dropped (the
+   title attribute still gives a tooltip). */
+.nav-menu .nav-button {
+    box-sizing: border-box;        /* the buttons live in the dock as either
+                                      <button> or <div> — normalise so the
+                                      <button>'s UA-default 2px padding does
+                                      not push it 4px wider than its <div>
+                                      siblings and break the equal gaps. */
+    width: 50px;
+    height: 50px;
+    margin: 0;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-3);
+    border: 1px solid var(--divider);
+    transition: background var(--t-fast) var(--ease);
+}
+/* The dock's display:flex must not override galene hiding the inactive control:
+   the camera start/stop pair and the view toggle swap via .invisible, so keep
+   that winning here — otherwise both camera buttons show at once. */
+.nav-menu .nav-button.invisible { display: none; }
+.nav-menu .nav-button:hover { background: var(--surface-2); }
+/* Geometrically centre the glyph: flex the span and force line-height:1 so the
+   varied FontAwesome glyph metrics (share / gear / phone-slash) don't sit low. */
+.nav-menu .nav-button span {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.nav-menu .nav-button label { display: none; }
+.nav-menu .nav-button i { font-size: 20px; display: block; line-height: 1; }
+/* undo the top-bar camera-button sizing now that it is a dock circle */
+.nav-menu #presentbutton,
+.nav-menu #unpresentbutton { width: 50px; margin: 0; font-size: inherit; }
+/* The dock is a flex pill — the only spacing between round buttons must come
+   from `gap` on .nav-menu, not from the legacy .nav-link margins or the
+   .nav-leave divider nudge. Both would otherwise add a hidden second gap and
+   make the spacing drift between buttons of slightly different content. */
+.nav-menu .nav-link { margin: 0; }
+/* Leave is the exception, and now the only one: the hairline that used to set
+   it apart is gone, so the gap does that job instead — 6px on top of the row's
+   own 8px, which is enough to read as "and then, separately, this one". */
+.nav-menu .nav-leave { margin-left: 6px !important; }
+
+/* The people + chat toggle now lives in the dock too: undo its old fixed
+   top-left pinning and render it as a dock circle. It keeps its id (so its
+   click handler and the unread alert dot still work) and its composite
+   person+chat icon. */
+.nav-menu #sidebarCollapse {
+    position: static;
+    top: auto;
+    left: auto;
+    width: 50px;
+    height: 50px;
+    padding: 0;
+    margin: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-3);
+    border: 1px solid var(--divider);
+    color: var(--text-2);
+    cursor: pointer;
+}
+.nav-menu #sidebarCollapse:hover { background: var(--surface-2); color: var(--accent); }
+.nav-menu #sidebarCollapse .panel-toggle-icon { font-size: 20px; }
+
+/* Leave: the same round ghost button as its neighbours, drawn in --danger and
+   filling only on hover.  A solid red disc among ghost circles made the one
+   destructive control the visual centre of the whole screen; outlining it
+   keeps the warning without letting it dominate.  (The old fill was a
+   gradient from --danger to --danger, i.e. a flat colour spelled the long
+   way.)  Set off from the rest by a thin divider. */
+.nav-leave {
+    position: relative;
+    margin-left: 6px !important;
+    background: transparent !important;
+    border: 1px solid var(--danger) !important;
+    color: var(--danger) !important;
+}
+.nav-leave:hover {
+    background: var(--danger) !important;
+    color: var(--accent-contrast) !important;
+}
+/* The divider that used to sit before it is gone: the dock has no other line
+   left in it, and a red ring among flat glyphs already sets the one
+   destructive control apart — the hairline was a second, quieter way of
+   saying so.  What holds it away from its neighbour is the extra 6px of
+   margin, restored where the divider used to be compensated for. */
+.nav-leave::before { content: none; }
+
+/* The top bar is gone: the controls live in the dock and the E2EE lock floats
+   above it. Make the (now empty) bar invisible and click-through, so taps on the
+   top of the video still toggle immersive mode; the dock re-enables clicks. */
+.topnav {
+    background: none;
+    border-bottom: none;
+    pointer-events: none;
+}
+.nav-menu { pointer-events: auto; }
+
+/* The empty top bar still took a ~56px strip in flow (and slid in/out with
+   immersive mode). Collapse it to nothing so the video fills the whole viewport;
+   the dock + lock float over the video and immersive just hides them via their
+   own rules. */
+header,
+.topnav {
+    height: 0;
+    min-height: 0;
+    padding: 0;
+    border: none;
+}
+.full-width,
+.video-container {
+    height: calc(var(--vh, 1vh) * 100);
+}
+
+/* E2EE lock + SAS: pinned to the top-left corner. Only shows when the call
+   is actually encrypted (.invisible otherwise); hidden in immersive mode. */
+#header #e2ee-indicator {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    margin: 0;
+    width: max-content;
+    max-width: calc(100vw - 24px);
+    z-index: 1041;
+    pointer-events: auto;
+    transition: opacity var(--t-base) var(--ease);
+}
+body.nav-hidden #e2ee-indicator {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ✕ to close the people + chat panel from its own header (the toggle now lives
+   in the dock, which fades when the panel is open on mobile, so this is the
+   always-visible way out). */
+.panel-close {
+    margin-left: auto;
+    flex: none;
+    background: none;
+    border: none;
+    color: var(--text-2);
+    cursor: pointer;
+    font-size: var(--fs-base);
+    line-height: 1;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+}
+.panel-close:hover { color: var(--text); background: var(--hover); }
+
+/* Immersive mode: the dock drops away with the rest of the chrome. */
+body.nav-hidden .nav-menu {
+    opacity: 0;
+    transform: translateY(160%);
+    pointer-events: none;
+}
+
+/* Phone: the dock sizes to its content and sits centred at the bottom, like
+   the desktop pill — the old "span the screen and space-between" looked
+   stretched on a phone. */
+@media only screen and (max-width: 600px) {
+    .nav-menu {
+        left: 0;
+        right: 0;
+        width: max-content;
+        max-width: calc(100vw - 24px);
+        margin: 0 auto;
+        justify-content: center;
+        gap: 6px;
+        padding: 8px 10px;
+    }
+    .nav-menu .nav-button,
+    .nav-menu #presentbutton,
+    .nav-menu #unpresentbutton { width: 46px; height: 46px; }
+    .nav-menu .nav-button i { font-size: 18px; }
+    body.nav-hidden .nav-menu { transform: translateY(160%); }
+}
+
+/* --- App shell ----------------------------------------------------------- */
+.app {
+    background-color: var(--bg);
+    box-shadow: none;
+}
+
+/* --- Left sidebar + participants -----------------------------------------
+   The panel is set apart from the stage by its fill and a soft edge, never by
+   a rule: a hairline down the full height of the window is the longest, and so
+   the loudest, mark on a screen whose actual content is two faces.  The header
+   strip and the row separators go for the same reason — the list already reads
+   as a list from its avatars and its spacing, and the lines were only telling
+   the eye something it had already worked out.  (Sozvon) */
+#left-sidebar {
+    background: var(--surface);
+    border-right: none;
+    box-shadow: var(--panel-edge);
+}
+.users-header {
+    background: var(--surface);
+    border-bottom: none;
+}
+#users {
+    background: var(--surface);
+    border: none;
+}
+#users .user-p { border-bottom: none; }
+#users > div:hover { background-color: var(--hover); }
+#users > div::before { color: var(--ok); }
+#users > div::after { color: var(--text-3); }
+
+/* Participant rows: round avatar (initial + presence dot) + name. The mic/cam
+   glyph still floats in via ::after; presence moved off the old leading dot onto
+   the avatar. Scoped :not(.knock-p) so lobby knock cards keep their own layout. */
+#users .user-p:not(.knock-p) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: auto;
+    min-height: 46px;
+    white-space: normal;
+    overflow: visible;
+}
+#users .user-p:not(.knock-p)::before { content: ""; margin: 0; }
+#users .user-p.user-status-raisehand:not(.knock-p)::before {
+    content: "\f256";
+    color: var(--warn);
+    margin-right: 4px;
+    flex: none;
+}
+#users .user-p:not(.knock-p)::after { float: none; flex: none; margin-left: 8px; }
+.up-avatar {
+    position: relative;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+}
+.up-ini { line-height: 1; }
+.up-dot {
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--ok);
+    border: 2px solid var(--surface);
+}
+.up-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.up-avatar.av-0 { background: var(--av-0); }
+.up-avatar.av-1 { background: var(--av-1); }
+.up-avatar.av-2 { background: var(--av-2); }
+.up-avatar.av-3 { background: var(--av-3); }
+.up-avatar.av-4 { background: var(--av-4); }
+
+/* --- Lobby / knock requests ---------------------------------------------- */
+#users .knock-p {
+    background-color: var(--surface-2);
+    border-left: 2px solid var(--accent);
+}
+#users .knock-p .knock-admit { background-color: var(--ok); }
+#users .knock-p .knock-deny  { background-color: var(--danger); }
+#users .knock-p .knock-admit,
+#users .knock-p .knock-deny {
+    min-width: 32px;
+    padding: 5px 9px;
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-md);
+    line-height: 1;
+}
+.lobby-note { color: var(--text-2); }
+
+/* --- Nav buttons --------------------------------------------------------- */
+.nav-link { color: var(--text-2); transition: color var(--t-fast) var(--ease); }
+.nav-link label { color: var(--text); }
+.nav-link:hover, .nav-link label:hover { color: var(--accent); }
+.nav-cancel, .muted, .nav-cancel label, .muted label,
+.nav-cancel:hover, .muted:hover, .nav-cancel label:hover, .muted label:hover {
+    color: var(--danger);
+}
+
+/* --- Chat ---------------------------------------------------------------- */
+#chat {
+    background-color: var(--surface);
+    border-right: none;
+}
+.close-chat { color: var(--text-2); }
+.close-chat:hover, .close-chat:active { border-color: var(--divider); }
+/* The composer is part of the panel, not a slab bolted to the bottom of it:
+   no fill of its own and no rule above it.  The message field is still found
+   at a glance because it is filled, and a filled field needs no outline — the
+   border here is transparent rather than absent so the focus ring can colour
+   it in without the field changing size.  (#input, the composer's own
+   textarea, has carried border:none since upstream; this is for the rest.) */
+.reply {
+    background-color: transparent;
+    border-top: none;
+}
+.reply textarea,
+.form-reply {
+    color: var(--text);
+    background-color: var(--surface-3);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    box-shadow: none;
+}
+.form-reply::placeholder { color: var(--text-3); }
+#inputbutton { color: var(--accent); }
+
+/* --- Messages: chat bubbles ---------------------------------------------- */
+/* Received messages sit left on a neutral surface; your own (.message-sender)
+   align right with an accent gradient; private messages keep the accent edge;
+   system notes are centred and quiet. Builds on the upstream inline-block
+   .message inside a clearfix .message-row. */
+.message {
+    background: var(--surface-2);
+    box-shadow: none;
+    border-radius: var(--radius);
+    padding: 7px 11px 8px !important;
+    margin-top: 0.7em;
+}
+.message-content { color: var(--text); font-size: var(--fs-md); }
+.message-header { color: var(--text-2); font-style: normal; font-size: var(--fs-sm); }
+.message-time { color: var(--text-3); font-size: var(--fs-xs); }
+
+/* Your own messages: pushed to the right with an accent gradient bubble.  The
+   side it sits on and the lighter fill already say whose it is; the outline it
+   also carried was a third way of saying the same thing. */
+.message-row:has(.message-sender) { text-align: right; }
+.message-sender {
+    background: linear-gradient(135deg, var(--hover-strong), var(--hover-strong));
+    border: 1px solid transparent;
+}
+
+/* A private message you received keeps the accent edge. */
+.message-private {
+    background: var(--surface-3);
+    border-left: 2px solid var(--accent);
+}
+
+/* System notices: centred, quiet, no bubble. */
+.message-system {
+    background: transparent;
+    color: var(--text-3);
+    display: block;
+    text-align: center;
+    max-width: 100%;
+    font-size: var(--fs-sm);
+}
+
+/* --- Inputs / selects ----------------------------------------------------
+   Filled, not outlined.  A field is found by the shape of its fill, and the
+   drawer stacks five of them in a column: outlined, that column reads as five
+   boxes with labels between them rather than as a list of settings.  Same
+   reasoning as the chat composer.  The border stays declared so the focus
+   state can colour it in without the control changing size — and focus is now
+   the only time any of these draws an edge, which is when it should. */
+.form-control,
+.select {
+    color: var(--text);
+    /* One clear step from the --surface the cards and the drawer are painted
+       with — the step the composer's field already uses.  --surface-2 was only
+       4% away from its background, which an outline was hiding; without the
+       outline the field has to hold itself. */
+    background-color: var(--surface-3);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: var(--fs-md);
+    line-height: 1.35;
+}
+.form-control::placeholder { color: var(--text-3); }
+
+/* Focus: soft glow, not a hard outline */
+.form-control:focus,
+.select:focus,
+.reply textarea:focus,
+.form-reply:focus,
+textarea:focus,
+input:focus-visible,
+.btn:focus-visible,
+a:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* --- Buttons ------------------------------------------------------------- */
+.btn {
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.01em;
+}
+.btn-default {
+    color: var(--text);
+    background-color: var(--surface-3);
+    border-color: var(--divider);
+}
+.btn-default:hover {
+    color: var(--text);
+    background-color: var(--surface-2);
+    border-color: var(--divider);
+}
+.btn-blue {
+    background: var(--accent);
+    border: none;
+    color: var(--accent-contrast);
+}
+/* The fill is already the brightest value the palette has, so hover dims it
+   rather than brightening; the old filter: brightness() was a no-op on white. */
+.btn-blue:hover {
+    background: var(--accent-hover);
+    border: none;
+    color: var(--accent-contrast);
+}
+.btn-success { background-color: var(--ok); border-color: var(--ok); }
+.btn-success:hover { background-color: var(--ok); border-color: var(--ok); }
+.btn-cancel { background-color: var(--danger); border-color: var(--danger); }
+.btn-cancel:hover { background-color: var(--danger); border-color: var(--danger); }
+.btn-warn { color: var(--warn); border-color: var(--warn); background: transparent; }
+.btn-warn:hover { color: var(--accent-contrast); background-color: var(--warn); border-color: var(--warn); }
+
+/* --- Links ----------------------------------------------------------------
+ * A link takes the palette's emphasis colour, and its underline is what says
+ * it is a link — the interface has no hue to spend on one.  Every link that
+ * carried its own rule already did this; the two that did not, both on the
+ * join card ("log in as operator", "log in with different credentials"), were
+ * left with the browser's default blue, which is the one colour the whole
+ * design does not contain.  :visited too, or Firefox keeps a purple of its
+ * own for a link that has been followed.
+ */
+a,
+a:visited {
+    color: var(--accent);
+}
+a:hover {
+    color: var(--accent-hover);
+}
+
+/* --- Profile ------------------------------------------------------------- */
+/* A filled white disc made the avatar the brightest thing in the drawer; it is
+   an identity marker, not a call to action.  Matches the participant avatars
+   in the left panel. */
+.profile-logo { background: var(--surface-2); color: var(--text-2); }
+.profile-info { color: var(--text-2); }
+#permspan { color: var(--text-2); }
+#chpwspan a,
+.sidenav .user-logout a { color: var(--accent); }
+.sidenav .user-logout a:hover { text-decoration: underline; }
+
+/* --- Login / join screen -------------------------------------------------- */
+/* There is no card here any more.  A panel earns an edge when it has to be
+   told apart from something behind it, and this one sits alone on an empty
+   page: the fill and the hairline were drawing a box around the only thing on
+   screen, which made the form read as a dialog dropped onto the page rather
+   than as the page.  Take the box away and the form has to hold itself, so
+   everything in it goes up a step — the fields, the button and the wordmark
+   are the structure now, and the space around them is the frame. */
+.login-container { background: var(--bg); }
+.login-box {
+    width: 24em;
+    max-width: 100%;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    height: auto;
+    align-self: flex-start;   /* don't let the flex container stretch (and clip) it */
+    /* Horizontal padding is the phone's gutter, not the card's inset.  The
+       vertical margin gives way on a short screen (landscape phone) before the
+       container has to scroll. */
+    padding: 0 1.25rem;
+    margin: clamp(1.5rem, 10vh, 6rem) auto;
+}
+.loginform label { color: var(--text-2); }
+
+/* Label above, field below, both a step larger.  Upstream's label is an
+   inline 3em column beside the input, which spends width on a single word and
+   leaves the field looking like the smaller half of the pair; here the field
+   is the thing you look at.  Scoped to the two field wrappers, because
+   `.loginform label` also matches the "remember me" line, which is a label
+   wrapped round a checkbox and wants none of this. */
+#userform label,
+#passwordform label {
+    display: block;
+    min-width: 0;
+    padding-top: 0;
+    margin-bottom: 0.5rem;
+    font-size: var(--fs-md);
+}
+#userform,
+#passwordform {
+    margin-bottom: 1.15rem;
+}
+.loginform .form-control {
+    font-size: var(--fs-base);
+    padding: 13px 14px;
+    border-radius: var(--radius);
+}
+/* The one action on the screen, so it spans the column and is the largest
+   type on it. */
+#connect-container {
+    margin-top: 1.9rem;
+}
+#connectbutton {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: var(--fs-lg);
+    border-radius: var(--radius);
+}
+
+/* Quiet depth for the first screen: a faint film grain so the near-black has
+   texture, and a gentle glow on the primary action.  Scoped to body.pre-join —
+   the only state in which the join screen is shown.  (The aurora this comment
+   used to describe went with the blue palette, and the elevated card went when
+   the card did.)
+
+   The grain is inert as it stands: it is a data: URI and the server sends
+   `img-src 'self'` (cspHeader in webserver/webserver.go), so the browser
+   refuses it and the page is plain --bg.  Left in place rather than deleted
+   because the fix is to serve the speckle as a file, not to widen the policy —
+   but until then, do not read a rule here as evidence of what the screen
+   actually looks like. */
+body.pre-join .login-container {
+    background: var(--bg);
+    position: relative;
+    overflow-x: hidden;   /* clip grain overlay horizontally */
+    overflow-y: auto;     /* allow scroll on short screens (landscape mobile) */
+}
+body.pre-join .login-container::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: var(--grain);
+}
+/* Above the grain, not behind it. */
+body.pre-join .login-box {
+    position: relative;
+    z-index: 1;
+}
+/* Lift under the one white shape on a black page, so it reads as sitting on
+   the page rather than cut out of it.  Softer than it was: the button spans
+   the column now, and the old halo at that width was a lamp.
+
+   Named, not `.btn-blue`: body.pre-join is also set on the operator dashboard,
+   where that selector lit up every Join button in the list and the Create one
+   above it — a glow that means "the one thing to do here" cannot be worn by
+   six things at once.
+
+   It outranks `.btn:focus-visible` (one class more), which used to mean this
+   button — the primary action, and the one people reach by tab — showed no
+   focus ring at all; so the focused state restates both. */
+body.pre-join #connectbutton,
+body.pre-join #rejoinbutton {
+    box-shadow: 0 12px 34px -14px var(--focus-ring);
+}
+body.pre-join #connectbutton:focus-visible,
+body.pre-join #rejoinbutton:focus-visible {
+    box-shadow: 0 0 0 3px var(--focus-ring),
+                0 12px 34px -14px var(--focus-ring);
+}
+
+/* --- Settings drawer ----------------------------------------------------- */
+/* The drawer and the people + chat panel are the same object — a full-height
+   column of --surface flanking the stage — and they were being drawn as two
+   different ones.  Same fill, but the drawer carried --shadow-2, a *drop*
+   shadow offset downwards: on something the height of the window that falls
+   off the bottom of the screen and spreads sideways instead, darkening the
+   stage along the drawer's edge.  Beside a left panel that casts nothing (in
+   dark) or a thin directional edge (in light), the drawer read as sitting on
+   slightly different ground even though the two fills are the same value.
+   Both take the panel edge now, mirrored so each falls away from its own
+   panel and into the stage.  --shadow-2 comes back below 1025px, where the
+   drawer stops pushing the call aside and covers it: there it genuinely
+   floats, and a floating thing casts a floating thing's shadow. */
+.sidenav {
+    background-color: var(--surface);
+    box-shadow: var(--panel-edge-flipped);
+}
+@media only screen and (max-width: 1024px) {
+    .sidenav { box-shadow: var(--shadow-2); }
+}
+/* No line under the drawer header.  It was doubled with the content's own
+   border-top for a while, then single; now neither — the header is a band of
+   the same surface at the top of a scrolling column, and text disappearing
+   under an opaque strip needs no rule drawn across it.  Same argument, and
+   the same result, as the people panel's header. */
+.sidenav-header {
+    border-bottom: none;
+}
+.sidenav-content {
+    background: var(--surface);
+    border-top: none;
+}
+.sidenav-header h2,
+.sidenav-content h2 { color: var(--text); }
+/* Upstream's drawer is the slide-out menu whose links are 30px display type.
+   Ours is a settings panel and its links are text like everything else in it.
+   Only three links live here and two of them are shown to almost nobody — the
+   app section appears inside the native clients only, and "change password"
+   only for an account that may — which is how a 30px "Сбросить вход на этом
+   устройстве" went unseen. */
+.sidenav a { color: var(--text-2); font-size: var(--fs-md); }
+.sidenav a:hover { color: var(--accent); }
+fieldset { border: 1px solid var(--divider); border-radius: var(--radius-sm); }
+legend { color: var(--text-2); }
+/* The markup already groups the drawer into fieldsets with translated legends
+   ("Media Options" / "Other Settings").  Upstream's compact styling hid them,
+   which left ten unrelated controls as one undifferentiated list.  Keep the
+   frames off, and show the legends as quiet micro-headers: that grouping is
+   what makes the panel readable at a glance.  The rule each of them used to
+   draw above itself is gone — a drawer of a dozen settings had a line every
+   few rows, and the space around a caps micro-header groups just as well. */
+.sidenav-content fieldset {
+    border: none;
+    padding: 0;
+    /* One group ends and the next begins here, and with no line to mark it the
+       gap has to be bigger than any gap inside a group. */
+    margin: 0 0 14px;
+}
+
+.sidenav-content legend {
+    display: block;
+    width: 100%;
+    /* The space above is what separates one group from the next now that the
+       rule is gone, so it is the group step. */
+    padding: var(--group-gap) 0 10px;
+    margin: 0;
+    font-size: var(--fs-sm);
+    line-height: 1.4;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+
+/* One step up in size across the drawer, for reading rather than scanning:
+   the controls carry the interface's body size and the labels above them the
+   step below it, so a setting reads as a sentence with a caption rather than
+   two sizes of small print.  Scoped to the drawer — the login card's fields
+   are sized by their own screen. */
+.sidenav-content .select,
+.sidenav-content .form-control {
+    font-size: var(--fs-base);
+    padding: 8px 10px;
+}
+
+/* In the drawer the segmented controls are a control like any other: the full
+   width of the column, in equal parts — not parts sized by their own words,
+   which had "Светлое" claiming a fifth more room than "Авто" inside one
+   pill. */
+.sidenav-content .pref-toggle {
+    display: flex;
+    width: 100%;
+}
+.sidenav-content .pref-toggle button {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 6px;
+}
+.sidenav-content form:has(> input[type="checkbox"]) label {
+    font-size: var(--fs-base);
+}
+.sidenav a {
+    font-size: var(--fs-base);
+}
+
+/* Sozvon — render the on/off settings as toggle switches. Upstream markup is
+   <form><input type=checkbox><label>; we flex the row (label left, switch right
+   via row-reverse) and restyle the native checkbox into a pill switch, with no
+   HTML change so upstream merges stay clean. Scoped to the drawer, so the login
+   "remember me" and pre-join checkboxes keep their native look. */
+.sidenav-content form:has(> input[type="checkbox"]) {
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    /* A switch is a whole row of the list; 4px between rows read as a stack of
+       lines rather than a set of choices. */
+    margin: 12px 0;
+}
+.sidenav-content form:has(> input[type="checkbox"]) label {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--fs-md);
+    cursor: pointer;
+}
+.sidenav-content input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    flex: none;
+    width: 42px;
+    height: 24px;
+    margin: 0;
+    border-radius: var(--radius-pill);
+    /* The off track is a fill too, one step further from the drawer's surface
+       than the fields are, so it holds its shape without the outline it used
+       to need at --surface-2.  On, it inverts to --accent and the question
+       does not arise. */
+    background: var(--surface-3);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background var(--t-fast) var(--ease),
+                border-color var(--t-fast) var(--ease);
+}
+.sidenav-content input[type="checkbox"]::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    /* Off: a grey knob on a dark track.  On: the track inverts to --accent, so
+       the knob has to invert with it or it vanishes into white-on-white. */
+    background: var(--text-3);
+    transition: transform var(--t-fast) var(--ease),
+                background var(--t-fast) var(--ease);
+}
+.sidenav-content input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: transparent;
+}
+.sidenav-content input[type="checkbox"]:checked::after {
+    transform: translateX(18px);
+    background: var(--accent-contrast);
+}
+.sidenav-content input[type="checkbox"]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* App-level settings (shown only inside the native clients): "Change server" /
+   "Reset login" as full-width tappable links. (Sozvon)
+
+   The section used to draw its own divider and style its own legend, from back
+   when the drawer's other groups had neither. They all have both now, and the
+   two rules landed 8px apart — one line from this fieldset, one from its
+   legend. Let the legend do it, exactly as it does for every other group. */
+#app-settings {
+    margin-top: 0.75rem;
+}
+#app-settings legend {
+    margin-bottom: 0.25rem;
+}
+.app-settings-link {
+    display: block;
+    padding: 11px 4px;
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+}
+.app-settings-link:hover { text-decoration: underline; }
+
+/* Sozvon brand lockup, relocated here from the people panel header so it no
+   longer competes with the participant list. Quiet header for the drawer. */
+.sidenav-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0;
+    margin: 0;
+}
+/* Sized by height, same argument as the other two lockups: the mark keeps its
+   own 218:590 proportion instead of being centred in a square. */
+.sidenav-brand .brand-mark { width: 9px; height: 24px; }
+.sidenav-brand .brand-word { font-size: var(--fs-lg); --brand-tracking: 0.22em; }
+
+/* --- Video tiles --------------------------------------------------------- */
+.video-container { background: var(--bg); }
+.peer {
+    background: var(--hover);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+.peer-active { border-color: var(--accent); }
+.media { border-radius: inherit; }
+.chat-btn .icon-chat { color: var(--text-2); text-shadow: none; }
+
+/* Chrome printed on top of video — the tile label, the on-video controls, the
+   floating self pill and the captions.  It does not follow the theme: the
+   surface underneath is someone's camera, not ours, so it stays light on a
+   dark scrim whichever way the rest of the interface goes. */
+.video-controls,
+.top-video-controls,
+.label { color: var(--on-video); }
+.video-controls span.disabled,
+.video-controls span.disabled:hover,
+.top-video-controls span.disabled:hover { color: var(--on-video); }
+.self-controls-pill,
+.top-video-controls .video-hide,
+.self-controls-pill .video-hide {
+    background: var(--on-video-scrim);
+    color: var(--on-video);
+}
+
+/* Floating "show video" pill.  The fill is the accent, so the glyph has to be
+   the accent's contrast: with both --accent and --text at white, the inherited
+   colour left a white icon on a white disc. */
+.show-video {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+@keyframes blink {
+    0%   { box-shadow: 0 0 16px var(--accent); }
+    50%  { box-shadow: none; }
+    100% { box-shadow: 0 0 16px var(--accent); }
+}
+
+/* --- Captions ------------------------------------------------------------ */
+#captions {
+    background-color: var(--on-video-scrim);
+    color: var(--on-video);
+    border-radius: var(--radius-sm);
+}
+
+/* --- Status text --------------------------------------------------------- */
+.connected { color: var(--ok); }
+.disconnected { color: var(--danger); }
+.error { color: var(--danger); }
+
+/* --- Invite dialog ------------------------------------------------------- */
+.file-progress { accent-color: var(--accent); }
+#invite-dialog {
+    background-color: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-lg);
+}
+#invite-dialog button { background: var(--accent); }
+#invite-dialog button:hover { background: var(--accent-hover); }
+#invite-dialog input {
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+}
+#invite-dialog label { color: var(--text-2); }
+::backdrop { background: var(--hover-strong); }
+
+/* --- Contextual menu ------------------------------------------------------
+   The vendored library names its own variables; we only supply their values.
+   These were the last six literals left over from the pre-monochrome palette
+   (a blue-grey #161B22 slab), which meant the menu stayed dark whatever the
+   rest of the interface did.  Mapped onto the tokens instead. */
+:root {
+    --contextualMenuBg: var(--surface-2);
+    --contextualMenuText: var(--text);
+    --contextualSubMenuBg: var(--surface-2);
+    --contextualHover: var(--surface-3);
+    --contextualOverflowIcon: var(--text-3);
+    --contextualSeperator: var(--divider);
+}
+
+/* --- Toastify: muted, never shouting ------------------------------------- */
+/* Note: toastify.css is loaded *after* galene.css in galene.html, so the
+   upstream `.toastify` rules override ours by source order.  We bump the
+   selector specificity (`body .toastify.toastify`) to win the cascade
+   without resorting to !important. */
+body .toastify.toastify {
+    /* Sozvon: softly rounded rectangle.  A percentage of the short side
+       squashes wide toasts into ovals, so use a fixed value that
+       matches the dock buttons' visual weight. */
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-1);
+}
+/* Toasts are chrome, not state: a solid white or amber slab is the brightest
+   thing that can appear over a black call, for a message that is usually
+   incidental.  They sit on the same dark surface as every other panel.
+   (The gradients were `linear-gradient(x, C, C)`: one flat colour written the
+   long way, left over from upstream.)
+
+   No edge, and no colour on it.  A coloured bar down the side of a grey slab
+   was the one hue on the whole call screen, spent on telling apart messages
+   whose first three words already tell them apart — and it landed next to a
+   glyph the platform insists on painting in a colour of its own (below), so
+   the corner of the screen ended up with two unrelated colours in it.  A
+   monochrome interface can say "error" in words. */
+body .toastify.toastify {
+    background: var(--surface-2);
+    color: var(--text);
+    border: none;
+}
+/* The per-kind rules earlier in this file are `.toastify.info .toast-close`
+   and friends — three classes — so a two-class selector here loses to them and
+   the close button would keep a colour meant for the old bright slabs.  Same
+   `body .toastify.toastify` trick the block above uses. */
+body .toastify.toastify .toast-close { color: var(--text-3); }
+body .toastify.toastify .toast-close:hover { color: var(--text); }
+/* The upstream close is barely visible (opacity 0.4) and, worse, is written
+   into the DOM as `&#10006;` — U+2716 HEAVY MULTIPLICATION X.  No text font in
+   our stack carries that codepoint, so it falls all the way through to Segoe
+   UI Emoji, which draws it as a colour bitmap: a purple ✖ that `color` cannot
+   touch, because a colour font paints its own.  Blank the library's glyph and
+   draw U+00D7 instead — the multiplication sign, which every text font has and
+   no platform has an emoji for, so it takes the colour it is given. */
+.toastify .toast-close {
+    opacity: 0.95;
+    font-size: 0;
+    line-height: 1;
+    padding: 0 8px;
+    align-self: center;
+}
+.toastify .toast-close::before {
+    content: "\00D7";
+    font-size: 1.6rem;
+    line-height: 1;
+}
+
+/* --- Knock (lobby) toast: Admit/Deny right from the popup ---------------- */
+.toastify.knock-toast {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: min(92vw, 420px);
+    box-sizing: border-box;
+}
+.knock-toast-body {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.knock-toast-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+.knock-toast-actions button {
+    min-width: 32px;
+    padding: 5px 9px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-md);
+    line-height: 1;
+    color: var(--text);
+    cursor: pointer;
+}
+.knock-toast-actions .knock-admit { background-color: var(--ok); }
+.knock-toast-actions .knock-deny  { background-color: var(--danger); }
+
+/* ==========================================================================
+   Sozvon — camera control, clean login screen, language toggle
+   ========================================================================== */
+
+/* --- Camera button: render present/unpresent as icon nav buttons --------- */
+button.nav-button {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    cursor: pointer;
+}
+button.nav-button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--focus-ring);
+    border-radius: var(--radius-sm);
+}
+#presentbutton, #unpresentbutton {
+    width: auto;
+    margin: 0 10px;
+    font-size: 25px;            /* match the other nav icons */
+    text-align: center;
+}
+.nav-cam-on, .nav-cam-on label { color: var(--accent); }
+
+/* --- Share screen toggle (Sozvon) ------------------------------------------
+   The share button is blue while a screen share is live, mirroring the mic/
+   camera state colours. The .sharing class is set/torn down in galene.js
+   based on the presence of an up-stream with label 'screenshare'. */
+#sharebutton.sharing,
+#sharebutton.sharing label,
+#sharebutton.sharing:hover,
+#sharebutton.sharing label:hover {
+    color: var(--accent);
+}
+
+/* --- Media toggles reflect the device's current state (no neutral grey) ---
+   The mic and camera buttons colour by what is LIVE right now, not by the
+   action a click performs:
+     on  -> accent (blue), upright glyph
+     off -> danger (red), slashed glyph
+   This removes the old ambiguous in-between where "mic on" and "camera off"
+   both sat at the neutral --text-2 grey. */
+#mutebutton:not(.muted),
+#mutebutton:not(.muted) label,
+#mutebutton:not(.muted):hover,
+#mutebutton:not(.muted) label:hover {
+    color: var(--accent);
+}
+.nav-cam:not(.nav-cam-on),
+.nav-cam:not(.nav-cam-on) label,
+.nav-cam:not(.nav-cam-on):hover,
+.nav-cam:not(.nav-cam-on) label:hover {
+    color: var(--danger);
+}
+
+/* --- View toggle: a picture-in-picture glyph for "switch to speaker view" ---
+   The old icon was a plain person (fa-user), which both looked unclear and
+   duplicated the participants toggle. Draw a framed rectangle with a smaller
+   inset rectangle in the lower-right corner — two nested camera frames — using
+   borders so it inherits the nav colour (and hover) exactly like a font icon.
+   updateViewToggle() in galene.js swaps this in for grid view and the
+   fa-th-large grid glyph back in for speaker view. */
+.view-pip {
+    position: relative;
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1.05em;
+    height: 0.8em;
+    border: 0.13em solid currentColor;
+    border-radius: 0.12em;
+    vertical-align: -0.04em;
+}
+.view-pip::after {
+    content: "";
+    position: absolute;
+    right: 0.12em;
+    bottom: 0.1em;
+    width: 0.42em;
+    height: 0.32em;
+    background: currentColor;
+    border-radius: 0.06em;
+}
+
+/* --- Clean login / waiting-room screen (hide sidebar, chat + top bar) ----- */
+/* The bottom control dock (.nav-menu) is position:fixed, so it floats over any
+   pre-join screen (login, lobby, operator dashboard) unless explicitly hidden;
+   the top bar (.topnav) carries the E2EE lock.  Neither belongs on a screen
+   where there is no call, so hide both alongside the sidebar/chat. */
+body.pre-join #left-sidebar,
+body.pre-join #left,
+body.pre-join #resizer,
+body.pre-join #sidebarCollapse,
+body.pre-join .nav-menu,
+body.pre-join .topnav,
+body.pre-join header {
+    display: none !important;   /* beat the mobile `.coln-left { ...!important }` rule */
+}
+body.pre-join .full-width { width: 100vw; height: calc(var(--vh, 1vh) * 100); }
+body.pre-join .coln-right { flex: 1 1 100%; }
+/* With no top bar, let the card centre over the full viewport height
+   (covers both #login-container and #lobby-waiting). */
+body.pre-join .login-container {
+    top: 0;
+    height: calc(var(--vh, 1vh) * 100);
+}
+
+/* Clip the sidebar so a collapsed (width:0) sidebar hides its content
+   instead of letting it spill. */
+#left-sidebar { overflow: hidden; }
+
+/* Brand + language row on the join screen.  It is the masthead of a page now
+   rather than the heading of a card, so it is drawn at that size. */
+.login-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 2.4rem;
+}
+/* Sized by height, keeping the mark's own 218:590 proportion (see .brand-mark
+   in common.css).  The square box it used to be given letterboxed a tall glyph
+   and padded the lockup with a finger's width of nothing. */
+.login-brand { gap: 14px; }   /* ~2x this lockup's 7.2px tracking */
+.login-brand .brand-mark { width: 12px; height: 32px; }
+.login-brand .brand-word { font-size: var(--fs-xl); --brand-tracking: 0.3em; }
+.login-top .pref-toggle button {
+    font-size: var(--fs-base);
+    padding: 9px 14px;
+}
+
+/* Sozvon: "Rejoin as X" quick action shown instead of the login fields when a
+   deliberate hang-up left us with still-usable credentials for this tab. */
+#rejoin-container { text-align: center; }
+/* Same size as the Connect button it stands in for. */
+#rejoin-container .btn {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: var(--fs-lg);
+    border-radius: var(--radius);
+}
+.rejoin-other { margin-top: 1rem; font-size: var(--fs-md); text-align: center; }
+
+/* "Log in as operator" — a way out of the remembered-login screen, not an
+   action, so it stays a link and only gets the room it needs. */
+#operator-login { margin-top: 0.9rem; font-size: var(--fs-md); }
+
+/* "Remember me on this device" checkbox on the join screen.  `.loginform label`
+   is one class and one element, so it outranks a lone `.remember-label` — the
+   layout here has to be stated at the same weight or the checkbox row inherits
+   the fields' stacked-label shape. */
+.rememberform { margin: 0.2rem 0 0; }
+.loginform .remember-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+    padding-top: 0;
+    cursor: pointer;
+    font-size: var(--fs-md);
+    color: var(--text-2);
+}
+.remember-label input {
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    flex: none;
+}
+
+/* --- Segmented preference control ----------------------------------------
+   One control, two uses: the language pair and the theme trio.  It was named
+   after the language when that was its only use; the name follows the job
+   now.  A .pref-row is the label-plus-control line the drawer stacks them in. */
+/* The pill sizes to its content by default: on the join card it shares a line
+   with the brand, where stretching it to the card's width shoved it across the
+   logo and out the side.  Only in the drawer, where every control spans the
+   column, does it go full width — see below. */
+.pref-toggle {
+    display: inline-flex;
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+    flex: none;
+}
+.pref-toggle button {
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    font-family: inherit;
+    font-size: var(--fs-md);
+    letter-spacing: 0.04em;
+    padding: 7px 11px;
+    cursor: pointer;
+    transition: color var(--t-fast) var(--ease),
+                background var(--t-fast) var(--ease);
+}
+.pref-toggle button:hover { color: var(--text); }
+.pref-toggle button.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+/* The drawer has two shapes, and only two.  A setting that holds a *value* —
+   a device, a theme, a language — is a quiet label with the control under it,
+   spanning the column: they are the wide ones, and stacking gives them room
+   and one left edge to share.  A setting you *act on* — a switch, the rotate
+   arrows — is a label on the left with its control on the right, which is
+   what every switch in the disclosure already does.  Sorting the rows into
+   those two is most of what "tidy" means here; before, appearance and
+   language were the second shape while being the first kind of thing. */
+.pref-row {
+    display: block;
+}
+/* Rotate video: two round buttons, each a quarter turn in the direction its
+   arrow points.  Filled like a field rather than outlined like a control,
+   which is how everything else in the drawer says "you can act on me", and
+   round because the thing they do is circular.  The row is the drawer's
+   action shape — label left, control right, exactly like a switch — so it
+   also has to defeat the stacked label's margins, which are what left the
+   buttons floating above their own words. */
+#settings-rotate {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+#settings-rotate label {
+    margin: 0;
+    font-size: var(--fs-base);
+    color: var(--text);
+}
+.rotate-buttons {
+    display: inline-flex;
+    gap: 8px;
+    flex: none;
+}
+.rotate-button {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 50%;
+    background: var(--surface-3);
+    color: var(--text);
+    font-size: var(--fs-md);
+    cursor: pointer;
+    transition: background var(--t-fast) var(--ease),
+                color var(--t-fast) var(--ease);
+}
+.rotate-button:hover {
+    background: var(--hover-strong);
+}
+.rotate-button:active {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+.rotate-button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* Kept as names the markup still carries: stacking and full width are what
+   every row does now, so these say nothing extra. */
+.pref-stack { display: block; }
+.pref-toggle-block { display: flex; width: 100%; }
+
+/* ==========================================================================
+   Sozvon — speaker view (Zoom-style 1-on-1)
+   In a 1-on-1 call the remote video fills the stage and the local video is a
+   small self-thumbnail in the corner. Toggled by the `speaker` class on
+   #peers from resizePeers().
+   ========================================================================== */
+#peers.speaker {
+    display: block;
+    padding: 0;
+}
+#peers.speaker .peer-remote {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+}
+#peers.speaker .peer-remote .media {
+    width: 100%;
+    height: 100%;
+    max-height: none !important;
+    padding-bottom: 0;
+    object-fit: contain;
+}
+/* Sozvon — smart framing: fill the stage edge-to-edge when cropping stays
+   modest (.framing-fill, toggled by applyRemoteFraming); otherwise show the
+   whole frame (contain). */
+#peers.speaker .peer-remote.framing-fill .media {
+    object-fit: cover;
+}
+#peers.speaker .peer-self {
+    position: absolute;
+    right: 16px;
+    top: 16px;
+    /* clamp() rather than width + min/max, and a floor under the height the
+       ratio derives: this box is absolutely positioned inside a grid, sized
+       from a percentage of it, and its height comes from nothing but
+       aspect-ratio — a combination engines have historically disagreed about
+       once the percentage falls under the minimum.  It is the only view of
+       your own camera on the screen, so it must not be able to resolve to
+       nothing whatever the stage does. (Sozvon) */
+    width: clamp(120px, 22%, 260px);
+    min-width: 120px;
+    max-width: 260px;
+    aspect-ratio: 4 / 3;
+    min-height: 90px;
+    margin: 0;
+    z-index: 1100;
+    border: 1px solid var(--divider);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-2);
+    background: var(--bg);
+}
+#peers.speaker .peer-self .media {
+    width: 100%;
+    height: 100%;
+    max-height: none !important;
+    padding-bottom: 0;
+    object-fit: cover;
+}
+#peers.speaker .peer-self .label,
+#peers.speaker .peer-self .video-controls {
+    display: none;
+}
+/* The hide-self eye on the speaker-view thumbnail had two problems:
+   1) Default `.top-video-controls { opacity: 0 }` — only visible on
+      hover, brittle on a 120-260px-wide thumbnail you barely notice.
+      Force opacity 1 so the eye is always there.
+   2) The <video> element below it was swallowing clicks — `e.target`
+      ended up as `.peer-self` itself instead of `.video-hide`, so
+      the eye's onclick handler never fired and self-hidden never
+      toggled. Making the video pass-through for pointer events lets
+      the absolutely-positioned top-controls catch the click instead.
+   The eye is the only interactive element on the self-thumbnail in
+   speaker / speaker-many view, so disabling pointer events on the
+   video is safe. (Sozvon) */
+#peers.speaker .peer-self .top-video-controls,
+#peers.speaker-many .peer-self .top-video-controls {
+    opacity: 1;
+}
+/* The self-thumb's hide ("eye") button is the only control on the thumbnail,
+   so it must stay visible AND tappable even in immersive mode (body.nav-hidden),
+   where the generic mobile rule sets the on-video controls to
+   pointer-events:none — the eye showed but did nothing on mobile. Its click
+   handler stopPropagation()s, so re-enabling it won't toggle the chrome. (Sozvon) */
+body.nav-hidden #peers.speaker .peer-self .top-video-controls,
+body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
+    opacity: 1;
+    pointer-events: auto;
+}
+#peers.speaker .peer-self .media,
+#peers.speaker-many .peer-self .media {
+    pointer-events: none;
+}
+/* The self-view thumbnail can be picked up and moved out of the way while in
+   speaker view (see makeSelfThumbDraggable in galene.js). touch-action:none so
+   a touch-drag moves the tile instead of scrolling the page. */
+#peers.speaker .peer-self {
+    cursor: grab;
+    touch-action: none;
+    transition: box-shadow var(--t-fast) var(--ease);
+}
+#peers.speaker .peer-self.dragging {
+    cursor: grabbing;
+    box-shadow: var(--shadow-2);
+    transition: none;
+}
+
+/* ==========================================================================
+   Sozvon — speaker-many view (self-thumbnail overlaid on a remote grid)
+   For 3+ participants: remotes are laid out as a regular grid, and only the
+   self tile is pulled out as a small floating overlay in the top-right
+   corner. The user can still drag the self tile away. (Sozvon)
+   ========================================================================== */
+#peers.speaker-many .peer-self {
+    position: absolute;
+    right: 16px;
+    top: 16px;
+    /* clamp() rather than width + min/max, and a floor under the height the
+       ratio derives: this box is absolutely positioned inside a grid, sized
+       from a percentage of it, and its height comes from nothing but
+       aspect-ratio — a combination engines have historically disagreed about
+       once the percentage falls under the minimum.  It is the only view of
+       your own camera on the screen, so it must not be able to resolve to
+       nothing whatever the stage does. (Sozvon) */
+    width: clamp(120px, 22%, 260px);
+    min-width: 120px;
+    max-width: 260px;
+    aspect-ratio: 4 / 3;
+    min-height: 90px;
+    margin: 0;
+    z-index: 1100;
+    border: 1px solid var(--divider);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-2);
+    background: var(--bg);
+    cursor: grab;
+    touch-action: none;
+    transition: box-shadow var(--t-fast) var(--ease);
+}
+#peers.speaker-many .peer-self.dragging {
+    cursor: grabbing;
+    box-shadow: var(--shadow-2);
+    transition: none;
+}
+#peers.speaker-many .peer-self .media {
+    width: 100%;
+    height: 100%;
+    max-height: none !important;
+    padding-bottom: 0;
+    object-fit: cover;
+}
+#peers.speaker-many .peer-self .label,
+#peers.speaker-many .peer-self .video-controls {
+    display: none;
+}
+
+/* ==========================================================================
+   Sozvon — self-view hidden: floating controls pill
+   When the user clicks "_" on their self tile, .peer-self is taken out of
+   layout (display: none) so it stops claiming grid space, and a small
+   pill with the show ("_") and stop ("✕") buttons is anchored to the
+   top-right of #video-container. The pill lives on the container, NOT on
+   the hidden tile (so it can't be hidden with it). The stream keeps
+   flowing the whole time — the remote still sees us. (Sozvon)
+   ========================================================================== */
+#video-container.self-hidden .peer-self { display: none; }
+
+.self-controls-pill {
+    position: fixed;
+    top: 16px;
+    /* Clear of the settings drawer.  The pill is fixed to the viewport, so
+       when the drawer opened and pushed the call area aside the pill stayed
+       against the window edge — underneath the drawer (z-index 2999 against
+       its 1300), which is to say the only control that brings the self-view
+       back was unreachable until the drawer was closed again.  --drawer-offset
+       is 0 unless the drawer is pushing rather than covering, so this is the
+       same value .full-width is sized with, and the pill slides with it. */
+    right: calc(16px + var(--drawer-offset));
+    transition: right var(--t-base) var(--ease);
+    z-index: 1300;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    background: var(--hover-strong);
+    border-radius: var(--radius-pill);
+    pointer-events: auto;
+}
+.self-controls-pill.visible { display: inline-flex; }
+/* The pill now only hosts the show ("eye") button — the stop "✕" was
+   dropped because the bottom dock's camera toggle already covers it. (Sozvon) */
+.self-controls-pill .video-hide {
+    display: inline-flex;
+    width: 1.5em;
+    height: 1.5em;
+    background: var(--hover-strong);
+    border-radius: 50%;
+    justify-content: center;
+    align-items: center;
+    color: var(--text);
+    font-size: 0.9em;
+    cursor: pointer;
+    user-select: none;
+    vertical-align: middle;
+}
+.self-controls-pill .video-hide:hover { opacity: .85; }
+
+/* ==========================================================================
+   Sozvon — let the video fill the tile (no reserved black strip)
+   Upstream reserves 20px under every .media for the old in-flow control bar.
+   Sozvon's controls are now an absolutely-positioned overlay, so that reserved
+   strip just paints the black tile background and crops the bottom of the
+   picture — it read as a dark name-bar at the bottom of grid tiles. Speaker
+   view already zeroes it; do the same for every tile, desktop and mobile
+   alike. The name label below stays readable via its text-shadow. (Sozvon)
+   ========================================================================== */
+.media { padding-bottom: 0; }
+
+/* ==========================================================================
+   Sozvon — combined people + chat panel
+   The left panel is one unit: brand header on top, the participant list and
+   the chat split the rest in half (participants above, chat below). A single
+   header button toggles the whole panel; the old separate chat column and its
+   drag-resizer are gone.
+   ========================================================================== */
+#left-sidebar {
+    display: flex;
+    flex-direction: column;
+}
+.users-header { flex: 0 0 auto; }
+
+/* The panel header lane carries the room title + E2EE indicator (moved out of
+   the top bar so the pinned toggle can't overlap them). It is already a flex
+   row via #left-sidebar .galene-header; drop the old float-clearfix pseudo
+   elements so they don't add phantom flex items, and let the title ellipsize. */
+.users-header::before,
+.users-header::after { content: none; display: none; }
+.users-header { overflow: hidden; }
+.users-header #title {
+    float: none;
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    line-height: 1.3;
+}
+
+/* Top-bar header: holds the (fixed) toggle button + the E2EE lock/SAS. Flex so
+   the indicator is vertically centred; on mobile the in-flow button and the
+   indicator sit side by side here too. */
+#header { display: flex; align-items: center; }
+
+/* Top half: participant list */
+#left-sidebar #users {
+    flex: 1 1 50%;
+    height: auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* Bottom half: chat */
+#left-sidebar #chat {
+    flex: 1 1 50%;
+    height: auto !important;      /* beat base #chat { height: 100% !important } */
+    width: 100%;
+    min-width: 0;
+    border: none;
+    display: flex;
+    overflow: hidden;
+    background: transparent;
+}
+#left-sidebar #chatbox {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}
+#left-sidebar #box {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+#left-sidebar .reply { flex: 0 0 auto; }
+
+/* Toggle icon: a person silhouette with a small chat bubble tucked into the
+   bottom-right corner. The bubble sits slightly clear of the silhouette, is
+   tinted with the accent and carries a halo in the bar colour, so the two
+   glyphs read as a person + chat rather than one merged blob. */
+.panel-toggle-icon { position: relative; display: inline-block; line-height: 1; }
+
+/* Composite person + chat glyph: the chat hint is what makes this button
+   readable as "people AND chat" rather than just a participant list.  Restyled
+   from the original, which held the badge apart from the person with four
+   stacked text-shadows — one knockout ring does the same job cleanly. */
+.panel-toggle-badge {
+    position: absolute;
+    right: -0.30em;
+    bottom: -0.14em;
+    top: auto;
+    font-size: 0.46em;
+    color: var(--text-2);
+    -webkit-text-stroke: 0.14em var(--bg);
+    paint-order: stroke fill;
+}
+
+/* Unobtrusive alert dot: unread chat or a new lobby knock while the panel is
+   closed. Sits at the TOP-right (clear of the chat bubble) and glows softly. */
+.panel-toggle-dot {
+    display: none;
+    position: absolute;
+    right: -0.32em;
+    top: -0.2em;
+    bottom: auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: panel-dot-pulse 1.8s ease-in-out infinite;
+}
+#sidebarCollapse.panel-alert .panel-toggle-dot { display: block; }
+@keyframes panel-dot-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.45; }
+}
+
+/* Draggable divider between the participant list and the chat. */
+#panel-resizer {
+    flex: 0 0 auto;
+    height: 8px;
+    position: relative;
+    cursor: ns-resize;
+    background: transparent;
+}
+/* The line is a grab handle, not a boundary — the gap between the last
+   participant and the first message already separates the two halves.  So it
+   stays invisible until the pointer is over the strip (the ns-resize cursor
+   arrives at the same moment), and only then draws itself. */
+#panel-resizer::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 3px;
+    height: 1px;
+    background: transparent;
+    transition: background var(--t-fast) var(--ease);
+}
+#panel-resizer:hover::before,
+#panel-resizer:active::before {
+    background: var(--accent);
+    height: 2px;
+    top: 3px;
+}
+
+/* Desktop: the panel is a 320px column that pushes the video aside;
+   collapsing it (.active) gives the video the full width. */
+@media only screen and (min-width: 1025px) {
+    #left-sidebar {
+        min-width: 320px;
+        max-width: 320px;
+        /* sits above the E2EE lock (z:1041) so the visible panel physically
+           covers the lock at the top-left — without this the lock paints on
+           top of the room title that lives inside .users-header. */
+        z-index: 1050;
+    }
+    #left-sidebar.active { min-width: 0; max-width: 0; }
+    .full-width { width: calc(100vw - 320px); }
+    .full-width-active { width: 100vw; }   /* wins over .full-width when collapsed */
+
+    /* Pin the people+chat toggle. Opening the panel pushes the video column
+       320px to the right, which used to drag this button along with it, so
+       closing the panel meant chasing the button. Anchor it to the viewport
+       instead — like the settings button, it now stays in one place whether
+       the panel is open or shut. The high z-index keeps it clickable above
+       the open panel; the .users-header strip below aligns to the same band. */
+    #sidebarCollapse {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 3.5rem;
+        margin: 0;
+        padding: 0 18px;
+        display: flex;
+        align-items: center;
+        z-index: 1100;
+    }
+    /* the room title no longer needs to clear a pinned toggle (it is in the dock) */
+    .users-header { padding-left: 16px; }
+
+    /* (The E2EE lock/SAS now floats centred above the dock — see the dock
+       section — so it no longer needs to clear a top-bar toggle here.) */
+}
+
+/* Mobile: keep the people+chat toggle pinned like the desktop one.
+   The panel is an in-flow column that, when open, pushes the rest of the top bar
+   320px to the right (off-screen, clipped by body{overflow-x:hidden}) — that is
+   what clears the bar off the panel so the panel's own "Main" header reads.  The
+   bug was that the toggle, being in that bar, slid away with it.  Pin the toggle
+   so it stays at the top-left and, because the bar's stacking context (z 1039)
+   sits above the in-flow panel (z 1002), it stays on top and tappable — the SAME
+   button opens AND closes the panel, just like on desktop.  The pushed-away lock
+   and call buttons are faded out so nothing peeks beside the panel. (Sozvon) */
+@media only screen and (max-width: 1024px) {
+    #left-sidebar.active {
+        min-width: 320px;
+        max-width: 320px;
+        /* overlays the video, sits above the E2EE lock (z:1041) so the panel
+           physically covers the lock when open, no hide/show needed. */
+        z-index: 1050;
+    }
+
+    /* Pin the toggle like the desktop one: it stays put and, sitting in the bar
+       that paints above the panel, stays tappable over the open panel. */
+    #sidebarCollapse {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 3.5rem;
+        margin: 0;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        z-index: 1103;
+        transition: opacity var(--t-base) var(--ease),
+                    transform var(--t-base) var(--ease);
+    }
+    /* toggle + lock moved to / above the dock; no top-bar padding needed */
+    #header { padding-left: 0; }
+    #left-sidebar .users-header { padding-left: 16px; }
+    /* Immersive: the toggle sits inside .nav-menu, so it rides the dock's own
+       hide (transform: translateY(160%) + opacity 0 on .nav-menu) and needs
+       no rule of its own. */
+
+    /* When the panel is open we are in "chat mode": fade out the lock and the
+       call buttons that the panel pushes aside, so nothing peeks in the strip
+       beside it.  The opacity transition matches the panel's slide, so they fade
+       back in instead of flashing on close (the old phantom-flash failure). */
+    .topnav .nav-menu,
+    #header > #e2ee-indicator {
+        transition: opacity var(--t-base) var(--ease);
+    }
+    /* Chat mode: the lock and the dock both go while the panel is open.
+       The complaint this started from — "the call's buttons are gone until you
+       find the ✕" — is answered by making the panel easy to leave (swipe it
+       away, or tap the stage beside it), not by keeping the dock on screen
+       underneath it.  Tried that: the dock is a floating pill sized to the
+       viewport, so over a 320px panel it lands across the panel's bottom edge
+       and squeezes the composer against it.  Two pieces of chrome for two
+       different things, stacked on top of each other, and it read as a
+       mistake.  One thing at a time is the better answer. */
+    #left-sidebar.active ~ .container .nav-menu,
+    #left-sidebar.active ~ .container #e2ee-indicator {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    /* Horizontal gestures have to be left to script, or the swipe-to-close
+       never sees them.  A touch on a panel is a candidate for panning in both
+       axes by default, so the browser claims the gesture the moment the finger
+       moves and fires pointercancel at us — which is exactly why the swipe
+       worked against synthetic pointer events (they bypass gesture
+       arbitration) and did nothing under a real finger.  pan-y keeps the
+       browser doing what it should, scrolling the chat log and the drawer
+       vertically, and hands the sideways movement over. (Sozvon) */
+    #left-sidebar,
+    #sidebarnav {
+        touch-action: pan-y;
+    }
+
+    /* Retire the legacy floating chat bubble / "show video" pill on mobile: the
+       combined panel is the chat now, and these were the "phantom" that flashed
+       at the top-right for the panel's 0.3s slide-out when it closed. */
+    .coln-right .collapse-video,
+    .coln-right .show-video {
+        display: none !important;
+    }
+}
+
+/* ==========================================================================
+   Sozvon — end-to-end encryption: lock + emoji SAS in the top bar
+
+   The 5 emoji are the Short Authentication String the two participants compare
+   out loud; the whole indicator lives next to the room title and is hidden
+   before joining (the top bar carries the .pre-join hide).
+   ========================================================================== */
+.e2ee-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: 0.25rem;
+    padding: 0.05rem 0.55rem;
+    border-radius: var(--radius-pill);
+    font-size: var(--fs-md);
+    cursor: default;
+    vertical-align: middle;
+}
+/* Only show the pill background when the emoji SAS is present (established),
+   so a lone red lock doesn't sit in an empty grey oval. */
+.e2ee-indicator.e2ee-on  {
+    color: var(--accent);
+    background: var(--hover);
+}
+.e2ee-indicator.e2ee-bad { color: var(--danger); }
+.e2ee-sas {
+    font-size: var(--fs-base);
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+@media only screen and (max-width: 480px) {
+    .e2ee-sas { font-size: var(--fs-md); }
+}
+
+/* Full-screen notice shown when the group requires end-to-end encryption but
+   the call cannot be encrypted; local media is blocked while it is visible.
+   Visibility is driven by the .invisible class (setVisibility); we show via
+   :not(.invisible) so the .invisible rule (display:none) always wins when set. */
+.e2ee-block-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    padding: 1.5rem;
+    background: var(--hover-strong);
+}
+.e2ee-block-overlay:not(.invisible) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.e2ee-block-card {
+    max-width: 30rem;
+    text-align: center;
+    padding: 1.6rem 1.8rem;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--danger);
+    color: var(--text);
+    box-shadow: var(--shadow-3);
+}
+.e2ee-block-card i {
+    font-size: var(--fs-2xl);
+    color: var(--danger);
+    margin-bottom: 0.6rem;
+}
+.e2ee-block-card p {
+    margin: 0.4rem 0 0;
+    line-height: 1.45;
+}
+
+/* Full-screen notice when the browser cannot do video calls (missing/broken
+   WebRTC, e.g. Xiaomi Mi Browser).  Same visibility trick as the E2EE overlay. */
+.browser-unsupported-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1001;
+    padding: 1.5rem;
+    background: var(--surface-2);
+}
+.browser-unsupported-overlay:not(.invisible) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.browser-unsupported-card {
+    max-width: 30rem;
+    text-align: center;
+    padding: 1.6rem 1.8rem;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    box-shadow: var(--shadow-3);
+}
+.browser-unsupported-card i {
+    font-size: var(--fs-2xl);
+    color: var(--warn);
+    margin-bottom: 0.6rem;
+}
+.browser-unsupported-card p { margin: 0.6rem 0 0; line-height: 1.45; }
+.browser-unsupported-url {
+    font-family: monospace;
+    font-size: var(--fs-md);
+    word-break: break-all;
+    opacity: 0.85;
+    -webkit-user-select: all;
+    user-select: all;
+}
+
+/* Sozvon — "reconnecting" banner: a non-modal status pill pinned to the top while
+   a dropped connection is being re-established (see scheduleReconnect).  Same
+   visibility trick as the overlays: the base rule has no `display`, so the
+   global `.invisible { display:none }` always wins when the class is set. */
+.reconnect-banner {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1002;
+    margin-top: 0.6rem;
+    padding: 0.5rem 1rem;
+    align-items: center;
+    gap: 0.6rem;
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    box-shadow: var(--shadow-2);
+    font-size: var(--fs-md);
+}
+.reconnect-banner:not(.invisible) { display: flex; }
+.reconnect-spinner {
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid var(--divider);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: reconnect-spin 0.8s linear infinite;
+}
+@keyframes reconnect-spin { to { transform: rotate(360deg); } }
+
+/* ==========================================================================
+   Sozvon — pre-join device check (login card)
+
+   Two square icon toggles (camera / microphone), off by default. Turning one
+   on reveals a live camera preview and/or a microphone level meter (a canvas
+   drawn by precheckDrawMeter in galene.js), plus a device picker for each,
+   so people can check their hardware before joining.
+   ========================================================================== */
+.precheck {
+    margin: 1.5rem 0 0;
+}
+.precheck-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.precheck-hint {
+    color: var(--text-2);
+    font-size: var(--fs-md);
+}
+.precheck-toggles {
+    display: flex;
+    gap: 10px;
+}
+.precheck-toggle {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius);
+    border: 1px solid var(--divider);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-lg);
+    cursor: pointer;
+    transition: color var(--t-fast) var(--ease),
+                border-color var(--t-fast) var(--ease),
+                background var(--t-fast) var(--ease);
+}
+.precheck-toggle:hover {
+    border-color: var(--accent);
+    color: var(--text);
+}
+.precheck-toggle.on {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.precheck-toggle:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+.precheck-preview {
+    margin-top: 14px;
+}
+/* The preview is a fixed 4:3 box (which is the ratio startCam asks the camera
+   for) rather than a video sized by whatever the camera hands back.  A stage
+   that does not change shape is what lets the rotate arrows work: a quarter
+   turn swaps the picture's own box inside a frame that stays put, instead of
+   the whole card jumping between portrait and landscape. (Sozvon) */
+.precheck-stage {
+    /* The ratio lives in two numbers because the quarter-turn rule below has
+       to divide by it; keep them here and nothing else needs editing to change
+       the shape of the preview. */
+    --precheck-w: 4;
+    --precheck-h: 3;
+    position: relative;
+    width: 100%;
+    /* The operator dashboard is 680px wide, and a device check does not need
+       to be half a metre of face.  A max-*width* leaves the ratio to derive
+       the height, which is what the quarter-turn rule depends on; a
+       max-height would flatten the box and quietly break it. */
+    max-width: 380px;
+    aspect-ratio: var(--precheck-w) / var(--precheck-h);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--surface-2);
+}
+.precheck-video {
+    display: block;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    /* `contain`, not `cover`: this is the one place whose whole job is to show
+       people what their camera is actually sending, so a frame that does not
+       match the stage is letterboxed rather than cropped — and a quarter turn
+       shows the turned picture whole, which is the only way the arrows can be
+       read at all. */
+    object-fit: contain;
+    /* Rotation first, mirror on top — the order the call uses (the canvas
+       filter turns the frame, then the self-view mirrors it), so the arrows
+       promise here what they deliver there.  --precheck-rot is written by
+       reflectRotation in galene.js. */
+    transform: translate(-50%, -50%) rotate(var(--precheck-rot, 0deg));
+}
+.precheck-stage.mirrored .precheck-video {
+    transform: translate(-50%, -50%) scaleX(-1)
+               rotate(var(--precheck-rot, 0deg));
+}
+/* A quarter turn: the picture's box is swapped so the turned image still
+   covers the stage.  Percentages here resolve against the stage, and the
+   stage's own height is (h/w) of its width — so the swap is expressible
+   without knowing a single pixel, in the same two numbers that set the
+   aspect ratio. */
+.precheck-stage.quarter .precheck-video {
+    width: calc(100% * var(--precheck-h) / var(--precheck-w));
+    height: calc(100% * var(--precheck-w) / var(--precheck-h));
+}
+/* Printed over the picture, so they take the on-video tokens (which do not
+   flip with the theme) rather than a surface colour. */
+.precheck-rotate {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    display: flex;
+    gap: 8px;
+}
+.precheck-rotate-button {
+    width: 38px;
+    height: 38px;
+    background: var(--on-video-scrim);
+    color: var(--on-video);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+}
+.precheck-rotate-button:hover {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+.precheck-meter {
+    display: block;
+    width: 100%;
+    max-width: 380px;   /* same cap as the stage, so the two line up */
+    height: 36px;
+    margin-top: 8px;
+}
+/* Uses the theme status tokens (common.css) rather than fixed hex, so these
+   notifications follow the Sozvon palette and any future light theme. (Sozvon) */
+.precheck-error {
+    margin: 8px 0 0;
+    color: var(--danger);
+    font-size: var(--fs-md);
+}
+/* Advisory hint (e.g. "we can't hear you") — amber warn token, not the red of
+   a hard error, so a "say something" nudge doesn't read as a failure. (Sozvon) */
+.precheck-error.soft {
+    color: var(--warn);
+}
+.precheck-devices {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+}
+.precheck-devices select {
+    width: 100%;
+    max-width: none;
+}
+/* class selectors above would otherwise tie with .invisible (declared much
+   earlier), so restate the hiding at higher specificity */
+.precheck .invisible,
+.apk-link.invisible {
+    display: none;
+}
+
+/* "Download the Android app" link under the login form; only shown when the
+   server actually serves an APK (probeAPK in galene.js). */
+.apk-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 14px;
+    padding: 9px 12px;
+    border: 1px dashed var(--divider);
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    font-size: var(--fs-md);
+    text-decoration: none;
+    transition: color var(--t-fast) var(--ease),
+                border-color var(--t-fast) var(--ease);
+}
+.apk-link:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    text-decoration: none;
+}
+
+/* --- Operator room (dashboard) -------------------------------------------
+   Shown on an operator-room hub instead of the call UI (body.pre-join is set,
+   so the top bar / sidebar / dock stay hidden).  A wider control surface than
+   the join screen, on the same background.
+
+   The dashboard had nine frames drawn on it: a card round the page, a rule
+   under each of two sections, a box round every link, a pill round every
+   status, an outline round the URL and one round each of four buttons.  Most
+   of them were drawing boundaries that the content already had — the card had
+   nothing behind it to be told apart from, the rules said what the section
+   headings say, the outlines said "button" about words that are plainly
+   buttons.  One frame survives, and it is the one doing real work: a link is a
+   discrete object in a list, so it keeps a fill (and only a fill).  Everything
+   else is grouped by space, and status keeps its shape only when the status is
+   worth noticing.  Same argument, in order, as the toasts, the drawer and the
+   join screen. */
+.operator-container {
+    height: calc(var(--vh, 1vh) * 100);
+    position: relative;
+    display: flex;
+    justify-content: center;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--bg);
+}
+/* This rule sets display, so it would beat the global `.invisible { display:none }`
+   (defined earlier) by source order -- re-assert it, or the dashboard renders on
+   top of the call in a child room, and on the login screen. */
+.operator-container.invisible { display: none; }
+.operator-box {
+    width: min(680px, 92vw);
+    align-self: flex-start;
+    /* Horizontal padding is the phone's gutter, not a card's inset — same as
+       the join screen, and the vertical margin gives way the same way. */
+    padding: 0 1.25rem;
+    margin: clamp(1.5rem, 8vh, 4.5rem) auto;
+    background: transparent;
+    border: none;
+}
+.operator-header { margin-bottom: 2.5rem; }
+.operator-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1em;
+}
+.operator-title {
+    margin: 0 0 0.25em;
+    font-size: var(--fs-xl);
+    color: var(--text);
+}
+.operator-subtitle {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-md);
+}
+/* A way out, not an action on this page — so it is drawn as the drawer's links
+   are, and the outline that made it compete with the room title is gone. */
+.operator-logout {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45em;
+    flex: 0 0 auto;
+    padding: 0.4em 0;
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    font: inherit;
+    font-size: var(--fs-md);
+    cursor: pointer;
+    transition: color var(--t-fast) var(--ease);
+}
+.operator-logout:hover { color: var(--text); }
+
+/* The page is three sections — the device check (applied when the operator
+   clicks "Join" on a link below, see operatorJoin in galene.js), the create
+   form, and the list.  Each used to end in a rule; each now begins with the
+   drawer's caps micro-header and is separated by the space around it, which is
+   the same trade the drawer made and for the same reason: on a page of three
+   things, two full-width lines are the longest marks on it. */
+.operator-section { margin-bottom: 2.75rem; }
+.operator-section-last { margin-bottom: 0; }
+.operator-section-title {
+    margin: 0 0 1rem;
+    font-size: var(--fs-sm);
+    line-height: 1.4;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+.operator-section .precheck { margin-top: 0; }
+/* The heading above already says "Camera & microphone"; the widget's own
+   "Check your devices:" caption said it again a line below, and being a
+   space-between row it also flung the two toggles to the far side of a 640px
+   column.  In this one context the caption goes and the toggles start at the
+   column's left edge, like everything else on the page.  (The join screen
+   keeps it: there the widget has no heading over it.) */
+.operator-section .precheck-hint { display: none; }
+.operator-section .precheck-row { justify-content: flex-start; }
+
+.operator-create {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.9em;
+}
+/* The label / client-name / expiry fields collapse behind a toggle so a quick
+   perpetual, auto-named link is a single click. */
+.operator-advanced-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.2em 0;
+    background: transparent;
+    border: none;
+    font: inherit;
+    font-size: var(--fs-md);
+    color: var(--text-2);
+    cursor: pointer;
+}
+.operator-advanced-toggle:hover { color: var(--text); }
+.operator-caret {
+    width: 0;
+    height: 0;
+    border-left: 5px solid currentColor;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform 0.15s ease;
+}
+.operator-advanced-toggle[aria-expanded="true"] .operator-caret {
+    transform: rotate(90deg);
+}
+.operator-advanced {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75em;
+    align-items: flex-end;
+    align-self: stretch;
+}
+/* This rule sets display, so re-assert it against the global
+   `.invisible { display:none }` (declared much earlier) which would otherwise
+   lose on source order and leave the fields showing. */
+.operator-advanced.invisible { display: none; }
+.operator-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+    flex: 1 1 12em;
+}
+.operator-field-expiry { flex: 0 1 9em; }
+.operator-field label {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+}
+/* One size for every button on the page, a step up from the .btn default so
+   they read as controls rather than as links with boxes round them. */
+.operator-create .btn,
+.operator-link .btn {
+    flex: 0 0 auto;
+    padding: 9px 16px;
+    font-size: var(--fs-md);
+    border-radius: var(--radius-sm);
+}
+
+.operator-links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+}
+/* Left-aligned like everything else in the column; centred text in a
+   left-aligned page reads as a different page. */
+.operator-empty {
+    color: var(--text-3);
+    margin: 0;
+}
+
+/* The one frame kept, and it is a fill rather than an outline: a link is a
+   discrete object in a list and has to be told from its neighbours, which a
+   surface does on its own — the border around it was a second boundary drawn
+   over the first.  Same treatment as a toast and a video tile. */
+.operator-link {
+    padding: 1.1em 1.2em;
+    background: var(--surface);
+    border: none;
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    gap: 0.7em;
+}
+.operator-link-expired { opacity: 0.55; }
+.operator-link-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75em;
+}
+/* Name and expiry share the first line: both say what the link is, and given
+   680px of row there is no reason for the expiry to claim one of its own. */
+.operator-link-id {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.2em 0.75em;
+    min-width: 0;
+}
+.operator-link-label {
+    font-weight: 600;
+    color: var(--text);
+}
+/* Status wears a shape only when the status is worth noticing.  "Idle" is what
+   a room is almost always, and a pill drawn round it put a frame on every row
+   to report the absence of news — the same argument that took the grey pill
+   out from behind the E2EE lock.  Someone knocking, or someone in the call, is
+   news: those keep the pill and the one colour the palette spends on state. */
+.operator-badge {
+    font-size: var(--fs-sm);
+    white-space: nowrap;
+}
+.operator-badge.knocking,
+.operator-badge.incall {
+    padding: 0.15em 0.7em;
+    border-radius: var(--radius-pill);
+    border: 1px solid transparent;
+}
+.operator-badge.empty {
+    color: var(--text-3);
+}
+.operator-badge.knocking {
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.operator-badge.incall {
+    color: var(--ok);
+    border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+    background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.operator-link-url {
+    display: flex;
+    gap: 0.5em;
+}
+/* Read-only: a value you copy, not a field you fill.  Without its outline it
+   has to hold itself, so it takes the step the join screen's fields take —
+   --surface-2 sits four percent from the row it is in, which an outline was
+   hiding. */
+.operator-url-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.5em 0.7em;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    background: var(--surface-3);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+}
+.operator-link-meta {
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+}
+.operator-link-actions {
+    display: flex;
+    gap: 0.5em;
+}
+/* Three buttons to a row is already a lot, so only the one you came for is
+   drawn as a button.  Copy and Delete lose their outlines and let hover do the
+   work — the same flattening the dock's buttons got, and for the same reason:
+   an outline round a word that is plainly a button says nothing twice. */
+.operator-copy, .operator-delete {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-2);
+}
+.operator-copy:hover {
+    color: var(--accent);
+    background: var(--hover);
+}
+.operator-delete:hover {
+    color: var(--danger);
+    background: var(--hover);
+}
+
+@media (max-width: 640px) {
+    .operator-box { margin: 1.5rem auto; }
+    .operator-field, .operator-field-expiry { flex: 1 1 100%; }
+    .operator-create .btn { width: 100%; }
+}
+
+/* --- Empty stage ----------------------------------------------------------
+ * Shown while nobody is publishing.  #video-container is hidden whenever there
+ * are no tiles, so a call where everyone has their camera off used to be an
+ * unexplained black rectangle.  Toggled by reflectStageEmpty() in galene.js.
+ *
+ * The display lives on :not(.invisible) on purpose: .invisible is declared
+ * earlier in this file, so a bare `.stage-empty { display: flex }` here would
+ * win the cascade and the placeholder could never be hidden.
+ */
+.stage-empty {
+    position: absolute;
+    inset: 0;
+    /* Opaque and above the grid: an audio-only publication still leaves a
+       (pictureless) tile on the stage, and #peers carries z-index: 1000, so a
+       background alone was painted under it.  Stays below the dock (1040). */
+    background: var(--bg);
+    z-index: 1010;
+    padding: 10px;
+    pointer-events: none;
+}
+
+.stage-empty:not(.invisible) {
+    display: block;
+}
+
+/* Before joining, the login card owns this area. */
+body.pre-join .stage-empty {
+    display: none;
+}
+
+
+
+
+/* --- Left panel proportions -----------------------------------------------
+ * #left-sidebar is a flex column and panelResizer() drives it by setting
+ * `flex` inline, but #users kept `height: calc(100% - 84px)` from upstream.
+ * That sized the participant list by the panel rather than by its contents, so
+ * a call with one participant showed one row and then several hundred pixels
+ * of nothing before the chat box at the bottom.
+ *
+ * Size the list by its contents instead, capped so a crowded room cannot push
+ * the chat off the panel, and let the chat take whatever is left.  Selectors
+ * are scoped to #left-sidebar to outrank the upstream rules, one of which is
+ * `height: 100% !important`.
+ */
+#left-sidebar #users {
+    flex: 0 1 auto;
+    height: auto;
+    min-height: 0;
+    max-height: 45%;
+    overflow-y: auto;
+}
+
+#left-sidebar #chat {
+    flex: 1 1 0;
+    height: auto !important;
+    min-height: 0;
+}
+
+/* --- Motion ---------------------------------------------------------------
+ * The motion tokens were defined but used in barely thirty places across three
+ * thousand lines, so most state changes snapped.  One rule for the interactive
+ * surfaces, naming only the properties that actually change on hover, focus or
+ * activation — never `all`, which drags layout into the animation.
+ */
+.nav-button,
+.nav-link,
+.btn,
+.select,
+.form-control,
+.form-reply,
+.pref-toggle button,
+.panel-close,
+.sidenav a,
+.signature a,
+#users > div {
+    transition: background-color var(--t-fast) var(--ease),
+                border-color var(--t-fast) var(--ease),
+                color var(--t-fast) var(--ease);
+}
+
+/* The placeholder fades in when the last camera stops rather than popping. */
+.stage-empty:not(.invisible) {
+    animation: stage-empty-in var(--t-base) var(--ease);
+}
+
+@keyframes stage-empty-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* Respect a stated preference for less movement. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* --- Settings drawer ------------------------------------------------------
+ * The drawer used to be opened by writing an inline width from JS, which meant
+ * only JS knew how wide it was.  The width now lives here, keyed off
+ * body.drawer-open, so the same value can offset the call area.
+ *
+ * On desktop the drawer pushes the call aside the way the people/chat panel
+ * does, instead of covering it: covering hides the very video you are adjusting
+ * the camera for.  Below 1025px — the same breakpoint isMobileLayout() uses —
+ * there is no room to push, so it stays an overlay.
+ */
+body.drawer-open .sidenav {
+    width: var(--drawer-w);
+}
+
+/*
+ * Padding on the outer row cannot do this: #mainrow carries .full-width, which
+ * is sized `calc(100vw - 320px)`.  100vw is the viewport, so it ignores any
+ * padding on an ancestor — the call area kept its full width and the stage
+ * stayed centred underneath the open drawer.  Feed the offset into that same
+ * calculation instead.
+ */
+@media only screen and (min-width: 1025px) {
+    body.drawer-open {
+        --drawer-offset: var(--drawer-w);
+    }
+
+    .full-width {
+        width: calc(100vw - 320px - var(--drawer-offset));
+        transition: width var(--t-base) var(--ease);
+    }
+
+    /* Left panel collapsed: the call area spans everything but the drawer. */
+    .full-width-active {
+        width: calc(100vw - var(--drawer-offset));
+    }
+}
+
+/* --- Dock buttons ---------------------------------------------------------
+ * The dock is already a translucent blurred pill, so filling each button
+ * inside it with another surface stacked two levels of chrome and made the row
+ * read as a cluster of grey discs rather than a set of controls.  Flatten them
+ * and let hover do the work — the same treatment the leave button already got.
+ * On/off state is carried by colour (.nav-cam-on and friends), not by these
+ * backgrounds, so nothing else has to change.
+ */
+.nav-menu .nav-button {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-2);
+}
+
+.nav-menu .nav-button:hover {
+    background: var(--hover-strong);
+    color: var(--text);
+}
+
+/* #sidebarCollapse is not a .nav-button, so flattening the dock left it as the
+   one filled disc in a row of flat controls — which is what actually looked
+   out of place about it.  Give it the same treatment as its neighbours. */
+.nav-menu #sidebarCollapse {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-2);
+}
+
+.nav-menu #sidebarCollapse:hover {
+    background: var(--hover-strong);
+    color: var(--text);
+}
+
+/* --- People on the empty stage --------------------------------------------
+ * Drawn by renderStagePeople().  These are tiles, not avatars: the same
+ * square-ish grid, the same surface, radius and bottom label as a real video
+ * tile, so a call where nobody has a camera on looks like the same interface
+ * with the pictures missing rather than like a different screen.
+ *
+ * Gated on the "display audio-only users" setting, which governs the real
+ * tiles in showHideMedia() and now governs these the same way.
+ */
+.stage-people {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    /* Rows take the tiles' height and the whole block is centred, rather than
+       the tiles stretching to fill the stage: a real video tile is bound by
+       its aspect ratio and letterboxes inside its cell, and a placeholder that
+       filled the screen looked nothing like one. */
+    /* The cap lives here, not in JS: renderStagePeople() builds the columns
+       from it so the tiles and the tracks that hold them cannot disagree. */
+    --stage-tile-max: 525px;
+    grid-auto-rows: auto;
+    align-content: center;
+    /* Centre the whole block of tracks.  With 1fr columns each tile was
+       centred inside its own half of the stage, which pushed two participants
+       out to opposite edges as if they were in different calls. */
+    justify-content: center;
+    justify-items: center;
+    align-items: center;
+    row-gap: 5px;
+    column-gap: 10px;
+    /* A crowded room with no cameras would otherwise push rows out over the
+       dock; the placeholder is not a scrollable surface (it is click-through),
+       so it clips instead. */
+    overflow: hidden;
+}
+
+/* Mirrors .peer: same fill, same corner, and the 2px transparent border that
+   reserves room for the active-speaker ring so nothing shifts. */
+.stage-person {
+    position: relative;
+    /* The shape a camera gives, capped so a call with one or two people does
+       not blow the tiles up to fill the window. */
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    min-width: 0;
+    min-height: 0;
+    /* renderStagePeople() works out how much height a row can have and sets
+       --stage-tile-h; the width follows it so the tile keeps its shape
+       instead of squashing.  The placeholder does not scroll, so without this
+       a crowded room simply lost its bottom rows off the screen. */
+    max-height: var(--stage-tile-h, none);
+    max-width: calc(var(--stage-tile-h, 100vw) * 16 / 9);
+    border: 2px solid transparent;
+    border-radius: var(--radius-lg);
+    background: var(--hover);
+    overflow: hidden;
+}
+
+/* The same tile as a cell of the real grid, for a participant who publishes
+   nothing and so has no tile of their own.  It inherits .peer's fill and
+   corner; all it needs is the shape a picture would have given it, since
+   there is no <video> inside to size the cell.  Not shown in the 1-on-1
+   speaker view, where the remote's picture is absolutely positioned over the
+   whole stage and a grid cell behind it would only be a cell nobody can see.
+   (Sozvon) */
+.peer-person {
+    position: relative;
+    /* The width comes from the grid column and the ratio derives the height
+       from it — the same pair .stage-person uses.  It has to be this way
+       round: there is no <video> inside to give the box a size, so anything
+       that stops the cell from stretching (justify-self, align-self) leaves
+       both dimensions auto and the tile collapses to the size of its own
+       (absolutely positioned, and therefore empty) label. */
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    min-width: 0;
+    min-height: 0;
+}
+#peers.speaker .peer-person { display: none; }
+
+/* A real tile with no picture in it — someone publishing a microphone only —
+   carries the same label as a placeholder cell, so hide upstream's plain one
+   underneath: otherwise the name is drawn twice, or, for someone who joined
+   without a name, drawn once as nothing. */
+.peer-nopicture .label { display: none; }
+
+/* Mirrors .label: the name sits along the bottom of the tile, where it sits
+   on a tile that has a picture. */
+.stage-person-label {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 6px 10px;
+    line-height: 24px;
+    color: var(--text);
+    text-shadow: var(--label-shadow);
+}
+
+.stage-person-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stage-person-state {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78em;
+    color: var(--text-3);
+}
+
+/* --- Microphone state in the people list ----------------------------------
+ * Not shown here at all any more.  The state belongs on the tile, printed
+ * next to the person's face, which is where you look when you wonder whether
+ * someone can hear you; repeating it at the end of every row said the same
+ * thing twice and put an icon on every line of an otherwise quiet list.  The
+ * raised hand (drawn by ::before) stays — that one is a request, not a state,
+ * and it is the only thing in the list that asks the reader to do something.
+ * Knock entries keep their own layout and are untouched.
+ */
+#users .user-p:not(.knock-p)::after {
+    content: none;
+}
+
+/* --- Chat send button -----------------------------------------------------
+ * Was an <input type="submit"> whose label was the character ➤ — the only
+ * text-as-icon left in the interface, and unstyleable as a glyph.
+ */
+/* Drawn as a glyph, not as a box: it is one icon next to a filled field, and
+   the outlined square around it was the heaviest line in the panel.  It fills
+   on hover instead, the same way .panel-close does. */
+#inputbutton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    cursor: pointer;
+}
+
+#inputbutton:hover {
+    background: var(--hover-strong);
+    color: var(--text);
+}
+
+/* The inner wrapper just carries the grid to full height. */
+.stage-empty-inner {
+    height: 100%;
+}
+
+/* "You are the only one here", shown in place of the tiles when nobody else is
+   in the room.  Laid over the whole placeholder rather than after the tile
+   grid, which claims the full height even with nothing in it — a note in flow
+   after it would sit below the bottom of the screen. */
+.stage-note:not(.invisible) {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0 24px;
+    text-align: center;
+    color: var(--text-2);
+    font-size: var(--fs-lg);
+}
+
+/* While the empty-stage placeholder is up it covers the grid opaquely but
+   stays click-through, so the tile beneath must stop reacting to a pointer the
+   user cannot see it responding to.  Set by reflectStageEmpty(). */
+body.stage-idle #video-container {
+    pointer-events: none;
+}
+
+/* The stage is idle *and* the self tile is floating over it — the self-only
+   view, or any speaker view whose remotes have no camera on.  The placeholder
+   is covering for the pictureless tiles inside #peers, but the thumbnail is
+   not one of them: it has a picture, and it is the one thing on the stage the
+   pointer must still reach (drag, and its own eye).  So the call area is
+   lifted above the placeholder and everything in it hidden by visibility,
+   which the thumbnail alone turns back on — visibility, not display, so
+   nothing about the layout moves.
+
+   The lift has to be on #video-container, not on #peers, and that is the
+   whole point of the body class: below 1025px #video-container is
+   `position: fixed`, and *Firefox establishes a stacking context for a fixed
+   element* where Chromium does not.  With the lift on #peers, its z-index was
+   trapped inside that context and the placeholder — a sibling of the
+   container, at 1010 — painted over the thumbnail.  Firefox only, narrow
+   windows only, and only with somebody else in the call whose camera is off:
+   the thumbnail simply vanished.  Lifting the container itself is the same
+   intent expressed one box further out, where no engine can bury it.
+   (body.thumb-over-idle is set by reflectStageEmpty(); 1020 stays below the
+   dock at 1040.) */
+body.thumb-over-idle #video-container {
+    z-index: 1020;
+    /* ...and transparent, or the lift buries what it was lifted over.  The
+       container is painted --bg to give the stage its field; raised above the
+       placeholder it becomes an opaque sheet across it, and the tiles the
+       placeholder had already drawn — one per person whose camera is off —
+       were rendered and then covered.  In this state the container has exactly
+       one thing left to show, the floating thumbnail, and a picture needs no
+       ground under it.  (Reported 2026-08-16: "the other participant's tile is
+       not displayed in thumbnail mode, and it looks as though nobody is in the
+       call".) */
+    background: transparent;
+}
+body.thumb-over-idle #peers {
+    visibility: hidden;
+    pointer-events: none;
+}
+body.thumb-over-idle #peers .peer-self {
+    visibility: visible;
+    pointer-events: auto;
+}
+
+/* --- Advanced settings disclosure -----------------------------------------
+ * The drawer had sixteen controls in one flat list, of which four — camera,
+ * microphone, speaker, orientation — account for nearly every visit.  The rest
+ * are set once and forgotten, so they fold away behind a native <details>:
+ * no script, and keyboard and screen-reader behaviour come for free.
+ *
+ * Styled to match the section headers, so a closed disclosure reads as one
+ * more quiet heading rather than as a control shouting for attention.
+ */
+/* No rule above it either: the disclosure is the last group in the drawer and
+   the space over it is what sets it apart. */
+#settings-advanced {
+    margin-top: 12px;
+}
+
+#settings-advanced > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* Matches the space a legend claims above itself: the summary is the same
+       kind of micro-header, and it is now separated by that space alone. */
+    padding: var(--group-gap) 0 10px;
+    list-style: none;
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    line-height: 1.4;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    -webkit-user-select: none;
+    user-select: none;
+    transition: color var(--t-fast) var(--ease);
+}
+
+/* Safari draws its own triangle unless this is turned off. */
+#settings-advanced > summary::-webkit-details-marker {
+    display: none;
+}
+
+#settings-advanced > summary::before {
+    content: "\f054";
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    font-size: 0.75em;
+    transition: transform var(--t-fast) var(--ease);
+}
+
+#settings-advanced[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+#settings-advanced > summary:hover {
+    color: var(--text-2);
+}
+
+#settings-advanced > summary:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--focus-ring);
+    border-radius: var(--radius-sm);
+}
+
+/* The disclosure replaces the section header, so the fieldset inside must not
+   draw a second rule above its first control. */
+#settings-advanced fieldset {
+    margin: 0;
+}
+
+/* Nor above the first group's legend: the summary it sits directly under is
+   already the separator, and the legend's own rule landed flush against it. */
+/* Directly under the summary, which is separation enough. */
+#settings-advanced > fieldset:first-of-type > legend {
+    padding-top: 6px;
+}
+
+/* Appearance and language are their own group, and the space above the pair
+   says so — the rule that used to say it was the last horizontal line in a
+   panel that had one every few rows.  Nothing is closer together than it was;
+   the groups are simply further apart than the rows inside them, which is the
+   whole of what a divider was doing.  Inside the pair, and for the rotate row
+   sitting among the device pickers, it is the ordinary row step. */
+.pref-row {
+    margin-top: var(--group-gap);
+}
+.pref-row + .pref-row,
+#settings-rotate {
+    margin-top: var(--row-gap);
+}

@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest something Sozvon should be able to do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the feature would suit [Galène](https://github.com/jech/galene) just
+        as well, please consider proposing it upstream — Sozvon aims to carry as
+        little fork as it can.
+
+        [FORK-CHANGES.md](../blob/main/FORK-CHANGES.md) has a "Planned" section;
+        it is worth a look in case this is already on it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve
+      description: |
+        Describe the situation you are actually in, not the solution you have
+        in mind. It is the most useful part of the request.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried or considered instead
+      description: Including whether an existing option nearly does it.

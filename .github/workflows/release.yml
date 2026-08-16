@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Lets a release be rehearsed without tagging: it builds and uploads the
+  # artefacts to the run, but creates no GitHub release.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to stamp into the dry-run build'
+        required: false
+        default: 'v0.0.0-dryrun'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Deliberately the current toolchain rather than go-version-file: the
+      # go directive states the *minimum* language version, and building a
+      # release with exactly that minimum ships whatever standard-library
+      # vulnerabilities have been fixed since.  These binaries run as a
+      # service on other people's servers; CI still checks the declared
+      # minimum compiles.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      # Never ship a release that does not pass what CI asks of every commit.
+      - name: Test
+        run: go test ./...
+        env:
+          CGO_ENABLED: "0"
+
+      - name: Determine version
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+              echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+              echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The server reads its web client from disk (static/ is not embedded),
+      # so an archive -- not a bare binary -- is the unit of distribution.
+      # contrib/install.sh relies on exactly this layout.
+      - name: Build archives
+        env:
+          CGO_ENABLED: "0"
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -eu
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+              GOOS=${target%/*}
+              GOARCH=${target#*/}
+              name="sozvon_${VERSION}_${GOOS}_${GOARCH}"
+              ext=""
+              [ "$GOOS" = "windows" ] && ext=".exe"
+
+              echo "==> $name"
+              rm -rf "build/$name"
+              mkdir -p "build/$name"
+
+              # -trimpath keeps absolute build paths out of the binary, so the
+              # same source at the same version builds to the same bytes.
+              env GOOS="$GOOS" GOARCH="$GOARCH" go build \
+                  -trimpath \
+                  -ldflags "-s -w -X main.version=${VERSION}" \
+                  -o "build/$name/sozvon${ext}" .
+              env GOOS="$GOOS" GOARCH="$GOARCH" go build \
+                  -trimpath \
+                  -ldflags "-s -w" \
+                  -o "build/$name/galenectl${ext}" ./galenectl
+
+              cp -r static "build/$name/static"
+              cp -r contrib "build/$name/contrib"
+
+              # LICENCE must be there -- shipping without it is a licence
+              # violation, so let the build fail loudly if it is missing.
+              cp LICENCE README.md "build/$name/"
+              # The rest are documentation: a release should not fail because
+              # one of them was renamed or has not landed on this branch yet.
+              for doc in FORK-CHANGES.md SECURITY.md CONTRIBUTING.md \
+                         galene-install.md galene.md galene-api.md; do
+                  if [ -f "$doc" ]; then
+                      cp "$doc" "build/$name/"
+                  else
+                      echo "note: $doc not present, omitted from $name" >&2
+                  fi
+              done
+
+              if [ "$GOOS" = "windows" ]; then
+                  (cd build && zip -qr "../dist/$name.zip" "$name")
+              else
+                  tar -czf "dist/$name.tar.gz" -C build "$name"
+              fi
+          done
+
+          (cd dist && sha256sum * > SHA256SUMS)
+          ls -l dist
+
+      - name: Upload artefacts to the workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: sozvon-release-${{ steps.v.outputs.version }}
+          path: dist/
+
+      - name: Write the release notes
+        if: github.ref_type == 'tag'
+        run: |
+          {
+            echo 'Verify a download before running it:'
+            echo
+            echo '```sh'
+            echo 'sha256sum -c SHA256SUMS --ignore-missing'
+            echo '```'
+            echo
+            echo 'Each archive contains the `sozvon` server, the `galenectl` admin'
+            echo 'tool, the `static/` web client the server serves at runtime,'
+            echo 'sample systemd and fail2ban configuration under `contrib/`, and'
+            echo 'the documentation.'
+            echo
+            echo 'To install on a fresh Debian or Ubuntu VPS, see `contrib/install.sh`.'
+          } > release-notes.md
+
+      # Uses the gh CLI rather than a third-party action: one less external
+      # dependency in the path that produces the binaries people will run.
+      # --generate-notes appends the autogenerated changelog below our text.
+      - name: Create the GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          gh release create "$VERSION" dist/* \
+              --title "Sozvon $VERSION" \
+              --notes-file release-notes.md \
+              --generate-notes

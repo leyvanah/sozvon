@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>SOZVON</title>
+  <style>
+    /*
+     * The app's own bar, along the top of the window.  It is the window's own
+     * page; everything else -- the launcher, the deploy wizard, a server's
+     * client -- is a view laid over the rest of the window, below it.  That
+     * is what keeps this bar out of the way of pages we do not own: nothing
+     * overlaps, so nothing has to be moved aside.
+     *
+     * The palette is the client's (static/common.css), restated here because
+     * this page is loaded from the filesystem.  Dark is the base; the light
+     * half arrives through prefers-color-scheme, which Electron drives from
+     * the appearance chosen anywhere in the app.
+     */
+    :root {
+      color-scheme: dark;
+      --bg: #000000;
+      --text: #FFFFFF;
+      --text-2: #BDBDBD;
+      --text-3: #8A8A8A;
+      --hover: rgba(255, 255, 255, 0.08);
+      --divider: rgba(255, 255, 255, 0.10);
+      --radius: 8px;
+      --font: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        color-scheme: light;
+        --bg: #FFFFFF;
+        --text: #000000;
+        --text-2: #444444;
+        --text-3: #767676;
+        --hover: rgba(0, 0, 0, 0.06);
+        --divider: rgba(0, 0, 0, 0.12);
+      }
+    }
+    * { box-sizing: border-box; }
+    /* This page is the whole window -- the content layer is laid over all of
+       it but the top strip -- so the bar has to size itself to that strip.  At
+       100% its row of buttons was centred in the window's full height, which
+       put it behind the content layer: an empty bar with nothing to click.
+       The height comes from the overlay the window controls are drawn in,
+       which main.js sets from the same constant, so the two cannot drift. */
+    /* No rule under the bar.  It shares the page's background, so a line
+       there draws a seam across a window that has none — the bar and the
+       content are one surface, and the buttons are enough to say where one
+       ends. */
+    html {
+      height: env(titlebar-area-height, 40px);
+      background: var(--bg);
+    }
+    body {
+      height: 100%;
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 8px 0 14px;
+      /* Everything that is not a control drags the window.  This is the
+         window's own page, so the region works the way it does in any
+         frameless window -- which is exactly what the invisible strip over a
+         server's client could not manage. */
+      -webkit-app-region: drag;
+      user-select: none;
+      /* Stop where the system's minimise/maximise/close begin. */
+      width: env(titlebar-area-width, 100%);
+    }
+    /* The lockup, as the client sets it: the mark, then the wordmark in a
+       light weight with wide tracking.  The mark is a CSS mask painted in
+       currentColor, so it follows the theme with no second cut. */
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-right: 10px;
+      flex: none;
+      color: var(--text-3);
+    }
+    .brand-mark {
+      width: 8px;
+      height: 21px;
+      flex: none;
+      background: currentColor;
+      -webkit-mask: url("mark.svg") center / contain no-repeat;
+      mask: url("mark.svg") center / contain no-repeat;
+    }
+    .name {
+      font-size: 11px;
+      font-weight: 300;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+    button {
+      -webkit-app-region: no-drag;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 28px;
+      padding: 0 10px;
+      background: transparent;
+      border: none;
+      border-radius: var(--radius);
+      color: var(--text-2);
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:hover { background: var(--hover); color: var(--text); }
+    button:disabled { opacity: 0.35; cursor: default; }
+    button:disabled:hover { background: transparent; color: var(--text-2); }
+    button svg { width: 15px; height: 15px; flex: none; }
+    .icon-only { padding: 0; width: 30px; justify-content: center; }
+    .spacer { flex: 1; -webkit-app-region: drag; align-self: stretch; }
+    /* Which icon shows is which theme is in force: a moon means dark. */
+    body.is-dark .icon-sun,
+    body:not(.is-dark) .icon-moon { display: none; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <span class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="name">SOZVON</span>
+  </span>
+
+  <button id="servers" type="button" title="К списку серверов">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M15 5l-7 7 7 7"/>
+    </svg>
+    <span>Серверы</span>
+  </button>
+
+  <button id="reload" class="icon-only" type="button" title="Обновить страницу">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20 11a8 8 0 1 0-.7 4.3"/>
+      <path d="M20 5.5V11h-5.5"/>
+    </svg>
+  </button>
+
+  <button id="hub" type="button" title="Операторская комната этого сервера">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 20v-1.5A4.5 4.5 0 0 1 8.5 14h7a4.5 4.5 0 0 1 4.5 4.5V20"/>
+      <circle cx="12" cy="7.5" r="3.5"/>
+    </svg>
+    <span>Операторская</span>
+  </button>
+
+  <div class="spacer"></div>
+
+  <button id="theme" class="icon-only" type="button">
+    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+    </svg>
+    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4.2"/>
+      <path d="M12 2.6v2.2M12 19.2v2.2M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M2.6 12h2.2M19.2 12h2.2M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6"/>
+    </svg>
+  </button>
+
+  <script src="titlebar.js"></script>
+</body>
+</html>

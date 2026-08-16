@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Server address screen (first run / "Change server" shortcut). -->
+    <ScrollView
+        android:id="@+id/entry"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="32dp">
+
+            <ImageView
+                android:layout_width="96dp"
+                android:layout_height="96dp"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_sozvon"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/app_name"
+                android:textColor="@color/sozvon_text"
+                android:textSize="30sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="@string/entry_subtitle"
+                android:textColor="@color/sozvon_text2"
+                android:textSize="14sp"/>
+
+            <EditText
+                android:id="@+id/server_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:autofillHints="url"
+                android:backgroundTint="@color/sozvon_accent"
+                android:hint="@string/server_url_hint"
+                android:imeOptions="actionGo"
+                android:inputType="textUri"
+                android:maxLines="1"
+                android:textColor="@color/sozvon_text"
+                android:textColorHint="@color/sozvon_text3"/>
+
+            <TextView
+                android:id="@+id/entry_error"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center"
+                android:textColor="@color/sozvon_error"
+                android:textSize="13sp"
+                android:visibility="gone"/>
+
+            <Button
+                android:id="@+id/connect"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:backgroundTint="@color/sozvon_accent"
+                android:text="@string/connect"
+                android:textColor="@color/sozvon_accent_contrast"/>
+
+            <!-- Servers this app has been to, most recent first.  Filled in
+                 by MainActivity.renderServers(); hidden while there are
+                 none, which is every first run. -->
+            <TextView
+                android:id="@+id/servers_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="@string/servers_title"
+                android:textAllCaps="true"
+                android:textColor="@color/sozvon_text3"
+                android:textSize="12sp"
+                android:visibility="gone"/>
+
+            <LinearLayout
+                android:id="@+id/servers"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"/>
+
+            <!-- Second way in: no server yet, install one on a VPS. -->
+            <TextView
+                android:id="@+id/deploy_cta"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:background="?attr/selectableItemBackground"
+                android:gravity="center"
+                android:padding="8dp"
+                android:text="@string/deploy_cta"
+                android:textColor="@color/sozvon_accent"
+                android:textSize="14sp"/>
+
+            <!-- Doubles the server screen as app settings: clears the saved
+                 web login (the remember-me token) for this device. -->
+            <TextView
+                android:id="@+id/reset_login"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="22dp"
+                android:background="?attr/selectableItemBackground"
+                android:padding="8dp"
+                android:text="@string/reset_login"
+                android:textColor="@color/sozvon_text2"
+                android:textSize="14sp"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <WebView
+        android:id="@+id/webview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"/>
+</FrameLayout>

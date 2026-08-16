@@ -1,0 +1,446 @@
+Galene 1.2 (unreleased)
+
+  * Implemented recursive and global tokens.
+  * Implemented "galenectl update-token".
+  * Removed backwards compatibility with Galene 0.8.
+
+21 June 2026: Galene 1.1
+
+  * Implemented "galenectl initial-setup".
+  * Implemented global tokens.
+  * Added options "-unrestricted-tokens" and "-auto-subgroups" to
+    galenectl group commands.
+  * Reworked the documentation.
+  * Fixed a bug that could cause multiple reads of the token file.
+  * Explicitly use blobs for file transfer, this should allow
+    transferring files larger than available memory.  This was the intent
+    all along, but the spec changed behind our back.
+  * Implemented support for RSA tokens.  Thanks to Jean Dupouy.
+  * Added support for include-inferiors in cryptographic tokens.  Thanks
+    to izeau.
+  * Fixed an issue with the chat window and the users' list disappearing
+    on mobile.  Thanks to Kirill smelkov.
+  * Fixed an issue that made it impossible to add a wildcard user to a
+    group with no users.  Thanks to Andrea Zucchelli.
+  * Added some more protection against denial of service attacks.  Thanks
+    to Vinayak Mishra.
+  * Fixed some race condtions in permission handling.  Thanks to Vinayak
+    Mishra.
+
+9 August 2025: Galene 1.0
+
+  * Upgrade to Pion v4.
+  * Add support for ETags and ICE restarts to the WHIP server.
+  * Implement UDP multiplexing.
+  * Implement hierarchical tokens.
+  * Add rotate filter; this is useful when using a mobile phone that is
+    upside down as a webcam.
+  * Implement /sharescreen, rename /stopshare to /unsharescreen.
+  * Implement JSON templates in galenectl.
+  * Make the TURN server less verbose.
+  * Replace the configuration field "publicServer" with "allowOrigin" and
+    "allowAdminOrigin".  This is an incompatible change.
+  * Fix a race condtion in the setdata request.  Thanks to git-lui.
+
+8 March 2025: Galene 0.96.3
+
+  * Change username validation to validate the effectively used username,
+    which is not necessarily the same as the one typed by the user.
+    Thanks to K900.
+  * Allow empty usernames again, they were mistakenly disallowed in 0.96.1.
+  * Reverted a change that caused the chat button to disappear on mobile.
+
+21 January 2025: Galene 0.96.2
+
+  * Fix a bug, introduced in 0.96.1, that could cause plaintext passwords
+    to be erroneously accepted even when incorrect.
+  * Implement background blur on Safari.
+  * Set the minimum TLS version to 1.2.
+  * Change the default hashing algorithm to bcrypt.  We use a cost of 8 in
+    order to keep hashing times under 25ms, even though 10 is currently
+    the recommended minimum.
+  * Limit the number of concurrent password hashing operations to the
+    number of CPUs.  This avoids using excessive memory when many users
+    log in at the same time.
+
+18 January 2025: Galene 0.96.1
+
+  * Avoid path traversal in disk writer.
+  * Forbid backslashes in group names on all systesm (we used to only
+    forbid them on Windows).  This is an incompatible change.
+  * Minor restrictions on usernames: forbid usernames starting with
+    a slash, forbid usernames containing the string "/.", and forbid
+    backslashes.  This is an incompatible change.
+  * Ensure cleartext passwords are veryfied in constant time.
+  * Remove "data:" from allowed image sources in CSP header.
+  * Disable the unmute button before presenting.  Thanks to Sacha Chua.
+  * Fix PCMA audio (don't ask).
+  * Update fontawesome to version 6.7.2.
+  * Delay requesting microphone permissions on Safari until after
+    successful login.
+
+1 January 2025: Galene 0.96
+
+  * Implemented asynchronous filters.
+  * Implemented background blur.
+  * More fixes to RTCP feedback signalling (thanks to Sean DuBois).
+
+4 December 2024: Galene 0.95
+
+  * Galene now requires Go 1.20.
+  * Added "galenectl" utility and removed "galene-password-generator".
+    This is an incompatible change.
+  * Fixed a number of bugs in the management protocol.
+  * Implemented captions for the galene-stt tool.
+  * Reworked the peer-to-peer file transfer protocol.  This is an
+    incompatible change.
+  * Added an id to every chat message, and made it possible to remove
+    a single chat message.
+  * Fixed a race condition that prevented operators from joining an
+    AutoKick group.
+  * Fixed a bug that could cause us to signal our ability to do RTCP
+    feedback incorrectly.
+  * Fixed a bug that would trigger JavaScript errors when a user attempted
+    to send a file to themself.
+
+15 July 2024: Galene 0.9.1
+
+  * Added an example client with minimal functionality under static/example.
+  * Changed the token login to force a user interaction in order to avoid
+    issues with autoplay.
+  * Fixed a race condition that would cause the client to run with
+    undefined settings if the initial connection was extremely fast.
+  * Implemented client-side timeouts (we already had one on the server side).
+  * Reduced the server-side timeout.
+  * Don't attempt to set the file descriptor limit, since recent versions
+    of the Go runtime do it automatically.
+
+26 May 2024: Galene 0.9
+
+  * Reworked the group definition format to be more modular.  There are
+    some incompatible changes: multiple users with the same username but
+    distinct passords are no longer supported, and the field
+    "allow-anonymous" is ignored.
+  * Reworked the definition of administrator passwords in config.json.
+    The old field "admin" is ignored, a new field "users" is required.
+    This is an incompatible change.
+  * Implemented an administrative API over HTTP.  Set the field
+    "writableGroups" in config.json to enable it.  The API is described in
+    the file "README.API", a JavaScript library is in management.js.
+  * Implemented a form to allow users to change their password.  If the
+    HTTP API is enabled, a link will appear in the side menu.
+  * Implemented a new command "/identify" (also availble in the users
+    menu) that discloses the IP address from which a user connected.
+  * Implemented a contextual menu that triggers on a double click on
+    a chat entry.
+  * Added a new command "/stopshare".
+  * Added a new permission "message" and new commands "shutup" and "unshutup".
+  * Changed stateless token validation to attempt all keys rather than
+    just the first matching one.
+
+26 May 2024: Galene 0.8.3
+
+  * Fixed a bug that could allow any user to clear the chat.
+
+14 April 2024: Galene 0.8.2
+
+  * Fixed possible crashes in the VP8 and AV1 parsers.
+  * Fixed keyframe detection for VP8 and VP9.
+
+9 March 2024: Galene 0.8.1
+
+  * Security fixes to WHIP ingress.
+  * Improved error messages for authentication failures.
+  * Added "expires" and "not-before" to group descriptions.
+  * Allow proxyURL to contain a path, for people who run Galene at
+    non-root URLs.  This requires manually modifying the files under
+    'static/' in order to point at the right locations.
+
+25 November 2023: Galene 0.8
+
+  * Added a new configuration option "publicServer".
+  * Implemented the WHIP protocol (draft-ietf-wish-whip).
+  * Disabled simulcast on Firefox by default.
+  * Removed support for protocol version 1 (used before version 0.7)
+  * Worked around clients that don't set the VP9 and H.264 profiles.
+  * Updated the activity detection code to work with newer browsers.
+    Thanks to Jackson Vieira.
+  * Constrained videos sent from a browser to use 4:3 aspect.
+  * Implemented BCrypt as an alternate password encryption algorithm.
+
+9 July 2023: Galene 0.7.2
+
+  * Improved workaround for Safari's autoplay-related mis-features.
+  * Fixed minor bugs related to stateful tokens.
+
+14 May 2023: Galene 0.7.1
+
+  * Fixed incorrect error-handling in token parsing, which could cause
+    Galene to crash after receiving a mis-formatted token.
+  * Implement a dialog for creating tokens.
+  * Tweaked peer-to-peer file transfer to more reliably return an error
+    message to the user.
+  * Fixed the workaround for non-standard simulcast in older Firefox
+    versions.
+
+10 April 2023: Galene 0.7.0
+
+  * Updated the protocol version to 2.  Dates are now represented in
+    ISO 8601 format, and there is a new "error" field in error messages
+    that contains a machine-readable identifier.
+  * Implemented stateful tokens ("invitations").
+  * Made more errors non-fatal, which makes it possible for the client
+    to recover in more situations.
+  * Reworked the progress indicator used during file transfer.
+  * Added Referrer-Policy and X-Content-Type-Options headers to HTTP
+    responses (Galene was already generating HTML links with the
+    "noreferrer" option).  Thanks to Alexandre Iooss.
+  * Fixed a bug in the handling of leave messages.  (The bundled client
+    never sends leave, it just disconnects, so the bug never triggerred.)
+  * Changed the way simulcast tracks are selected to not depend on the rid.
+
+11 January 2023: Galene 0.6.2
+
+  * Disable simulcast for screensharing; this didn't work well with many
+    browsers.
+  * Fix parsing of VP8 packets with degenerate headers.
+  * Fix computation of group URL when running in insecure mode.
+  * Add configuration option "proxyURL", which makes it easier to run
+    Galene behind a reverse proxy.
+  * Disable ulimit checking on BSD systems, where our code doesn't compile.
+
+7 October 2022: Galene 0.6.1
+
+  * Add a camera/microphone indicator in the users list, and hide
+    audio-only peers by default.  They can be reenabled in the side menu.
+  * Ensure that autolocked groups are locked on creation.  Thanks to
+    Michael Ströder.
+  * Don't send chat history multiple times.  Thanks to Rémy Nollet.
+  * Fix status display for remote (redirected) groups.
+
+10 September 2022: Galene 0.6
+
+  * Version the protocol: the handshake message now contains a version
+    number, and the server will warn if it is incorrect.  This will become
+    a hard error in the future.
+  * Rework the peer-to-peer file transfer protocol.  It now lives in
+    protocol.js, which makes it easy to use by third-party clients.
+  * Extend the authorization protocol to allow the authorization server to
+    request that the client fall back to password authorization.
+  * Make it possible to run the web server on a Unix domain socket.
+    Thanks to Martin Pépin.
+  * Check that a given group exists before redirecting from the landing
+    page.  This avoids an unsightly 404 error when the user makes a typo.
+  * Publish the group name end websocket endpoint in the group status.
+    This avoids hardwirint the server structure in the client.
+  * Fix a race condition that could cause chathistory messages to be sent
+    before the joined status.
+
+23 July 2022: Galene 0.5.5
+
+  * Fix a longstanding bug with time conversion that would occasionally
+    cause us to miscalculate rates and send incorrect sender reports.
+    Thanks to lamhai1401.
+  * Update srtp to a version that includes Adrian Cable's optimisations.
+    This should yield a 10% to 20% improvement for AES-CTR (but modern
+    browsers use GCM).
+  * Reword the Safari warning to be more frightening, since screensharing
+    on Safari tends to get stuck.
+
+5 May 2022: Galene 0.5.4
+
+  * Fix username check when a token is present.
+  * Improve the performance of AES in CTR mode.
+  * Tweak detection of keyframes with H.264.
+
+25 April 2022: Galene 0.5.3
+
+  * Remove a forgotten "replace" that prevented 0.5.2 from compiling
+    unless "pion/ice" was downloaded manually.
+  * Fix a race condition in the rate estimator.
+  * Update pion/ice to a version that handles aggressive nomination; this
+    avoids broken connection in some (fairly rare) cases.
+
+20 April 2022: Galene 0.5.2
+
+  * Implement audio-video sync in the diskwriter.
+  * Fix setting of the keyframe flag in audio samples in diskwriter.
+  * Don't use high-quality audio for screenshare by default, obey the
+    hqaudio preference in all cases.
+  * Maintain user information for oneself, not just other users.
+  * Call the onuser callback when a user deletes a stream.
+
+25 March 2022: Galene 0.5.1
+
+  * Enable simulcast on Firefox.
+  * Fix rate control on Firefox.
+  * Fix corruption after packet reordering when saving to disk.
+  * Fix the H.264 profile for compatibility with older iPhones.
+  * Display a warning when joining a locked group.
+  * Add a hook that allows the client to influence the ICE policy.
+  * Fix error handling in peer-to-peer file transfer.
+
+8 March 2022: Galene 0.5
+
+  * Implement third-party (token-based) authentication.
+  * Implement peer-to-peer file transfer (/sendfile).
+  * Add a contextual menu to the users list.
+  * Removed the "Broadcast file" entry in the side menu, it is now
+    available as a context menu entry and a chat command (/presentfile).
+  * Add side-menu options for high-quality audio (Opus at 128kbps) and
+    disabling audio preprocessing.
+  * Send audio in addition to video when sharing browser tabs.
+
+1 February 2022: Galene 0.4.4
+
+  * Update dependencies.  Pion WebRTC v3.1.19 fixes a bug that could cause
+    audio tracks to be discarded under some circumstances.
+  * Fix a bug that could cause user statuses (raisehand) to be discarded.
+  * Fix incorrect maxRate value in statistics display.
+
+27 January 2022: Galène 0.4.3
+
+  * Fix a locking issue that could cause a deadlock when massive numbers
+    of clients join at the same time.
+  * Add support for displaying raised hands (thanks to Sascha Silbe).
+  * Update the MIME type for AV1 to track recent browsers.
+  * Avoid overflow during rate estimation.
+  * More fixes to the disk writer.
+
+1 December 2021: Galène 0.4.2
+
+  * Update the samplebuilder to avoid a crash when a single frame is so
+    large that it overflows the buffer.
+  * Various other changes that improve the quality of disk recordings.
+
+4 November 2021: Galène 0.4.1
+
+  * Create a new file data/config.json with global configuration.
+  * Remove data/passwd and the -redirect option with entries in config.json;
+    these are incompatible changes.
+  * Change the group URL from /group/name to /group/name/, which allows
+    using relative links.  The old URL is redirected to the new one.
+  * Extend the protocol with the ability to consult the group status before
+    joining; this allows using the group's displayName before the user has
+    logged in, and will be required for new authorisation schemes.
+  * Allow scrolling of the login dialog, useful on small devices.
+  * Fixed a typo that prevented the group name from being displayed.
+  * Made failed videos more visible.
+  * No longer attempt to save passwords in browser JavaScript, it's
+    insecure and not very useful.
+
+5 September 2021: Galène 0.4
+
+  * Implemented simulcast.
+  * Implemented scalable video coding (SVC) for VP8 and VP9.
+  * Preliminary support for the AV1 codec.
+  * Fixed the profile announced for VP9.
+  * Reworked the disk writer, which should no longer cause corruption
+    after packet loss.
+  * Added support for recording H.264 tracks.
+  * Reworked the signalling protocol, it is now possible to request
+    different tracks for distinct streams, and there are provisions to
+    carry user permissions and statuses; this is not yet used by the user
+    interface.
+  * Reworked internal signalling; this will hopefully fix issues with
+    losing tracks under load.
+  * Added an option to limit the range of UDP ports used by the server.
+  * Added a close button in every locally-generated video; this allows
+    closing individual screen shares and simplifies the UI by not creating
+    close buttons in the top bar.
+  * The server will now attempt to increase the file descriptor limit at
+    startup.
+  * Stats are now exported as JSON and formatted on the client side; the
+    stats URL is now /stats.html rather than just /stats.
+
+27 April 2021: Galène 0.3.4
+
+  * Fixed a bug in the loss estimator.  We will now reduce the rate more
+    aggressively when there is loss in the client->serer direction.
+  * Fixed display of the chat on some devices.
+  * Exported the group.Description data structure for the sake of external
+    configuration tools.
+
+16 April 2021: Galène 0.3.3
+
+  * Fixed an off-by-one error that could occasionally lead to a server
+    crash.  Thanks to Louis Gesbert.
+  * Attempt to negotiate stereo Opus audio.
+
+3 March 2021: Galène 0.3.2
+
+  * Fixed compatibility with versions of Go earlier than 1.15 (thanks to
+    Michael Ströder).
+  * Fixed a race condition in the disk writer.
+
+26 February 2021: Galène 0.3.1
+
+  * We now notice when the TLS certificate has changed on disk; the
+    certificate can therefore be rotated without a restart.
+  * We now generate a self-signed certificate if none is found on disk.
+
+18 February 2021: Galène 0.3
+
+  * Implemented the command /muteall.  This allows muting all users except
+    yourself.
+  * Implemented the autolock and autokick user group options, that cause,
+    a group to be locked or all users to be kicked out when the last
+    administrator leaves.
+  * Implemented client-side filters that are run over the video before it
+    is sent to the server.  A pair of mirroring filters are provided,
+    which are useful when using a mirror in front of a webcam.
+  * Included a built-in TURN server, which drastically simplifies
+    deployment in common cases.
+  * Implemented testing of TURN servers, on both the client and the server
+    side.  Connectivity will be checked by the server every 12 hours, and
+    by the client whenever a user uses the /relay-test command.
+  * Group configurations are now checked at startup, and any failures are
+    logged.  This implies that it is no longer possible to use undefined
+    keys in group definition files (this is a breaking change).
+  * Reworked the client API, which is now simpler and more uniform.
+  * Subgroups can now be public.
+  * Added an option to disable the mirror view, which is useful when writing.
+  * Ported file playback to Firefox.
+  * We now display a friendly error message when the user has disabled
+    WebRTC under Firefox.
+  * Implemented renegotiation of down streams, which reduces the amount of
+    flicker in the user interface.
+  * Fixed a number of race conditions that could cause audio tracks to
+    become muted or video tracks to freeze.
+
+9 January 2021: Galène 0.2
+
+  * We now work around a limitation of the Go runtime that used to cause
+    a crash on 32-bit architectures.
+  * Recording to disk now works on Windows too.
+  * Error handling has been improved.  In particular, group operators now
+    receive a friendly warning when recording to disk fails for some reason.
+  * It is now possible to configure a group to use codecs such as VP9 and
+    H.264.  The default is still to use VP8 and Opus, as this yields the
+    best compatibility across browsers.  Only VP8, VP9 and Opus can be
+    saved to disk.
+  * The command-line option "-relay-only" can be used to specify that all
+    media traffic should go through a TURN server.
+  * It is now possible to generate TURN passwords automatically, which
+    avoids leaking long-term TURN credentials.  See the "credentialType"
+    value "hmac-sha1" described in README.
+  * The ICE configuration will now be checked periodically, and new
+    clients will use an updated configuration.
+  * The client-server protocol has been reworked to be more symmetric
+    and more secure.  It is now documented in the file README.PROTOCOL.
+  * The stream abort protocol message is now supported in the client->server
+    direction, making it possible for the client to reject a stream.
+  * The delay before sending NACKs has been reduced, which gives a major
+    boost in video quality.
+  * The play from disk button is not available when the browser doesn't
+    support the required API.  We used to display a cryptic error message
+    in that case.
+  * The command-line option -insecure allows using plain HTTP, which is
+    useful when running behind a reverse proxy.
+  * When saving to disk to disk, the keyframe interval has been reduced to 4s.
+  * We now send keepalives after 55s at most, which should fix issues with
+    reverse proxies timing out the WebSocket.
+
+19 December 2020: Galène 0.1
+
+  * Initial release.

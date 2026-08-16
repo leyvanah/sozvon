@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The dark half of the palette, mirroring static/common.css :root.  See
+  values/colors.xml for the light half and for why sozvon_accent_contrast is a
+  colour of its own.
+
+  It is not an inversion of the light scale: #BDBDBD reads 11.2:1 on black but
+  1.9:1 on white, so the two brand greys swap jobs — here it is secondary
+  text, there it is the border line.
+-->
+<resources>
+    <!-- True black: the client is AMOLED-first, and depth comes from the
+         border hairline rather than from progressively lighter fills. -->
+    <color name="sozvon_bg">#000000</color>
+    <color name="sozvon_surface">#0A0A0A</color>
+    <color name="sozvon_accent">#FFFFFF</color>
+    <color name="sozvon_accent_contrast">#000000</color>
+    <!-- Ratios against sozvon_bg: 21:1, 11.2:1, 6.1:1. -->
+    <color name="sozvon_text">#FFFFFF</color>
+    <color name="sozvon_text2">#BDBDBD</color>
+    <color name="sozvon_text3">#8A8A8A</color>
+    <!-- A line, never text: 2.2:1 on black. -->
+    <color name="sozvon_border">#444444</color>
+    <color name="sozvon_error">#E06A6A</color>
+    <color name="sozvon_ok">#6BBE8A</color>
+    <color name="sozvon_warn">#D6B85A</color>
+</resources>

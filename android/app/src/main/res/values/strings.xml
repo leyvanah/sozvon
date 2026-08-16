@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">SOZVON</string>
+    <string name="entry_subtitle">Self-hosted video conferencing</string>
+    <string name="server_url_hint" translatable="false">https://meet.example.com</string>
+    <string name="connect">Connect</string>
+    <string name="error_url">Enter the server address, e.g. https://meet.example.com</string>
+    <string name="error_https">The server address must start with https://</string>
+    <string name="error_load">Could not reach the server</string>
+    <string name="change_server">Change server</string>
+    <string name="reset_login">Reset login data</string>
+    <string name="reset_login_done">Login data cleared</string>
+
+    <!-- Saved servers on the address screen -->
+    <string name="servers_title">Saved servers</string>
+    <string name="server_actions">Server actions</string>
+    <string name="server_pinned">Certificate pinned</string>
+    <string name="server_rename">Rename</string>
+    <string name="server_rename_hint">Name for this server</string>
+    <string name="server_remove">Remove</string>
+    <string name="server_remove_confirm">Remove %1$s from the list?</string>
+    <string name="server_reinstall">Reinstall on the server…</string>
+    <string name="server_clean">Clean reinstall…</string>
+    <string name="server_delete">Delete from the server…</string>
+
+    <!-- Managing an installed server over SSH -->
+    <string name="reinstall_title">Reinstall</string>
+    <string name="reinstall_subtitle">Runs the installer over the server again: a new version, or a repair for one that has stopped. Rooms, invite links and the operator password are kept.</string>
+    <string name="reinstall_go">Reinstall</string>
+    <string name="reinstall_confirm">Reinstall on %1$s?\n\nCertificate: %2$s\nRoom: %3$s\nPort: %4$s\n\nRooms, invite links and the operator password are kept.</string>
+    <string name="reinstall_prefilled">Filled in with what this server was installed with. Changing it changes the server.</string>
+    <string name="clean_title">Clean reinstall</string>
+    <string name="clean_subtitle">Deletes the server completely, then installs it as if the machine were new. Rooms, invite links and certificates are lost, and the operator gets a new password.</string>
+    <string name="clean_go">Wipe and install</string>
+    <string name="clean_confirm">Everything SOZVON holds on %1$s will be deleted, then it will be installed from scratch. Rooms, invite links and the operator password will not survive. Continue?</string>
+    <string name="remove_title">Delete the server</string>
+    <string name="remove_subtitle">Removes SOZVON from the machine over SSH. Nothing else on the server is touched.</string>
+    <string name="remove_go">Delete</string>
+    <string name="remove_purge">Delete the data as well</string>
+    <string name="remove_keep_hint">The service is stopped and removed; rooms, operator accounts, invite links and certificates stay on disk, so installing again picks them back up.</string>
+    <string name="remove_purge_hint">Everything goes, including rooms, operator accounts, invite links, certificates and recordings. Nothing is backed up.</string>
+    <string name="remove_confirm_keep">Remove SOZVON from %1$s? Its rooms and accounts stay on disk.</string>
+    <string name="remove_confirm_purge">Delete SOZVON from %1$s along with every room, operator account, invite link and certificate? This cannot be undone.</string>
+    <string name="remove_done_keep">The server is removed. Its data is still on the machine — installing again will pick it up.</string>
+    <string name="remove_done_purge">The server and all of its data are gone.</string>
+    <string name="remove_done_toast">Removed from the server</string>
+    <string name="phase_removing">Removing the server…</string>
+    <string name="common_save">Save</string>
+    <string name="leave_server_in_call">You are in a call. Leave it and go back to the server list?</string>
+    <string name="leave_server">Leave</string>
+    <string name="leave_server_background">Keep the call</string>
+
+    <!-- Deploying a server to a VPS over SSH -->
+    <string name="deploy_cta">No server yet? Set one up on your VPS</string>
+    <string name="deploy_title">Deploy your own server</string>
+    <string name="deploy_subtitle">SOZVON will be installed on your VPS over SSH. You need a clean Debian or Ubuntu server and root access.</string>
+    <string name="ssh_host_label">Server address</string>
+    <string name="ssh_port_label">SSH port</string>
+    <string name="ssh_user_label">User</string>
+    <string name="auth_type_label">Sign in with</string>
+    <string name="ssh_password_label">SSH password</string>
+    <string name="ssh_password_hint">Used only during the install and never saved.</string>
+    <string name="password_show">Show the password</string>
+    <string name="password_hide">Hide the password</string>
+    <string name="ssh_key_label">Private key</string>
+    <string name="ssh_key_hint">Paste the contents of the key file.</string>
+    <string name="ssh_passphrase_label">Key passphrase (if any)</string>
+    <string name="tls_label">Certificate</string>
+    <string name="domain_label">Domain</string>
+    <string name="domain_hint">Its A record must already point at this server.</string>
+    <string name="room_label">Room name</string>
+    <string name="deploy_install">Install</string>
+    <string name="deploy_back">Back</string>
+    <string name="deploy_connecting">Connecting to the server…</string>
+    <string name="deploy_step_of">Step %1$d of %2$d</string>
+    <string name="deploy_patience">Usually takes 2–5 minutes. The install runs on the server by itself: if the connection drops, the app reconnects and keeps watching.</string>
+    <string name="deploy_failed">The install failed.</string>
+    <string name="deploy_retry">Back to settings</string>
+    <string name="deploy_done_title">Your server is ready</string>
+    <string name="deploy_done_subtitle">Write the password down — it is shown only once.</string>
+    <string name="result_address">Address</string>
+    <string name="result_operator">Operator</string>
+    <string name="result_password">Password</string>
+    <string name="result_password_unchanged">(unchanged)</string>
+    <string name="result_copy_password">Copy the password</string>
+    <string name="result_copied">Password copied</string>
+    <string name="result_selfsigned">The certificate is self-signed: an ordinary browser will refuse this address, only the app will work.</string>
+    <string name="deploy_open">Open the room</string>
+
+    <string name="tls_hint_sslip">The name is derived from the server\'s IP via sslip.io and the certificate comes from Let\'s Encrypt. Nothing to configure, works in any browser.</string>
+    <string name="tls_hint_domain">The most self-contained option: your own name, no third party in the chain.</string>
+    <string name="tls_hint_selfsigned">Needs neither a domain nor access to Let\'s Encrypt. But browsers will reject such a certificate — only the app will be able to connect.</string>
+
+    <string name="hostkey_title">Check the server fingerprint</string>
+    <string name="hostkey_new">You are connecting to %1$s for the first time.</string>
+    <string name="hostkey_changed">The key of server %1$s has changed since last time.</string>
+    <string name="hostkey_previous">Previously:</string>
+    <string name="hostkey_warning">Compare it with what your hosting control panel shows. If it does not match, someone may be impersonating your server — and you are about to give them the root password.</string>
+    <string name="hostkey_trust">Trust</string>
+    <string name="common_cancel">Cancel</string>
+
+    <string name="stage_preflight">Checking the system</string>
+    <string name="stage_user">Creating the service account</string>
+    <string name="stage_fetch">Downloading SOZVON</string>
+    <string name="stage_tls">Preparing the certificate</string>
+    <string name="stage_config">Writing the configuration</string>
+    <string name="stage_firewall">Opening the ports</string>
+    <string name="stage_service">Installing the service</string>
+    <string name="stage_verify">Waiting for the server to answer</string>
+    <string name="stage_done">Finishing up</string>
+
+    <string name="phase_checking">Checking privileges…</string>
+    <string name="phase_uploading">Sending the installer…</string>
+    <string name="phase_starting">Starting the install…</string>
+    <string name="phase_installing">Installing…</string>
+
+    <string name="advanced_label">Advanced</string>
+    <string name="https_port_label">HTTPS port</string>
+    <string name="https_port_hint">Leave empty for 443. A different port is needed when something else already uses 443 — but Let\'s Encrypt only works on 443, so pair it with a self-signed certificate.</string>
+    <string name="mirror_label">Download mirror</string>
+    <string name="mirror_hint">Leave empty to download from GitHub. Set it when the server cannot reach GitHub.</string>
+    <string name="error_cert_untrusted">This server\'s certificate is not trusted. Only a server installed from this app with a self-signed certificate can be opened this way.</string>
+    <string name="error_cert_changed">The server\'s certificate has changed since it was installed. The connection was refused.</string>
+
+    <string-array name="tls_modes">
+        <item>Automatic, no domain (sslip.io + Let\'s Encrypt)</item>
+        <item>Your own domain (Let\'s Encrypt)</item>
+        <item>Self-signed (app only)</item>
+    </string-array>
+    <string-array name="auth_types">
+        <item>password</item>
+        <item>key</item>
+    </string-array>
+</resources>

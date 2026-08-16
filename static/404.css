@@ -1,0 +1,108 @@
+/*
+ * Sozvon — the page you land on when the address is wrong.
+ *
+ * It was the last screen still wearing the template it arrived in: a fixed
+ * 475px card with a border and a drop shadow, the whole thing scaled to 0.8 by
+ * a transform (so a 48px heading actually drew at 38.4), a paragraph pinned to
+ * 35% of the width so its last word fell to a line of its own, and a Font
+ * Awesome frown — a filled grey disc, the only solid blob in an interface
+ * drawn from hairlines.
+ *
+ * And the way back was invisible.  The base rule set the button's fill and its
+ * text together; the Sozvon rule below it changed only the fill, to --accent.
+ * That was right while --accent was a violet gradient, and wrong the moment
+ * the palette went monochrome — --accent became #FFF, the text stayed --text,
+ * which is also #FFF, and the label vanished.  In the light theme the same
+ * pair is black on black.  An emphasised fill takes --accent-contrast: that
+ * is what the token is for, and it is the difference-not-a-colour mistake this
+ * fork has now made twice.
+ *
+ * What is left is the shape the rest of the client settled on: no card, the
+ * wordmark saying where you are, the status code as a quiet stamp, one
+ * sentence, one way out.  Centred rather than left-aligned, because this page
+ * is a sibling of the landing page and not of the join form.
+ *
+ * Sozvon is a fork of Galène (MIT); see LICENCE.
+ */
+
+body {
+    /* common.css sets html/body to height:100%; let this one grow instead, so
+       a narrow phone scrolls rather than clipping the button off the bottom. */
+    height: auto;
+    min-height: 100vh;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1.25rem;
+    background: var(--bg);
+}
+
+.notfound {
+    width: min(30rem, 100%);
+    text-align: center;
+}
+
+/* Quiet: it identifies the site, it is not the thing you are here to do. */
+.notfound-brand {
+    justify-content: center;
+    margin-bottom: 3rem;
+    color: var(--text-3);
+}
+/* .brand-word paints itself --text; here the whole lockup — word and mask
+   alike, the mark being currentColor — takes the row's colour. */
+.notfound-brand .brand-word { color: inherit; }
+
+/* The status code as a stamp rather than a headline: it is the one piece of
+   this page a person can quote to someone who can help. */
+.notfound-code {
+    margin: 0 0 0.75rem;
+    font-size: var(--fs-sm);
+    letter-spacing: 0.3em;
+    color: var(--text-3);
+}
+
+.notfound h1 {
+    margin: 0 0 0.75rem;
+    font-size: var(--fs-2xl);
+    /* The wordmark is Inter Light and so is this: at display size the interface
+       speaks in the identity's weight.  `white-space` because common.css keeps
+       h1 on one line for the call screen's room title, which would send a
+       translated sentence off the side of a phone. */
+    font-weight: 300;
+    white-space: normal;
+    line-height: 1.15;
+    color: var(--text);
+}
+
+.notfound-text {
+    margin: 0 0 2.25rem;
+    font-size: var(--fs-base);
+    color: var(--text-2);
+}
+
+/* The one action, drawn the way every other primary action in the client is:
+   an inverted fill, and its text in the token that exists to stay legible on
+   it whichever way the theme runs. */
+.home-link {
+    display: inline-block;
+    padding: 13px 26px;
+    border-radius: var(--radius);
+    font-size: var(--fs-md);
+    background: var(--accent);
+    color: var(--accent-contrast);
+    text-decoration: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    transition: background var(--t-fast) var(--ease);
+}
+.home-link:hover {
+    background: var(--accent-hover);
+    color: var(--accent-contrast);
+    text-decoration: none;
+}
+.home-link:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}

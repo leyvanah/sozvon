@@ -1,0 +1,58 @@
+*~
+/galene
+/sozvon
+/sozvon.exe
+/sozvon-smoke.exe
+/sozvon-test.exe
+/sozvon.log
+# The pre-rename names.  Local build output and working files still carry
+# them, and an entry that only matches the new name silently stops ignoring
+# a file that already exists on disk.
+/oryn
+/oryn.exe
+/oryn-smoke.exe
+/oryn-test.exe
+/oryn.log
+/galenectl/galenectl
+/data
+/recordings
+/groups/**/*.json
+/static/**/*.d.ts
+/static/third-party/tasks-vision
+
+# Local artefacts
+/logs/
+/sozvon-rebrand.tar.gz
+/oryn-rebrand.tar.gz
+
+# Claude Code local context (machine-specific, never commit)
+CLAUDE.local.md
+/.claude/
+
+# Claude Code project file - local only, not for the repo
+CLAUDE.md
+
+# Local-only test-stand doc — holds the LAN hostname, never commit (see CLAUDE.local.md)
+/sozvon-test-stand.md
+/oryn-test-stand.md
+
+# Local-only remote-device testing notes — hold a LAN address and device
+# details for the test phone, never commit
+/android/REMOTE-TESTING.md
+
+# Local-only known-bugs log — internal debugging notes, not for the public repo
+/KNOWN-BUGS.md
+
+# JetBrains IDE project files — machine-local paths/names, never commit
+/.idea/
+
+# Release build output (contrib/install.sh + .github/workflows/release.yml)
+/build/
+/dist/
+
+# Local-only pre-publication checklist — process notes, not part of the project
+/PRE-PUBLISH.md
+
+# Generated before each Android build from contrib/install.sh (see
+# android/app/build.gradle.kts); a tracked copy would drift.
+/android/app/src/main/assets/install.sh

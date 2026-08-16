@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The light half of the palette, mirroring the web client's design tokens
+  (static/common.css, the :root[data-theme="light"] block).  The dark half is
+  in values-night/; Android picks between them, and Theming.kt tells it which
+  when the user has made an explicit choice in the client.
+
+  Monochrome by design: black, a grey ramp, and three status colours reserved
+  for state.  "Accent" is not a hue — an emphasised control inverts, which is
+  why sozvon_accent_contrast exists: anything printed *on* an accent fill has to
+  take it rather than a literal white, or it vanishes in one of the two
+  themes.
+-->
+<resources>
+    <color name="sozvon_bg">#FFFFFF</color>
+    <color name="sozvon_surface">#F7F7F7</color>
+    <color name="sozvon_accent">#000000</color>
+    <color name="sozvon_accent_contrast">#FFFFFF</color>
+    <!-- Ratios against sozvon_bg: 21:1, 9.7:1, 4.5:1. -->
+    <color name="sozvon_text">#000000</color>
+    <color name="sozvon_text2">#444444</color>
+    <color name="sozvon_text3">#767676</color>
+    <!-- A line, never text: 1.9:1 on white. -->
+    <color name="sozvon_border">#BDBDBD</color>
+    <!-- The launcher icon's plate.  Not themed, and not sozvon_bg: an icon that
+         followed the device's dark mode would put white ink on a white plate
+         the moment the user switched.  A launcher icon is how the app is
+         recognised, so it holds still. -->
+    <color name="sozvon_icon_bg">#000000</color>
+    <color name="sozvon_error">#B5524F</color>
+    <color name="sozvon_ok">#2E7D50</color>
+    <color name="sozvon_warn">#8A6D1F</color>
+</resources>

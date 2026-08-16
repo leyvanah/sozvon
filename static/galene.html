@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>SOZVON</title>
+    <meta charset="utf-8">
+    <!-- Decides light vs dark before the first paint; must stay a blocking
+         script in the head, ahead of the stylesheets.  Not to be confused
+         with the deployment theme hook in static/theme/. -->
+    <script src="/theme-init.js"></script>
+    <!-- Deployment theme hook: repointed to the theme's icon; a no-op copy
+         the SOZVON micro icon ships in the stock distribution (see static/theme/favicon.svg). -->
+    <link rel="icon" type="image/svg+xml" href="/theme/favicon.svg"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="ScreenOrientation" content="autoRotate:disabled">
+    <link rel="stylesheet" type="text/css" href="/common.css"/>
+    <link rel="stylesheet" type="text/css" href="/galene.css"/>
+    <link rel="author" href="https://www.irif.fr/~jch/"/>
+    <link rel="stylesheet" type="text/css" href="/third-party/fontawesome/css/fontawesome.min.css"/>
+    <link rel="stylesheet" type="text/css" href="/third-party/fontawesome/css/solid.min.css"/>
+    <link rel="stylesheet" type="text/css" href="/third-party/fontawesome/css/regular.min.css"/>
+    <link rel="stylesheet" type="text/css" href="/third-party/toastify/toastify.css"/>
+    <link rel="stylesheet" type="text/css" href="/third-party/contextual/contextual.css"/>
+    <!-- Deployment theme hook: loaded last so its rules win the cascade.
+         Empty in the stock distribution; see static/theme/theme.css. -->
+    <link rel="stylesheet" type="text/css" href="/theme/theme.css"/>
+  </head>
+
+  <!-- No bgcolor= here on purpose, for two reasons that arrived separately:
+       it named the pre-rebrand background (#0B0E13), and being a
+       presentational attribute no stylesheet could correct it — so a themed
+       deployment would have had to patch this file.  common.css paints `html`
+       with var(--bg) before first paint, covering the same window. -->
+  <body class="pre-join">
+    <!-- Sozvon: loading overlay / FOUC guard.  Covers the brief unstyled paint
+         before the large galene.css applies, then galene.js removes it on
+         window 'load'.  Styled in common.css because the CSP forbids inline
+         <style>. -->
+    <div id="app-loading"><div class="app-spinner"></div></div>
+    <!-- Shown when the group requires end-to-end encryption but this call
+         cannot be encrypted (a peer that cannot encrypt, or more than two
+         participants).  Toggled by enforceE2EEMediaPolicy() in galene.js. -->
+    <div id="e2ee-block-overlay" class="e2ee-block-overlay invisible" role="alert" hidden>
+      <div class="e2ee-block-card">
+        <i class="fas fa-unlock" aria-hidden="true"></i>
+        <p data-i18n="e2ee.blockedOverlay">Unencrypted connections are blocked. This call cannot be end-to-end encrypted (a participant cannot encrypt, or there are more than two), so the connection is blocked.</p>
+      </div>
+    </div>
+    <!-- Shown when the browser cannot do video calls (missing/broken WebRTC,
+         e.g. Xiaomi Mi Browser).  Toggled by showBrowserUnsupported(). -->
+    <div id="browser-unsupported-overlay" class="browser-unsupported-overlay invisible" role="alert" hidden>
+      <div class="browser-unsupported-card">
+        <i class="fas fa-exclamation-triangle" aria-hidden="true"></i>
+        <p data-i18n="browser.unsupported">Your browser does not support video calls. Please open this link in Chrome, Firefox, Safari or Edge.</p>
+        <p class="browser-unsupported-url" id="browser-unsupported-url"></p>
+      </div>
+    </div>
+    <!-- Sozvon: shown while an established connection dropped and we are retrying
+         (gotClose/scheduleReconnect in galene.js).  Non-modal status banner. -->
+    <div id="reconnect-banner" class="reconnect-banner invisible" role="status" aria-live="polite" hidden>
+      <span class="reconnect-spinner" aria-hidden="true"></span>
+      <span data-i18n="reconnect.reconnecting">Reconnecting…</span>
+    </div>
+    <div id="main" class="app" hidden>
+      <div class="row full-height">
+        <nav id="left-sidebar">
+          <!-- Panel header lane: the room title + E2EE lock/SAS live here now,
+               relocated from the top bar so the pinned toggle button can no
+               longer overlap them. The title is padded clear of the fixed
+               toggle on desktop; when the panel is closed it hides with it. -->
+          <div class="users-header galene-header">
+            <h1 id="title" class="header-title">SOZVON</h1>
+            <button id="panel-close" class="panel-close" type="button" title="Close" data-i18n-title="common.close">
+              <i class="fas fa-times" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="users"></div>
+          <div id="panel-resizer" title="Resize"></div>
+          <div id="chat">
+            <div id="chatbox">
+              <div id="box"></div>
+              <div class="reply">
+                <form id="inputform">
+                  <textarea id="input" class="form-reply" data-i18n-placeholder="chat.placeholder" placeholder="Message"></textarea>
+                  <button id="inputbutton" type="submit" class="btn btn-default" title="Send" data-i18n-title="chat.send">
+                    <i class="fas fa-paper-plane" aria-hidden="true"></i>
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </nav>
+        <div class="container">
+          <header>
+            <nav class="topnav navbar navbar-expand navbar-light fixed-top">
+              <div id="header">
+                <span id="e2ee-indicator" class="e2ee-indicator invisible" title="">
+                  <i class="fas fa-lock" aria-hidden="true"></i>
+                  <span id="e2ee-sas" class="e2ee-sas"></span>
+                </span>
+              </div>
+
+              <ul class="nav-menu">
+                <li>
+                  <button id="presentbutton" class="invisible nav-link nav-button nav-cam" title="Start video" data-i18n-title="nav.startVideo">
+                    <span><i class="fas fa-video-slash" aria-hidden="true"></i></span>
+                    <label data-i18n="nav.camera">Camera</label>
+                  </button>
+                </li>
+                <li>
+                  <button id="unpresentbutton" class="invisible nav-link nav-button nav-cam nav-cam-on" title="Stop video" data-i18n-title="nav.stopVideo">
+                    <span><i class="fas fa-video" aria-hidden="true"></i></span>
+                    <label data-i18n="nav.camera">Camera</label>
+                  </button>
+                </li>
+                <li>
+                  <div id="mutebutton" class="nav-link nav-button">
+                    <span><i class="fas fa-microphone-slash" aria-hidden="true"></i></span>
+                    <label data-i18n="nav.mute">Mute</label>
+                  </div>
+                </li>
+                <li>
+                  <div id="sharebutton" class="invisible nav-link nav-button">
+                    <span><i class="fas fa-desktop" aria-hidden="true"></i></span>
+                    <label data-i18n="nav.share">Share Screen</label>
+                  </div>
+                </li>
+                <li>
+                  <button id="viewtoggle" class="invisible nav-link nav-button" type="button" title="Grid view" data-i18n-title="nav.gridView">
+                    <span><i class="fas fa-th-large" aria-hidden="true"></i></span>
+                    <label data-i18n="nav.view">View</label>
+                  </button>
+                </li>
+                <li>
+                  <div class="collapse panel-toggle" title="People &amp; chat" data-i18n-title="nav.panel" id="sidebarCollapse">
+                    <span class="panel-toggle-icon">
+                      <i class="fas fa-user" aria-hidden="true"></i>
+                      <i class="fas fa-comment panel-toggle-badge" aria-hidden="true"></i>
+                      <span class="panel-toggle-dot" aria-hidden="true"></span>
+                    </span>
+                  </div>
+                </li>
+                <li>
+                  <div class="nav-button nav-link nav-more" id="openside" title="Settings" data-i18n-title="settings.title">
+                    <span><i class="fas fa-gear" aria-hidden="true"></i></span>
+                  </div>
+                </li>
+                <li>
+                  <button id="leavebutton" class="nav-link nav-button nav-leave" type="button" title="Leave call" data-i18n-title="nav.leave">
+                    <span><i class="fas fa-phone-slash" aria-hidden="true"></i></span>
+                    <label data-i18n="nav.leave">Leave</label>
+                  </button>
+                </li>
+              </ul>
+            </nav>
+          </header>
+          <div class="row full-width" id="mainrow">
+            <div class="coln-right" id="right">
+              <span class="show-video blink invisible" id="show-video">
+                <i class="fas fa-exchange-alt" aria-hidden="true"></i>
+              </span>
+              <div class="chat-btn collapse-video invisible" id="collapse-video">
+                <i class="far fa-comment-alt icon-chat" title="Hide video and show chat"></i>
+              </div>
+              <div class="video-container invisible" id="video-container">
+                <div id="expand-video" class="expand-video">
+                  <div id="peers"></div>
+                </div>
+              </div>
+              <!-- Shown while nobody is publishing: #video-container is hidden
+                   when there are no tiles, which used to leave the stage an
+                   unexplained black void.  reflectStageEmpty() in galene.js
+                   toggles this from resizePeers(); CSS keeps it out of the way
+                   before you have joined. -->
+              <div class="stage-empty invisible" id="stage-empty" role="status"
+                   data-i18n-aria="stage.noVideo" aria-label="Nobody has turned their camera on.">
+                <div class="stage-empty-inner">
+                  <div class="stage-people" id="stage-people"></div>
+                  <!-- Shown instead of the tiles when you are the only person
+                       in the room: a placeholder tile with your own name on it
+                       says nothing you do not know. -->
+                  <p class="stage-note invisible" id="stage-note"
+                     data-i18n="stage.onlyYou">You are the only one here.</p>
+                </div>
+              </div>
+              <div id="captions-container" class="invisible">
+                <div id="captions"></div>
+              </div>
+              <div class="login-container invisible" id="login-container">
+                <div class="login-box">
+                  <div class="login-top">
+                    <div class="brand login-brand">
+                      <span class="brand-word">SOZVON</span>
+                      <span class="brand-mark" aria-hidden="true"></span>
+                    </div>
+                    <div class="pref-toggle" role="group" aria-label="Language">
+                      <button type="button" data-lang-option="en">EN</button>
+                      <button type="button" data-lang-option="ru">RU</button>
+                    </div>
+                  </div>
+                  <form id="loginform" class="loginform">
+                    <!-- Sozvon: shown instead of the fields below when we still hold
+                         credentials from before a deliberate hang-up in this tab,
+                         so leaving a call doesn't force a full re-login. -->
+                    <div id="rejoin-container" class="invisible">
+                      <button type="button" id="rejoinbutton" class="btn btn-blue">
+                        <span data-i18n="login.rejoinAs">Join as</span> <span id="rejoin-username"></span>
+                      </button>
+                      <p class="rejoin-other">
+                        <a href="#" id="rejoin-other-link" data-i18n="login.rejoinOther">Log in with different credentials</a>
+                      </p>
+                    </div>
+                    <div id="normal-login-fields">
+                    <p id="lobby-note" class="lobby-note invisible" data-i18n="login.lobbyNote">
+                      This is a private room. Enter your name below and the
+                      host will let you in.
+                    </p>
+                    <div id="userform">
+                      <label for="username" data-i18n="login.username">Username</label>
+                      <input id="username" type="text" name="username"
+                             autocomplete="username" class="form-control"/>
+                    </div>
+                    <div id="passwordform">
+                      <label for="password" data-i18n="login.password">Password</label>
+                      <input id="password" type="password" name="password"
+                             autocomplete="current-password" class="form-control"/>
+                    </div>
+                    <div id="rememberform" class="rememberform">
+                      <label class="remember-label">
+                        <input id="remember" type="checkbox"/>
+                        <span data-i18n="login.remember">Remember me on this device</span>
+                      </label>
+                    </div>
+                    <div id="operator-login" class="invisible">
+                      <a href="#" id="operator-login-link" data-i18n="login.operatorLogin">Log in as operator</a>
+                    </div>
+                    </div>
+                    <!-- Pre-join device check: camera/mic toggles (off by
+                         default) with a live camera preview, a microphone
+                         level meter and device pickers, so people can test
+                         their hardware before joining.  Wired up by the
+                         precheck* functions in galene.js.  Shared by the
+                         "Rejoin as X" quick action above and the normal login
+                         fields, so a device check is available either way. (Sozvon) -->
+                    <div class="precheck">
+                      <div class="precheck-row">
+                        <span class="precheck-hint" data-i18n="login.checkDevices">Check your devices:</span>
+                        <div class="precheck-toggles">
+                          <button type="button" id="precheck-cam" class="precheck-toggle"
+                                  title="Camera" data-i18n-title="login.camera"
+                                  aria-pressed="false">
+                            <i class="fas fa-video-slash" aria-hidden="true"></i>
+                          </button>
+                          <button type="button" id="precheck-mic" class="precheck-toggle"
+                                  title="Microphone" data-i18n-title="login.microphone"
+                                  aria-pressed="false">
+                            <i class="fas fa-microphone-slash" aria-hidden="true"></i>
+                          </button>
+                        </div>
+                      </div>
+                      <div id="precheck-preview" class="precheck-preview invisible">
+                        <!-- The stage is a fixed 4:3 box the preview fills, so a
+                             quarter turn has somewhere to land; the rotate
+                             arrows sit in its corner and do exactly what the
+                             drawer's do (rotateVideo). -->
+                        <div id="precheck-stage" class="precheck-stage invisible">
+                          <video id="precheck-video" class="precheck-video"
+                                 autoplay playsinline muted></video>
+                          <div class="precheck-rotate">
+                            <button type="button" id="precheck-rotate-left"
+                                    class="rotate-button precheck-rotate-button"
+                                    title="Rotate left" data-i18n-title="settings.rotateLeft"
+                                    data-i18n-aria="settings.rotateLeft" aria-label="Rotate left">
+                              <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" id="precheck-rotate-right"
+                                    class="rotate-button precheck-rotate-button"
+                                    title="Rotate right" data-i18n-title="settings.rotateRight"
+                                    data-i18n-aria="settings.rotateRight" aria-label="Rotate right">
+                              <i class="fas fa-rotate-right" aria-hidden="true"></i>
+                            </button>
+                          </div>
+                        </div>
+                        <canvas id="precheck-meter" class="precheck-meter invisible"
+                                width="320" height="36"></canvas>
+                      </div>
+                      <p id="precheck-error" class="precheck-error invisible"></p>
+                      <div class="precheck-devices">
+                        <select id="precheck-videoselect" class="select invisible"
+                                title="Camera" data-i18n-title="login.camera"
+                                data-i18n-aria="login.camera"></select>
+                        <select id="precheck-audioselect" class="select invisible"
+                                title="Microphone" data-i18n-title="login.microphone"
+                                data-i18n-aria="login.microphone"></select>
+                      </div>
+                    </div>
+                    <div class="clear"></div>
+                    <div id="connect-container" class="connect">
+                      <input id="connectbutton" type="submit" class="btn btn-blue" value="Connect" data-i18n-value="login.connect"/>
+                    </div>
+                  </form>
+                  <!-- Shown only when this deployment serves an Android app
+                       (data/sozvon.apk on the server); see probeAPK() in
+                       galene.js. -->
+                  <a id="apk-link" class="apk-link invisible" href="/sozvon.apk">
+                    <i class="fas fa-mobile-alt" aria-hidden="true"></i>
+                    <span data-i18n="login.apk">Download the Android app (APK)</span>
+                  </a>
+                  <div class="clear"></div>
+                </div>
+              </div>
+              <div class="login-container invisible" id="lobby-waiting">
+                <div class="login-box">
+                  <h2 data-i18n="lobby.title">Waiting room</h2>
+                  <p id="lobby-waiting-text" data-i18n="lobby.text">
+                    The host will let you in shortly…
+                  </p>
+                </div>
+              </div>
+              <!-- Sozvon: the operator-room dashboard, shown on an
+                   operator-room hub instead of the call UI. -->
+              <div class="operator-container invisible" id="operator-room">
+                <div class="operator-box">
+                  <div class="operator-header">
+                    <div class="operator-header-row">
+                      <!-- The id is kept as a hook for a deployment theme
+                           (theme.js swaps branding by plain DOM), but the text
+                           is translated markup now rather than written from
+                           the hub's displayName: this heading names the page,
+                           not the room. -->
+                      <h2 id="operator-room-title" class="operator-title"
+                          data-i18n="operator.title">Operator panel</h2>
+                      <button type="button" id="operator-logout" class="operator-logout"
+                              data-i18n-title="operator.logout" title="Log out">
+                        <i class="fas fa-sign-out-alt" aria-hidden="true"></i>
+                        <span data-i18n="operator.logout">Log out</span>
+                      </button>
+                    </div>
+                    <p class="operator-subtitle" data-i18n="operator.subtitle">
+                      Create a personal link for each client and let them in
+                      when they knock.
+                    </p>
+                  </div>
+                  <!-- Sozvon: camera/mic check for the operator's own upcoming
+                       call. Applied when they click "Join" on a link below, so
+                       they land in the call with the chosen devices already on
+                       -- no separate device-check screen in between. Mirrors
+                       the login card's precheck (see makePrecheck in
+                       galene.js), under the "operator-precheck" id prefix. -->
+                  <div class="operator-section">
+                    <p class="operator-section-title" data-i18n="operator.devicesTitle">
+                      Camera &amp; microphone
+                    </p>
+                    <div class="precheck">
+                      <div class="precheck-row">
+                        <span class="precheck-hint" data-i18n="login.checkDevices">Check your devices:</span>
+                        <div class="precheck-toggles">
+                          <button type="button" id="operator-precheck-cam" class="precheck-toggle"
+                                  title="Camera" data-i18n-title="login.camera"
+                                  aria-pressed="false">
+                            <i class="fas fa-video-slash" aria-hidden="true"></i>
+                          </button>
+                          <button type="button" id="operator-precheck-mic" class="precheck-toggle"
+                                  title="Microphone" data-i18n-title="login.microphone"
+                                  aria-pressed="false">
+                            <i class="fas fa-microphone-slash" aria-hidden="true"></i>
+                          </button>
+                        </div>
+                      </div>
+                      <div id="operator-precheck-preview" class="precheck-preview invisible">
+                        <div id="operator-precheck-stage" class="precheck-stage invisible">
+                          <video id="operator-precheck-video" class="precheck-video"
+                                 autoplay playsinline muted></video>
+                          <div class="precheck-rotate">
+                            <button type="button" id="operator-precheck-rotate-left"
+                                    class="rotate-button precheck-rotate-button"
+                                    title="Rotate left" data-i18n-title="settings.rotateLeft"
+                                    data-i18n-aria="settings.rotateLeft" aria-label="Rotate left">
+                              <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" id="operator-precheck-rotate-right"
+                                    class="rotate-button precheck-rotate-button"
+                                    title="Rotate right" data-i18n-title="settings.rotateRight"
+                                    data-i18n-aria="settings.rotateRight" aria-label="Rotate right">
+                              <i class="fas fa-rotate-right" aria-hidden="true"></i>
+                            </button>
+                          </div>
+                        </div>
+                        <canvas id="operator-precheck-meter" class="precheck-meter invisible"
+                                width="320" height="36"></canvas>
+                      </div>
+                      <p id="operator-precheck-error" class="precheck-error invisible"></p>
+                      <div class="precheck-devices">
+                        <select id="operator-precheck-videoselect" class="select invisible"
+                                title="Camera" data-i18n-title="login.camera"
+                                data-i18n-aria="login.camera"></select>
+                        <select id="operator-precheck-audioselect" class="select invisible"
+                                title="Microphone" data-i18n-title="login.microphone"
+                                data-i18n-aria="login.microphone"></select>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="operator-section">
+                  <p class="operator-section-title" data-i18n="operator.createTitle">
+                    New link
+                  </p>
+                  <form id="operator-create-form" class="operator-create">
+                    <button type="button" id="operator-advanced-toggle"
+                            class="operator-advanced-toggle"
+                            aria-expanded="false" aria-controls="operator-advanced">
+                      <span class="operator-caret" aria-hidden="true"></span>
+                      <span data-i18n="operator.options">Options</span>
+                    </button>
+                    <div id="operator-advanced" class="operator-advanced invisible">
+                      <div class="operator-field">
+                        <label for="operator-label" data-i18n="operator.label">Label</label>
+                        <input id="operator-label" type="text" class="form-control"
+                               data-i18n-placeholder="operator.labelHint"/>
+                      </div>
+                      <div class="operator-field">
+                        <label for="operator-clientname" data-i18n="operator.clientName">Client name (optional)</label>
+                        <input id="operator-clientname" type="text" class="form-control"
+                               data-i18n-placeholder="operator.clientNameHint"/>
+                      </div>
+                      <div class="operator-field operator-field-expiry">
+                        <label for="operator-expiry" data-i18n="operator.expiry">Valid for</label>
+                        <select id="operator-expiry" class="select">
+                          <option value="0" selected data-i18n="operator.expiryForever">Never expires</option>
+                          <option value="1" data-i18n="operator.expiry1">1 day</option>
+                          <option value="7" data-i18n="operator.expiry7">7 days</option>
+                          <option value="30" data-i18n="operator.expiry30">30 days</option>
+                          <option value="90" data-i18n="operator.expiry90">90 days</option>
+                        </select>
+                      </div>
+                    </div>
+                    <button type="submit" class="btn btn-blue operator-create-btn"
+                            data-i18n="operator.create">Create link</button>
+                  </form>
+                  </div>
+                  <div class="operator-section operator-section-last">
+                    <p class="operator-section-title" data-i18n="operator.linksTitle">
+                      Links
+                    </p>
+                    <div id="operator-links" class="operator-links"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="sidebarnav" class="sidenav" hidden>
+      <div class="sidenav-header">
+        <div class="brand sidenav-brand">
+          <span class="brand-word">SOZVON</span>
+          <span class="brand-mark" aria-hidden="true"></span>
+        </div>
+        <a class="closebtn" id="clodeside"><i class="fas fa-times" aria-hidden="true"></i></a>
+      </div>
+      <div class="sidenav-content" id="optionsdiv">
+        <div id="profile" class="profile invisible">
+          <div class="profile-user">
+            <div class="profile-logo">
+              <span><i class="fas fa-user" aria-hidden="true"></i></span>
+            </div>
+            <div class="profile-info">
+              <span id="userspan"></span>
+              <span id="permspan"></span>
+              <span id="chpwspan" class="invisible"><a id="change-password" data-i18n="settings.changePassword">Change password</a></span>
+            </div>
+            <div class="user-logout">
+              <a id="disconnectbutton">
+                <span class="logout-icon"><i class="fas fa-sign-out-alt"></i></span>
+                <span class="logout-text" data-i18n="settings.logout">Logout</span>
+              </a>
+            </div>
+          </div>
+        </div>
+        <div id="mediaoptions" class="invisible">
+          <fieldset>
+            <label for="videoselect" class="sidenav-label-first" data-i18n="settings.camera">Camera</label>
+            <select id="videoselect" class="select select-inline">
+              <option value="" data-i18n="opt.off">off</option>
+            </select>
+
+            <!-- Turning the picture is an action, not a value to pick out
+                 of a list of four: two buttons that turn it a quarter at a
+                 time, the way every photo viewer does it.  It sits under the
+                 camera because that is what it turns; the stored setting is
+                 still the absolute angle (settings.videoRotation), which is
+                 what addLocalMedia reads. -->
+            <div class="pref-row" id="settings-rotate">
+              <label class="sidenav-label" data-i18n="settings.rotate">Rotate video</label>
+              <span class="rotate-buttons">
+                <button type="button" id="rotate-left" class="rotate-button"
+                        title="Rotate left" data-i18n-title="settings.rotateLeft"
+                        data-i18n-aria="settings.rotateLeft" aria-label="Rotate left">
+                  <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                </button>
+                <button type="button" id="rotate-right" class="rotate-button"
+                        title="Rotate right" data-i18n-title="settings.rotateRight"
+                        data-i18n-aria="settings.rotateRight" aria-label="Rotate right">
+                  <i class="fas fa-rotate-right" aria-hidden="true"></i>
+                </button>
+              </span>
+            </div>
+
+            <label for="audioselect" class="sidenav-label" data-i18n="settings.microphone">Microphone</label>
+            <select id="audioselect" class="select select-inline">
+              <option value="" data-i18n="opt.off">off</option>
+            </select>
+
+            <label for="outputselect" class="sidenav-label" data-i18n="settings.speaker">Speaker</label>
+            <select id="outputselect" class="select select-inline">
+              <option value="" data-i18n="opt.default">default</option>
+            </select>
+          </fieldset>
+        </div>
+
+        <!-- App-level settings, revealed only inside the Sozvon Android app
+             (which exposes the window.SozvonApp bridge); see setupAppSettings()
+             in galene.js. -->
+        <div id="app-settings" class="invisible">
+          <fieldset>
+            <legend data-i18n="settings.appSection">App</legend>
+            <a id="app-change-server" class="app-settings-link" href="#" data-i18n="settings.changeServer">Change server</a>
+            <a id="app-reset-login" class="app-settings-link" href="#" data-i18n="settings.resetLogin">Reset login on this device</a>
+          </fieldset>
+        </div>
+
+        <!-- Appearance and language are both set-once preferences, so they sit
+             below the devices you opened the drawer to change, with only the
+             advanced disclosure under them.  Appearance stacks its label: three
+             words do not fit beside one on a 250px drawer in either language. -->
+        <form class="pref-row pref-stack" id="settings-theme">
+          <label class="sidenav-label-first" data-i18n="settings.theme">Appearance</label>
+          <span class="pref-toggle pref-toggle-block" role="group"
+                data-i18n-aria="settings.theme" aria-label="Appearance">
+            <button type="button" data-theme-option="system" data-i18n="theme.system">Auto</button>
+            <button type="button" data-theme-option="light" data-i18n="theme.light">Light</button>
+            <button type="button" data-theme-option="dark" data-i18n="theme.dark">Dark</button>
+          </span>
+        </form>
+
+        <form class="pref-row" id="settings-language">
+          <label class="sidenav-label-first" data-i18n="settings.language">Language</label>
+          <span class="pref-toggle" role="group" aria-label="Language">
+            <button type="button" data-lang-option="en">EN</button>
+            <button type="button" data-lang-option="ru">RU</button>
+          </span>
+        </form>
+
+        <!-- Everything below is set once and forgotten.  A native <details>
+             keeps it one click away without any script, and stays keyboard
+             and screen-reader operable for free.  It sits at the foot of the
+             drawer, after the preferences: the things you open the drawer for
+             are above it, and this is what you go looking for. -->
+        <details id="settings-advanced">
+          <summary data-i18n="settings.advanced">Advanced</summary>
+
+          <!-- Host-only controls; revealed only when the current user has
+               the "op" permission (see gotJoined in galene.js).  First inside
+               the disclosure: they are about the room rather than about this
+               device, and the operator should not have to walk past eleven
+               device knobs to reach them. -->
+          <fieldset id="operator-settings" class="invisible">
+            <legend data-i18n="settings.operatorSection">Host controls</legend>
+            <form>
+              <input id="locked1on1box" type="checkbox"/>
+              <label for="locked1on1box" data-i18n="settings.locked1on1">Lock room 1-on-1 (block 3+ participants)</label>
+            </form>
+            <form>
+              <input id="knocksoundbox" type="checkbox" checked/>
+              <label for="knocksoundbox" data-i18n="settings.knockSound">Play sound on lobby knock</label>
+            </form>
+          </fieldset>
+
+          <fieldset>
+            <form>
+            <input id="autorotatebox" type="checkbox" checked/>
+            <label for="autorotatebox" data-i18n="settings.autorotate">Auto-rotate (mobile/tablet)</label>
+          </form>
+
+          <form id="filterform">
+            <label for="filterselect" class="sidenav-label" data-i18n="settings.filter">Filter</label>
+            <select id="filterselect" class="select select-inline">
+              <option value="" selected data-i18n="opt.none">none</option>
+            </select>
+          </form>
+
+          <form id="sendform">
+            <label for="sendselect" class="sidenav-label" data-i18n="settings.send">Send</label>
+            <select id="sendselect" class="select select-inline">
+              <option value="lowest" data-i18n="opt.lowest">lowest</option>
+              <option value="low" data-i18n="opt.low">low</option>
+              <option value="normal" data-i18n="opt.normal">normal</option>
+              <option value="unlimited" selected data-i18n="opt.unlimited">unlimited</option>
+            </select>
+          </form>
+
+          <form id="simulcastform">
+            <label for="simulcastselect" class="sidenav-label" data-i18n="settings.simulcast">Simulcast</label>
+            <select id="simulcastselect" class="select select-inline">
+              <option value="off" data-i18n="opt.off">off</option>
+              <option value="auto" selected data-i18n="opt.auto">auto</option>
+              <option value="on" data-i18n="opt.on">on</option>
+            </select>
+          </form>
+
+          <form id="requestform">
+            <label for="requestselect" class="sidenav-label" data-i18n="settings.receive">Receive</label>
+            <select id="requestselect" class="select select-inline">
+              <option value="" data-i18n="opt.nothing">nothing</option>
+              <option value="audio" data-i18n="opt.audioOnly">audio only</option>
+              <option value="screenshare" data-i18n="opt.screenshareOnly">screenshare only</option>
+              <option value="everything-low" data-i18n="opt.lowQuality">low quality</option>
+              <option value="everything" selected data-i18n="opt.everything">everything</option>
+            </select>
+          </form>
+
+          <form>
+            <input id="mirrorbox" type="checkbox" checked/>
+            <label for="mirrorbox" data-i18n="settings.mirror">Mirror view</label>
+          </form>
+
+          <form>
+            <input id="preprocessingbox" type="checkbox" checked/>
+            <label for="preprocessingbox" data-i18n="settings.noise">Noise suppression</label>
+          </form>
+
+          <form>
+            <input id="hqaudiobox" type="checkbox" checked/>
+            <label for="hqaudiobox" data-i18n="settings.hqaudio">High-quality audio</label>
+          </form>
+
+          <form>
+            <input id="activitybox" type="checkbox"/>
+            <label for="activitybox" data-i18n="settings.activity">Activity detection</label>
+          </form>
+
+          <form>
+            <input id="displayallbox" type="checkbox" checked/>
+            <label for="displayallbox" data-i18n="settings.displayAll">Display audio-only users</label>
+          </form>
+
+          <form>
+            <input id="blackboardbox" type="checkbox"/>
+            <label for="blackboardbox" data-i18n="settings.blackboard">Blackboard mode</label>
+          </form>
+
+          <form>
+            <input id="multisharebox" type="checkbox"/>
+            <label for="multisharebox" data-i18n="settings.multishare">Allow multiple screen shares</label>
+          </form>
+          </fieldset>
+        </details>
+      </div>
+    </div>
+
+    <div id="videocontrols-template" class="invisible" hidden>
+      <div class="video-controls vc-overlay">
+      </div>
+    </div>
+    <div id="topvideocontrols-template" class="invisible" hidden>
+      <div class="top-video-controls">
+        <div class="controls-button controls-right">
+          <span class="hide-icon video-hide" title="Hide video" data-i18n-title="vc.hide"><i class="fas fa-eye" aria-hidden="true"></i></span>
+        </div>
+      </div>
+    </div>
+
+    <dialog id="invite-dialog">
+      <form method="dialog">
+        <label for="invite-username" data-i18n="invite.username">Username (optional)</label>
+        <input id="invite-username" type="text"/>
+        <br>
+        <label for="invite-not-before" data-i18n="invite.notBefore">Not before</label>
+        <input id="invite-not-before" type="datetime-local"/>
+        <br>
+        <label for="invite-expires" data-i18n="invite.expires">Expires</label>
+        <input id="invite-expires" type="datetime-local"/>
+        <br>
+        <button id="invite-cancel" value="cancel" type="button" data-i18n="common.cancel">Cancel</button>
+        <button value="invite" data-i18n="invite.invite">Invite</button>
+      </form>
+    </dialog>
+
+    <script src="/protocol.js" defer></script>
+    <script src="/third-party/toastify/toastify.js" defer></script>
+    <script src="/third-party/contextual/contextual.js" defer></script>
+    <script src="/i18n.js" defer></script>
+    <!-- Deployment theme hook: runs after i18n.js so it can call
+         Sozvon.i18n.override(); a no-op in the stock distribution. -->
+    <script src="/theme/theme.js" defer></script>
+    <script src="/e2ee-crypto.js" defer></script>
+    <script src="/e2ee.js" defer></script>
+    <script src="/settings.js" defer></script>
+    <script src="/filter.js" defer></script>
+    <script src="/galene.js" defer></script>
+  </body>
+</html>

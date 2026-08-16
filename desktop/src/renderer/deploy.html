@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>SOZVON — свой сервер</title>
+  <style>
+    /* The client's palette, restated — see launcher.html for why, and
+       static/common.css for the original.  Dark is the base; the light half
+       arrives through prefers-color-scheme, which Electron drives from the
+       appearance the user chose in the web client. */
+    :root {
+      color-scheme: dark;
+      --bg: #000000;
+      --surface: #0A0A0A;
+      --surface-2: #141414;
+      --text: #FFFFFF;
+      --text-2: #BDBDBD;
+      --text-3: #8A8A8A;
+      --accent: #FFFFFF;
+      --accent-contrast: #000000;
+      --accent-hover: #D6D6D6;
+      --border: #444444;
+      --divider: rgba(255, 255, 255, 0.10);
+      --danger: #E06A6A;
+      --warn: #D6B85A;
+      --ok: #6BBE8A;
+      --shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.65);
+      --radius: 8px;
+      --radius-lg: 12px;
+      --font: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif;
+      --mono: Consolas, monospace;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        color-scheme: light;
+        --bg: #FFFFFF;
+        --surface: #F7F7F7;
+        --surface-2: #F0F0F0;
+        --text: #000000;
+        --text-2: #444444;
+        --text-3: #767676;
+        --accent: #000000;
+        --accent-contrast: #FFFFFF;
+        --accent-hover: #333333;
+        --border: #BDBDBD;
+        --divider: rgba(0, 0, 0, 0.12);
+        --danger: #B5524F;
+        --warn: #8A6D1F;
+        --ok: #2E7D50;
+        --shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.20);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--divider);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      width: 100%;
+      max-width: 560px;
+      box-shadow: var(--shadow);
+    }
+    h1 { margin: 0 0 6px; font-size: 24px; font-weight: 600; letter-spacing: -0.5px; }
+    .subtitle { margin: 0 0 20px; color: var(--text-3); font-size: 13px; line-height: 1.5; }
+    label { display: block; margin: 14px 0 6px; font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px; }
+    input[type="text"], input[type="password"], input[type="number"], select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--accent); }
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+    .hint { font-size: 12px; color: var(--text-3); margin-top: 6px; line-height: 1.5; }
+    button {
+      margin-top: 22px;
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: var(--accent-contrast);
+      border: none;
+      border-radius: var(--radius);
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { background: var(--surface-2); color: var(--text-3); cursor: not-allowed; }
+    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text-2); margin-top: 10px; }
+    button.secondary:hover { border-color: var(--accent); color: var(--text); background: transparent; }
+    .back { display: inline-block; margin-bottom: 14px; color: var(--text-3); font-size: 13px; cursor: pointer; }
+    .back:hover { color: var(--text); }
+    .steps { margin: 8px 0 0; padding: 0; list-style: none; }
+    .steps li { padding: 7px 0 7px 26px; font-size: 14px; color: var(--text-3); position: relative; }
+    .steps li::before { content: "○"; position: absolute; left: 4px; }
+    /* The step in progress is the only emphasis here; done and failed carry
+       their meaning in the status colours, which is what they are for. */
+    .steps li.active { color: var(--text); }
+    .steps li.active::before { content: "◐"; color: var(--accent); }
+    .steps li.done { color: var(--ok); }
+    .steps li.done::before { content: "●"; color: var(--ok); }
+    .steps li.failed { color: var(--danger); }
+    .steps li.failed::before { content: "✕"; color: var(--danger); }
+    .box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 14px; }
+    .box.warn { border-color: var(--warn); }
+    .box.error { border-color: var(--danger); }
+    .fp { font-family: var(--mono); font-size: 12px; word-break: break-all; color: var(--text-2); margin: 8px 0; }
+    .kv { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 14px; border-bottom: 1px solid var(--divider); }
+    .kv:last-child { border-bottom: none; }
+    .kv span:first-child { color: var(--text-3); }
+    .kv span:last-child { font-family: var(--mono); text-align: right; word-break: break-all; }
+    .row { display: flex; gap: 10px; }
+    .row button { flex: 1; }
+    pre { background: var(--surface-2); border-radius: var(--radius); padding: 10px; font-size: 11px; color: var(--text-2); max-height: 160px; overflow: auto; white-space: pre-wrap; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="card">
+
+    <!-- ---------------------------------------------------------- form -->
+    <div id="view-form">
+      <span class="back" id="back">← назад</span>
+      <h1>Развернуть свой сервер</h1>
+      <p class="subtitle">
+        SOZVON будет установлен на ваш VPS по SSH. Нужен чистый сервер с Debian
+        или Ubuntu и доступ с правами root.
+      </p>
+
+      <div class="grid">
+        <div>
+          <label for="host">Адрес сервера</label>
+          <input id="host" type="text" placeholder="203.0.113.10" autocomplete="off">
+        </div>
+        <div>
+          <label for="port">Порт SSH</label>
+          <input id="port" type="number" value="22">
+        </div>
+      </div>
+
+      <div class="grid">
+        <div>
+          <label for="user">Пользователь</label>
+          <input id="user" type="text" value="root" autocomplete="off">
+        </div>
+        <div>
+          <label for="authtype">Вход по</label>
+          <select id="authtype">
+            <option value="password">паролю</option>
+            <option value="key">ключу</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="auth-password">
+        <label for="password">Пароль SSH</label>
+        <input id="password" type="password" autocomplete="off">
+        <div class="hint">
+          Пароль используется только на время установки и никуда не
+          сохраняется.
+        </div>
+      </div>
+
+      <div id="auth-key" hidden>
+        <label for="keypath">Путь к приватному ключу</label>
+        <input id="keypath" type="text" placeholder="C:\Users\...\.ssh\id_ed25519" autocomplete="off">
+        <label for="passphrase">Пароль ключа (если есть)</label>
+        <input id="passphrase" type="password" autocomplete="off">
+      </div>
+
+      <label for="tls">Сертификат</label>
+      <select id="tls">
+        <option value="letsencrypt-sslip">Автоматически, без домена (sslip.io + Let's Encrypt)</option>
+        <option value="letsencrypt-domain">Свой домен (Let's Encrypt)</option>
+        <option value="self-signed">Самоподписанный (только из приложения)</option>
+      </select>
+      <div class="hint" id="tls-hint"></div>
+
+      <div id="domain-wrap" hidden>
+        <label for="domain">Домен</label>
+        <input id="domain" type="text" placeholder="meet.example.com" autocomplete="off">
+        <div class="hint">A-запись домена уже должна указывать на этот сервер.</div>
+      </div>
+
+      <label for="group">Название комнаты</label>
+      <input id="group" type="text" value="meet" autocomplete="off">
+
+      <button id="go">Установить</button>
+    </div>
+
+    <!-- ------------------------------------------------------- hostkey -->
+    <div id="view-hostkey" hidden>
+      <h1>Проверьте отпечаток сервера</h1>
+      <p class="subtitle" id="hk-text"></p>
+      <div class="box warn">
+        <div style="font-size:12px;color:var(--text-3);">Отпечаток ключа</div>
+        <div class="fp" id="hk-fp"></div>
+        <div id="hk-prev-wrap" hidden>
+          <div style="font-size:12px;color:var(--text-3);margin-top:10px;">Было раньше</div>
+          <div class="fp" id="hk-prev"></div>
+        </div>
+      </div>
+      <p class="hint">
+        Сверьте его с тем, что показывает панель управления вашего хостинга.
+        Если отпечаток не совпадает, кто-то может выдавать себя за ваш сервер —
+        а вы собираетесь дать ему пароль root.
+      </p>
+      <div class="row">
+        <button id="hk-no" class="secondary">Отмена</button>
+        <button id="hk-yes">Доверять</button>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------ progress -->
+    <div id="view-progress" hidden>
+      <h1>Устанавливаем</h1>
+      <p class="subtitle" id="pr-sub">Подключаемся к серверу…</p>
+      <ul class="steps" id="steps"></ul>
+      <p class="hint">
+        Обычно занимает 2–5 минут. Установка идёт на сервере сама по себе:
+        если связь оборвётся, приложение переподключится и продолжит следить.
+      </p>
+    </div>
+
+    <!-- --------------------------------------------------------- done -->
+    <div id="view-done" hidden>
+      <h1>Сервер готов</h1>
+      <p class="subtitle">Запишите пароль — он показывается только один раз.</p>
+      <div class="box">
+        <div class="kv"><span>Адрес</span><span id="r-url"></span></div>
+        <div class="kv"><span>Оператор</span><span id="r-user"></span></div>
+        <div class="kv"><span>Пароль</span><span id="r-pass"></span></div>
+        <div class="kv"><span>Версия</span><span id="r-ver"></span></div>
+      </div>
+      <div class="box warn" id="r-selfsigned" hidden>
+        <div style="font-size:13px;">
+          Сертификат самоподписанный: обычный браузер откажется открывать этот
+          адрес, работать будет только приложение.
+        </div>
+        <div class="fp" id="r-fp"></div>
+      </div>
+      <button id="d-open">Открыть комнату</button>
+      <button id="d-copy" class="secondary">Скопировать данные</button>
+    </div>
+
+    <!-- -------------------------------------------------------- error -->
+    <div id="view-error" hidden>
+      <h1>Не получилось</h1>
+      <div class="box error">
+        <div id="e-msg" style="font-size:14px;"></div>
+      </div>
+      <pre id="e-detail" hidden></pre>
+      <button id="e-retry">Назад к настройкам</button>
+    </div>
+
+  </div>
+  <script src="deploy.js"></script>
+</body>
+</html>

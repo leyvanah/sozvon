@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>SOZVON</title>
+    <meta charset="utf-8">
+    <!-- Decides light vs dark before the first paint; must stay a blocking
+         script in the head, ahead of the stylesheets.  Not to be confused
+         with the deployment theme hook in static/theme/. -->
+    <script src="/theme-init.js"></script>
+    <!-- Deployment theme hook: repointed to the theme's icon; a no-op copy
+         the SOZVON micro icon ships in the stock distribution (see static/theme/favicon.svg). -->
+    <link rel="icon" type="image/svg+xml" href="/theme/favicon.svg"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/common.css">
+    <link rel="stylesheet" href="/mainpage.css">
+    <link rel="stylesheet" type="text/css" href="/galene.css"/>
+    <link rel="author" href="https://www.irif.fr/~jch/"/>
+    <!-- Deployment theme hook: loaded last so its rules win the cascade.
+         Empty in the stock distribution; see static/theme/theme.css. -->
+    <link rel="stylesheet" type="text/css" href="/theme/theme.css"/>
+  </head>
+
+  <body>
+
+    <div class="page-prefs">
+      <div class="pref-toggle" role="group"
+           data-i18n-aria="settings.theme" aria-label="Appearance">
+        <button type="button" data-theme-option="system" data-i18n="theme.system">Auto</button>
+        <button type="button" data-theme-option="light" data-i18n="theme.light">Light</button>
+        <button type="button" data-theme-option="dark" data-i18n="theme.dark">Dark</button>
+      </div>
+      <div class="pref-toggle" role="group" aria-label="Language">
+        <button type="button" data-lang-option="en">EN</button>
+        <button type="button" data-lang-option="ru">RU</button>
+      </div>
+    </div>
+
+    <div class="home">
+      <div class="brand brand-lg">
+        <span class="brand-word">SOZVON</span>
+        <span class="brand-mark" aria-hidden="true"></span>
+      </div>
+
+      <form id="groupform">
+        <label for="group" data-i18n="home.group">Group:</label>
+        <input id="group" type="text" name="group" class="form-control form-control-inline" autofocus/>
+        <input id='submitbutton' type="submit" value="Join" class="btn btn-blue btn-large" data-i18n-value="home.join"/><br/>
+      </form>
+
+      <p id="errormessage"></p>
+  
+      <div id="public-groups" class="groups">
+        <h2 data-i18n="home.publicGroups">Public groups</h2>
+  
+        <table id="public-groups-table"></table>
+      </div>
+    </div>
+    <footer class="signature">
+      <p>SOZVON — a fork of <a href="https://galene.org/">Galène</a> by <a href="https://www.irif.fr/~jch/" rel="author">Juliusz Chroboczek</a></p>
+    </footer>
+    
+    <script src="/i18n.js" defer></script>
+    <!-- Deployment theme hook: runs after i18n.js so it can call
+         Sozvon.i18n.override(); a no-op in the stock distribution. -->
+    <script src="/theme/theme.js" defer></script>
+    <script src="/mainpage.js" defer></script>
+    
+  </body>
+</html>

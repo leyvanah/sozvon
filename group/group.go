@@ -1,0 +1,1491 @@
+package group
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log"
+	"maps"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/pion/ice/v4"
+	"github.com/pion/interceptor"
+	"github.com/pion/webrtc/v4"
+
+	"github.com/leyvanah/sozvon/token"
+)
+
+var Directory, DataDirectory string
+var UseMDNS bool
+var UDPMin, UDPMax uint16
+var udpMux ice.UDPMux
+
+var ErrUsernameRequired = errors.New("username required")
+
+type NotAuthorisedError struct {
+	err error
+}
+
+func (err *NotAuthorisedError) Error() string {
+	if err.err != nil {
+		return "not authorised: " + err.err.Error()
+	}
+	return "not authorised"
+}
+func (err *NotAuthorisedError) Unwrap() error {
+	return err.err
+}
+
+var ErrBadPassword = &NotAuthorisedError{
+	err: errors.New("bad password"),
+}
+
+var ErrNoSuchUsername = &NotAuthorisedError{
+	err: errors.New("user not found"),
+}
+
+var ErrDuplicateUsername = &NotAuthorisedError{
+	err: errors.New("this username is taken"),
+}
+
+type UserError string
+
+func (err UserError) Error() string {
+	return string(err)
+}
+
+type KickError struct {
+	Id       string
+	Username *string
+	Message  string
+}
+
+func (err KickError) Error() string {
+	m := "kicked out"
+	if err.Message != "" {
+		m += " (" + err.Message + ")"
+	}
+	if err.Username != nil && *err.Username != "" {
+		m += " by " + *err.Username
+	}
+	return m
+}
+
+type ProtocolError string
+
+func (err ProtocolError) Error() string {
+	return string(err)
+}
+
+type ChatHistoryEntry struct {
+	Id     string
+	Source string
+	User   *string
+	Time   time.Time
+	Kind   string
+	Value  interface{}
+}
+
+const (
+	LowBitrate = 100 * 1024
+	MinBitrate = LowBitrate * 2
+	MaxBitrate = 1024 * 1024 * 1024
+)
+
+type Group struct {
+	name string
+
+	mu          sync.Mutex
+	description *Description
+	locked      *string
+	locked1on1  bool
+	clients     map[string]Client
+	knocking    map[string]*knockEntry
+	admitted    map[string]bool
+	history     []ChatHistoryEntry
+	timestamp   time.Time
+	data        map[string]interface{}
+}
+
+// knockEntry is a non-op client waiting in the lobby of a locked group.
+type knockEntry struct {
+	client   Client
+	username string
+}
+
+func (g *Group) Name() string {
+	return g.name
+}
+
+func (g *Group) Locked() (bool, string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.locked != nil {
+		return true, *g.locked
+	} else {
+		return false, ""
+	}
+}
+
+func (g *Group) SetLocked(locked bool, message string) {
+	g.mu.Lock()
+	if locked {
+		g.locked = &message
+	} else {
+		g.locked = nil
+	}
+	clients := g.getClientsUnlocked(nil)
+	g.mu.Unlock()
+
+	for _, c := range clients {
+		c.Joined(g.Name(), "change")
+	}
+}
+
+// Locked1on1 reports whether the operator has engaged the 1-on-1 lock:
+// when set, non-op clients are turned away as soon as the room has two
+// participants already (ops are exempt, mirroring max-clients).
+func (g *Group) Locked1on1() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.locked1on1
+}
+
+// SetLocked1on1 toggles the runtime 1-on-1 lock on this group.  The
+// state is purely in-memory and is cleared on server restart, the same
+// as the regular lock — this matches the operator-only toggle in the
+// web client's settings drawer.
+func (g *Group) SetLocked1on1(on bool) {
+	g.mu.Lock()
+	g.locked1on1 = on
+	clients := g.getClientsUnlocked(nil)
+	g.mu.Unlock()
+
+	for _, c := range clients {
+		c.Joined(g.Name(), "change")
+	}
+}
+
+// ErrKnocking is returned by AddClient when a non-op client has been
+// placed in the waiting room (lobby) of a locked group instead of being
+// refused.  It is not an authorisation failure: the client is connected
+// and waiting for an operator to admit or deny them.
+var ErrKnocking = errors.New("knocking")
+
+// notifyKnock informs every operator in clients about a change to a knock.
+// kind is "knock" (waiting) or "knockcancel" (gone).  Called unlocked.
+func notifyKnock(g *Group, clients []Client, kind, id, username string) {
+	for _, c := range clients {
+		if slices.Contains(c.Permissions(), "op") {
+			c.PushClient(g.Name(), kind, id, username, nil, nil)
+		}
+	}
+}
+
+// Admit lets a knocking client into a locked group, in response to an
+// operator accepting the knock.  The client is granted a one-shot
+// permission to bypass the lock and is asked to re-join.
+func (g *Group) Admit(id string) error {
+	g.mu.Lock()
+	k := g.knocking[id]
+	if k == nil {
+		g.mu.Unlock()
+		return UserError("no such request")
+	}
+	delete(g.knocking, id)
+	g.admitted[id] = true
+	clients := g.getClientsUnlocked(nil)
+	g.mu.Unlock()
+
+	notifyKnock(g, clients, "knockcancel", id, k.username)
+	return k.client.Joined(g.Name(), "rejoin")
+}
+
+// Deny rejects a knocking client.
+func (g *Group) Deny(id string) error {
+	g.mu.Lock()
+	k := g.knocking[id]
+	if k == nil {
+		g.mu.Unlock()
+		return UserError("no such request")
+	}
+	delete(g.knocking, id)
+	delete(g.admitted, id)
+	clients := g.getClientsUnlocked(nil)
+	g.mu.Unlock()
+
+	notifyKnock(g, clients, "knockcancel", id, k.username)
+	return k.client.Joined(g.Name(), "deny")
+}
+
+// RemoveKnock drops any pending knock or admission for a client id, e.g.
+// when the client disconnects while waiting.
+func (g *Group) RemoveKnock(id string) {
+	g.mu.Lock()
+	k := g.knocking[id]
+	delete(g.knocking, id)
+	delete(g.admitted, id)
+	clients := g.getClientsUnlocked(nil)
+	g.mu.Unlock()
+
+	if k != nil {
+		notifyKnock(g, clients, "knockcancel", id, k.username)
+	}
+}
+
+func (g *Group) Data() map[string]interface{} {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return maps.Clone(g.data)
+}
+
+func (g *Group) UpdateData(d map[string]interface{}) {
+	g.mu.Lock()
+	if g.data == nil {
+		g.data = make(map[string]interface{})
+	}
+	for k, v := range d {
+		if v == nil {
+			delete(g.data, k)
+		} else {
+			g.data[k] = v
+		}
+	}
+	clients := g.getClientsUnlocked(nil)
+	g.mu.Unlock()
+
+	for _, c := range clients {
+		c.Joined(g.Name(), "change")
+	}
+}
+
+func (g *Group) Description() *Description {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.description
+}
+
+func (g *Group) ClientCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.clients)
+}
+
+func (g *Group) mayExpire() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.description.Public {
+		return false
+	}
+	if len(g.clients) > 0 || len(g.knocking) > 0 {
+		// keep a room alive while a client is still waiting in its
+		// lobby (an operator-room child can hold knockers with no
+		// operator present, so it would otherwise be reaped here).
+		return false
+	}
+	return time.Since(g.timestamp) > maxHistoryAge(g.description)
+}
+
+var groups struct {
+	mu     sync.Mutex
+	groups map[string]*Group
+}
+
+func (g *Group) API() (*webrtc.API, error) {
+	g.mu.Lock()
+	codecs := g.description.Codecs
+	g.mu.Unlock()
+
+	return APIFromNames(codecs)
+}
+
+func fmtpValue(fmtp, key string) string {
+	fields := strings.Split(fmtp, ";")
+	for _, f := range fields {
+		k, v, found := strings.Cut(f, "=")
+		if found && k == key {
+			return v
+		}
+	}
+	return ""
+}
+
+func CodecPayloadType(codec webrtc.RTPCodecCapability) (webrtc.PayloadType, error) {
+	switch strings.ToLower(codec.MimeType) {
+	case "video/vp8":
+		return 96, nil
+	case "video/vp9":
+		profile := fmtpValue(codec.SDPFmtpLine, "profile-id")
+		switch profile {
+		case "", "0":
+			return 98, nil
+		case "2":
+			return 100, nil
+		default:
+			return 0, fmt.Errorf("unknown VP9 profile %v", profile)
+
+		}
+	case "video/av1":
+		return 35, nil
+	case "video/h264":
+		profile := fmtpValue(codec.SDPFmtpLine, "profile-level-id")
+		if profile == "" {
+			return 102, nil
+		}
+		if len(profile) < 4 {
+			return 0, errors.New("malforned H.264 profile")
+		}
+		switch strings.ToLower(profile[:4]) {
+		case "4200":
+			return 102, nil
+		case "42e0":
+			return 108, nil
+		default:
+			return 0, fmt.Errorf(
+				"unknown H.264 profile %v", profile,
+			)
+		}
+	case "audio/opus":
+		return 111, nil
+	case "audio/g722":
+		return 9, nil
+	case "audio/pcmu":
+		return 0, nil
+	case "audio/pcma":
+		return 8, nil
+	default:
+		return 0, fmt.Errorf("unknown codec %v", codec.MimeType)
+	}
+}
+
+// VideoRTCPFeedback are the RTCP feedback types that we expect for video
+// tracks.
+var VideoRTCPFeedback = []webrtc.RTCPFeedback{
+	{"goog-remb", ""},
+	{"nack", ""},
+	{"nack", "pli"},
+	{"ccm", "fir"},
+}
+
+// AudioRTCPFeedback is like VideoRTCPFeedback but for audio tracks.
+var AudioRTCPFeedback = []webrtc.RTCPFeedback(nil)
+
+func codecsFromName(name string) ([]webrtc.RTPCodecParameters, error) {
+	var codecs []webrtc.RTPCodecCapability
+
+	switch name {
+	case "vp8":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"video/VP8", 90000, 0,
+				"",
+				VideoRTCPFeedback,
+			},
+		}
+	case "vp9":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"video/VP9", 90000, 0,
+				"profile-id=0",
+				VideoRTCPFeedback,
+			},
+			{
+				"video/VP9", 90000, 0,
+				"profile-id=2",
+				VideoRTCPFeedback,
+			},
+		}
+	case "av1":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"video/AV1", 90000, 0,
+				"",
+				VideoRTCPFeedback,
+			},
+		}
+	case "h264":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"video/H264", 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+				VideoRTCPFeedback,
+			},
+		}
+	case "opus":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"audio/opus", 48000, 2,
+				"minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1",
+				AudioRTCPFeedback,
+			},
+		}
+	case "g722":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"audio/G722", 8000, 1,
+				"",
+				AudioRTCPFeedback,
+			},
+		}
+	case "pcmu":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"audio/PCMU", 8000, 1,
+				"",
+				AudioRTCPFeedback,
+			},
+		}
+	case "pcma":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"audio/PCMA", 8000, 1,
+				"",
+				AudioRTCPFeedback,
+			},
+		}
+	default:
+		return nil, errors.New("unknown codec")
+	}
+
+	parms := make([]webrtc.RTPCodecParameters, 0, len(codecs))
+	for _, c := range codecs {
+		ptype, err := CodecPayloadType(c)
+		if err != nil {
+			log.Printf("Couldn't determine ptype for codec %v: %v",
+				c.MimeType, err)
+			continue
+		}
+		parms = append(parms, webrtc.RTPCodecParameters{
+			RTPCodecCapability: c,
+			PayloadType:        ptype,
+		})
+	}
+	return parms, nil
+}
+
+func SetUDPMux(port int) error {
+	var err error
+	udpMux, err = ice.NewMultiUDPMuxFromPort(port)
+	return err
+}
+
+func APIFromCodecs(codecs []webrtc.RTPCodecParameters) (*webrtc.API, error) {
+	s := webrtc.SettingEngine{}
+	s.SetSRTPReplayProtectionWindow(512)
+	s.DisableActiveTCP(true)
+	if !UseMDNS {
+		s.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+	}
+
+	m := webrtc.MediaEngine{}
+
+	for _, codec := range codecs {
+		tpe := webrtc.RTPCodecTypeVideo
+		if strings.HasPrefix(strings.ToLower(codec.MimeType), "audio/") {
+			tpe = webrtc.RTPCodecTypeAudio
+		}
+		err := m.RegisterCodec(codec, tpe)
+		if err != nil {
+			log.Printf("%v", err)
+			continue
+		}
+	}
+
+	if udpMux != nil {
+		s.SetICEUDPMux(udpMux)
+	} else if UDPMin > 0 && UDPMax > 0 {
+		s.SetEphemeralUDPPortRange(UDPMin, UDPMax)
+	}
+
+	err := webrtc.ConfigureSimulcastExtensionHeaders(&m)
+	if err != nil {
+		return nil, err
+	}
+
+	ir := interceptor.Registry{}
+
+	return webrtc.NewAPI(
+		webrtc.WithSettingEngine(s),
+		webrtc.WithMediaEngine(&m),
+		webrtc.WithInterceptorRegistry(&ir),
+	), nil
+}
+
+func APIFromNames(names []string) (*webrtc.API, error) {
+	if len(names) == 0 {
+		names = []string{"vp8", "opus"}
+	}
+	var codecs []webrtc.RTPCodecParameters
+	for _, n := range names {
+		cs, err := codecsFromName(n)
+		if err != nil {
+			log.Printf("Codec %v: %v", n, err)
+			continue
+		}
+		codecs = append(codecs, cs...)
+	}
+
+	return APIFromCodecs(codecs)
+}
+
+func Add(name string, desc *Description) (*Group, error) {
+	g, notify, err := add(name, desc)
+	for _, c := range notify {
+		c.Joined(g.Name(), "change")
+	}
+	return g, err
+}
+
+func validGroupName(name string) bool {
+	if strings.ContainsRune(name, '\\') {
+		return false
+	}
+	if s := filepath.Separator; s != '/' && s != '\\' {
+		if strings.ContainsRune(name, s) {
+			return false
+		}
+	}
+
+	s := path.Clean("/" + name)
+	if s == "/" {
+		return false
+	}
+
+	return s == "/"+name
+}
+
+func add(name string, desc *Description) (*Group, []Client, error) {
+	if !validGroupName(name) {
+		return nil, nil, UserError("illegal group name")
+	}
+
+	groups.mu.Lock()
+	defer groups.mu.Unlock()
+
+	if groups.groups == nil {
+		groups.groups = make(map[string]*Group)
+	}
+
+	var err error
+
+	g := groups.groups[name]
+	if g == nil {
+		if desc == nil {
+			desc, err = readDescription(name, true)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		g = &Group{
+			name:        name,
+			description: desc,
+			clients:     make(map[string]Client),
+			knocking:    make(map[string]*knockEntry),
+			admitted:    make(map[string]bool),
+			timestamp:   time.Now(),
+		}
+		groups.groups[name] = g
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	notify := false
+	if desc != nil {
+		if !descriptionMatch(g.description, desc) {
+			g.description = desc
+			notify = true
+		}
+	} else if !descriptionUnchanged(name, g.description) {
+		desc, err = readDescription(name, true)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				log.Printf("Reading group %v: %v", name, err)
+			}
+			deleteUnlocked(g)
+			return nil, nil, err
+		}
+		g.description = desc
+		notify = true
+	}
+
+	autoLockKick(g)
+
+	var clients []Client
+	if notify {
+		clients = g.getClientsUnlocked(nil)
+	}
+	return g, clients, nil
+}
+
+func Range(f func(g *Group) bool) {
+	groups.mu.Lock()
+	defer groups.mu.Unlock()
+
+	for _, g := range groups.groups {
+		ok := f(g)
+		if !ok {
+			break
+		}
+	}
+}
+
+func GetNames() []string {
+	names := make([]string, 0)
+
+	Range(func(g *Group) bool {
+		names = append(names, g.name)
+		return true
+	})
+	return names
+}
+
+type SubGroup struct {
+	Name    string
+	Clients int
+}
+
+func GetSubGroups(parent string) []SubGroup {
+	prefix := parent + "/"
+	subgroups := make([]SubGroup, 0)
+
+	Range(func(g *Group) bool {
+		if strings.HasPrefix(g.name, prefix) {
+			g.mu.Lock()
+			count := len(g.clients)
+			g.mu.Unlock()
+			if count > 0 {
+				subgroups = append(subgroups,
+					SubGroup{g.name, count})
+			}
+		}
+		return true
+	})
+	return subgroups
+}
+
+type SubGroupClient struct {
+	Username string `json:"username,omitempty"`
+	Op       bool   `json:"op,omitempty"`
+}
+
+type SubGroupStatus struct {
+	Name     string           `json:"name"`
+	Clients  []SubGroupClient `json:"clients"`
+	Knocking []string         `json:"knocking"`
+}
+
+// GetSubGroupStatus returns, for every in-memory child room of parent
+// (parent/...), who is connected (with their operator flag) and who is
+// waiting in the lobby.  Unlike GetSubGroups it also reports rooms that
+// hold only knockers, which the operator-room dashboard needs to see.
+func GetSubGroupStatus(parent string) []SubGroupStatus {
+	prefix := parent + "/"
+	statuses := make([]SubGroupStatus, 0)
+
+	Range(func(g *Group) bool {
+		if !strings.HasPrefix(g.name, prefix) {
+			return true
+		}
+		g.mu.Lock()
+		clients := make([]SubGroupClient, 0, len(g.clients))
+		for _, c := range g.clients {
+			if slices.Contains(c.Permissions(), "system") {
+				continue
+			}
+			clients = append(clients, SubGroupClient{
+				Username: c.Username(),
+				Op:       slices.Contains(c.Permissions(), "op"),
+			})
+		}
+		knocking := make([]string, 0, len(g.knocking))
+		for _, k := range g.knocking {
+			knocking = append(knocking, k.username)
+		}
+		g.mu.Unlock()
+		if len(clients) > 0 || len(knocking) > 0 {
+			statuses = append(statuses, SubGroupStatus{
+				Name:     g.name,
+				Clients:  clients,
+				Knocking: knocking,
+			})
+		}
+		return true
+	})
+	return statuses
+}
+
+func Get(name string) *Group {
+	groups.mu.Lock()
+	defer groups.mu.Unlock()
+	if groups.groups == nil {
+		return nil
+	}
+	return groups.groups[name]
+}
+
+func Delete(name string) bool {
+	groups.mu.Lock()
+	defer groups.mu.Unlock()
+	g := groups.groups[name]
+	if g == nil {
+		return false
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return deleteUnlocked(g)
+}
+
+// Called with both groups.mu and g.mu taken.
+func deleteUnlocked(g *Group) bool {
+	if len(g.clients) != 0 || len(g.knocking) != 0 {
+		// a client is connected or still waiting in the lobby
+		return false
+	}
+
+	delete(groups.groups, g.name)
+	return true
+}
+
+func AddClient(group string, c Client, creds ClientCredentials) (*Group, error) {
+	g, err := Add(group, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	clients := g.getClientsUnlocked(nil)
+
+	if !slices.Contains(c.Permissions(), "system") {
+		username, perms, err := g.description.GetPermission(
+			g.name, creds,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		c.Init(username, perms)
+
+		if !slices.Contains(perms, "op") {
+			cid := c.Id()
+			if g.description.Lobby {
+				// Waiting room: a non-op guest always waits for an
+				// operator to admit them, whether or not the group is
+				// explicitly locked.  This makes a lobby group a true
+				// private room that does not depend on the in-memory
+				// lock state, and so survives a server restart.
+				child := g.description.isOperatorRoomChild
+				if g.admitted[cid] {
+					// admitted by an operator: let them in (one shot)
+					delete(g.admitted, cid)
+				} else if creds.Token != "" && !child {
+					// invited via token: for an ordinary lobby the
+					// token is itself the pass, so skip the waiting
+					// room.  An operator-room child is different -- the
+					// personal link only says who may knock, and the
+					// operator still admits every client -- so a token
+					// holder there falls through to the knock below.
+				} else if child && creds.Token == "" {
+					// An operator-room child can only be knocked on by
+					// someone holding a valid personal link (token).
+					// This also closes any inherited wildcard-user.
+					return nil, UserError("this link is not valid")
+				} else {
+					// Ordinary lobby groups require an operator to be
+					// present to receive the knock.  Operator-room
+					// children instead hold the knocker even with no
+					// operator online, so the client can wait to be
+					// let in (the room is kept alive meanwhile).
+					if !child {
+						ops := false
+						for _, cc := range clients {
+							if slices.Contains(cc.Permissions(), "op") {
+								ops = true
+								break
+							}
+						}
+						if !ops {
+							return nil, UserError(
+								"the host is not available yet",
+							)
+						}
+					}
+					g.knocking[cid] = &knockEntry{
+						client:   c,
+						username: username,
+					}
+					notifyKnock(g, clients, "knock", cid, username)
+					return nil, ErrKnocking
+				}
+			} else if g.locked != nil {
+				m := *g.locked
+				if m == "" {
+					m = "this group is locked"
+				}
+				return nil, UserError(m)
+			}
+			if g.description.NotBefore != nil ||
+				g.description.Expires != nil {
+				now := time.Now()
+				if g.description.NotBefore != nil &&
+					g.description.NotBefore.After(now) {
+					return nil, UserError(
+						"this group is not open yet",
+					)
+				}
+				if g.description.Expires != nil &&
+					g.description.Expires.Before(now) {
+					return nil, UserError(
+						"this group is closed",
+					)
+				}
+			}
+			if g.description.Autokick {
+				ops := false
+				for _, c := range clients {
+					if slices.Contains(
+						c.Permissions(), "op",
+					) {
+						ops = true
+						break
+					}
+				}
+				if !ops {
+					return nil, UserError(
+						"there are no operators " +
+							"in this group",
+					)
+				}
+			}
+		}
+
+		if !slices.Contains(perms, "op") &&
+			g.description.MaxClients > 0 {
+			if len(g.clients) >= g.description.MaxClients {
+				return nil, UserError("too many users")
+			}
+		}
+
+		if !slices.Contains(perms, "op") && g.locked1on1 &&
+			len(g.clients) >= 2 {
+			// Runtime 1-on-1 lock set by an operator in the web
+			// client's settings drawer.  Turn away the third
+			// participant so the room stays a 1-on-1 call.
+			return nil, UserError("Room is busy, try again later")
+		}
+
+		if g.description.E2EE && g.description.RequireE2EE && !g.description.OperatorRoom {
+			// This group requires end-to-end encryption, which the web
+			// client can only provide between exactly two participants.
+			// Turn away anyone who would be the third (ops included, since
+			// a third op would break the pairwise encryption just the same)
+			// so the call cannot silently downgrade to cleartext.
+			// Operator rooms (hubs) are exempt: they serve a dashboard, not
+			// a call, so the two-participant limit doesn't apply there.  Child
+			// rooms of a hub inherit require-e2ee but have OperatorRoom=false,
+			// so the limit still protects 1-on-1 sessions.
+			if len(g.clients) >= 2 {
+				return nil, UserError(
+					"this group requires end-to-end " +
+						"encryption and is limited to " +
+						"two participants",
+				)
+			}
+		}
+	}
+	id := c.Id()
+	if id == "" {
+		return nil, errors.New("client has empty id")
+	}
+	if g.clients[id] != nil {
+		return nil, ProtocolError("duplicate client id")
+	}
+	g.clients[id] = c
+	g.timestamp = time.Now()
+
+	c.Joined(g.Name(), "join")
+
+	u := c.Username()
+	p := c.Permissions()
+	s := c.Data()
+	c.PushClient(g.Name(), "add", c.Id(), u, p, s)
+	for _, cc := range clients {
+		pp := cc.Permissions()
+		uu := cc.Username()
+		c.PushClient(g.Name(), "add", cc.Id(), uu, pp, cc.Data())
+		cc.PushClient(g.Name(), "add", id, u, p, s)
+	}
+
+	if slices.Contains(p, "op") {
+		for kid, k := range g.knocking {
+			c.PushClient(g.Name(), "knock", kid, k.username, nil, nil)
+		}
+	}
+
+	return g, nil
+}
+
+// called locked
+func autoLockKick(g *Group) {
+	if !(g.description.Autolock && g.locked == nil) &&
+		!g.description.Autokick {
+		return
+	}
+
+	clients := g.getClientsUnlocked(nil)
+	for _, c := range clients {
+		if slices.Contains(c.Permissions(), "op") {
+			return
+		}
+	}
+	if g.description.Autolock && g.locked == nil {
+		m := "this group is locked"
+		g.locked = &m
+		for _, c := range clients {
+			c.Joined(g.Name(), "change")
+		}
+	}
+
+	if g.description.Autokick {
+		// we cannot call kickall, since it requires the group to
+		// be unlocked.  And calling it asynchronously might
+		// spuriously kick out an operator.
+		go func(clients []Client) {
+			for _, c := range clients {
+				c.Kick(
+					"", nil,
+					"there are no operators in this group",
+				)
+			}
+		}(g.getClientsUnlocked(nil))
+	}
+}
+
+func DelClient(c Client) {
+	g := c.Group()
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	if g.clients[c.Id()] != c {
+		log.Printf("Deleting unknown client")
+		g.mu.Unlock()
+		return
+	}
+	delete(g.clients, c.Id())
+	g.timestamp = time.Now()
+	clients := g.getClientsUnlocked(nil)
+	g.mu.Unlock()
+
+	c.Joined(g.Name(), "leave")
+	for _, cc := range clients {
+		cc.PushClient(
+			g.Name(), "delete", c.Id(), c.Username(), nil, nil,
+		)
+	}
+	autoLockKick(g)
+}
+
+func (g *Group) GetClients(except Client) []Client {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.getClientsUnlocked(except)
+}
+
+func (g *Group) getClientsUnlocked(except Client) []Client {
+	clients := make([]Client, 0, len(g.clients))
+	for _, c := range g.clients {
+		if c != except {
+			clients = append(clients, c)
+		}
+	}
+	return clients
+}
+
+func (g *Group) GetClient(id string) Client {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.getClientUnlocked(id)
+}
+
+func (g *Group) getClientUnlocked(id string) Client {
+	for idd, c := range g.clients {
+		if idd == id {
+			return c
+		}
+	}
+	return nil
+}
+
+func (g *Group) Range(f func(c Client) bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, c := range g.clients {
+		ok := f(c)
+		if !ok {
+			break
+		}
+	}
+}
+
+func kickall(g *Group, message string) {
+	g.Range(func(c Client) bool {
+		c.Kick("", nil, message)
+		return true
+	})
+}
+
+func Shutdown(message string) {
+	Range(func(g *Group) bool {
+		g.SetLocked(true, message)
+		kickall(g, message)
+		return true
+	})
+}
+
+type warner interface {
+	Warn(oponly bool, message string) error
+}
+
+func (g *Group) WallOps(message string) {
+	clients := g.GetClients(nil)
+	for _, c := range clients {
+		w, ok := c.(warner)
+		if !ok {
+			continue
+		}
+		err := w.Warn(true, message)
+		if err != nil {
+			log.Printf("WallOps: %v", err)
+		}
+	}
+}
+
+const maxChatHistory = 50
+
+func (g *Group) ClearChatHistory(id string, userId string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if id == "" && userId == "" {
+		g.history = nil
+		return
+	}
+	g.history = slices.DeleteFunc(g.history, func(e ChatHistoryEntry) bool {
+		return e.Source == userId && (id == "" || e.Id == id)
+	})
+}
+
+func (g *Group) AddToChatHistory(id, source string, user *string, time time.Time, kind string, value interface{}) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if len(g.history) >= maxChatHistory {
+		copy(g.history, g.history[1:])
+		g.history = g.history[:len(g.history)-1]
+	}
+	g.history = append(g.history,
+		ChatHistoryEntry{Id: id, Source: source, User: user, Time: time, Kind: kind, Value: value},
+	)
+}
+
+func discardObsoleteHistory(h []ChatHistoryEntry, duration time.Duration) []ChatHistoryEntry {
+	i := 0
+	for i < len(h) {
+		if time.Since(h[i].Time) <= duration {
+			break
+		}
+		i++
+	}
+	if i > 0 {
+		copy(h, h[i:])
+		h = h[:len(h)-i]
+	}
+	return h
+}
+
+func (g *Group) GetChatHistory() []ChatHistoryEntry {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.history = discardObsoleteHistory(
+		g.history, maxHistoryAge(g.description),
+	)
+
+	h := make([]ChatHistoryEntry, len(g.history))
+	copy(h, g.history)
+	return h
+}
+
+// Configuration represents the contents of the data/config.json file.
+type Configuration struct {
+	// The modtime and size of the file.  These are used to detect
+	// when a file has changed on disk.
+	modTime  time.Time `json:"-"`
+	fileSize int64     `json:"-"`
+
+	CanonicalHost    string                     `json:"canonicalHost,omitempty"`
+	AllowOrigin      []string                   `json:"allowOrigin,omitempty"`
+	AllowAdminOrigin []string                   `json:"allowAdminOrigin,omitempty"`
+	ProxyURL         string                     `json:"proxyURL,omitempty"`
+	WritableGroups   bool                       `json:"writableGroups,omitempty"`
+	Users            map[string]UserDescription `json:"users,omitempty"`
+
+	// obsolete fields
+	Admin []ClientPattern `json:"admin,omitempty"`
+}
+
+func (conf Configuration) Zero() bool {
+	return conf.modTime.Equal(time.Time{}) &&
+		conf.fileSize == 0
+}
+
+var configuration struct {
+	mu            sync.Mutex
+	configuration *Configuration
+}
+
+func GetConfiguration() (*Configuration, error) {
+	configuration.mu.Lock()
+	defer configuration.mu.Unlock()
+
+	if configuration.configuration == nil {
+		configuration.configuration = &Configuration{}
+	}
+
+	filename := filepath.Join(DataDirectory, "config.json")
+	fi, err := os.Stat(filename)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if !configuration.configuration.Zero() {
+				configuration.configuration = &Configuration{}
+			}
+			return configuration.configuration, nil
+		}
+		return nil, err
+	}
+
+	if configuration.configuration.modTime.Equal(fi.ModTime()) &&
+		configuration.configuration.fileSize == fi.Size() {
+		return configuration.configuration, nil
+	}
+
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	d := json.NewDecoder(f)
+	d.DisallowUnknownFields()
+	var conf Configuration
+	err = d.Decode(&conf)
+	if err != nil {
+		return nil, err
+	}
+	if conf.Admin != nil {
+		log.Printf("%v: field \"admin\" is obsolete, ignored", filename)
+		conf.Admin = nil
+	}
+	configuration.configuration = &conf
+	return configuration.configuration, nil
+}
+
+func (desc *Description) getPasswordPermission(creds ClientCredentials) (Permissions, error) {
+	if creds.Username == nil {
+		return Permissions{}, errors.New("username not provided")
+	}
+	if desc.Users != nil {
+		if c, found := desc.Users[*creds.Username]; found {
+			ok, err := c.Password.Match(creds.Password)
+			if err != nil {
+				return Permissions{}, err
+			}
+			if ok {
+				return c.Permissions, nil
+			} else {
+				return Permissions{}, ErrBadPassword
+			}
+		}
+	}
+
+	if desc.WildcardUser != nil {
+		ok, _ := desc.WildcardUser.Password.Match(creds.Password)
+		if ok {
+			return desc.WildcardUser.Permissions, nil
+		}
+	}
+	return Permissions{}, ErrNoSuchUsername
+}
+
+// Return true if there is a user entry with the given username.
+// Always return false for an empty username.
+func (g *Group) UserExists(username string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.description.userExists(username)
+}
+
+func (desc *Description) userExists(username string) bool {
+	if desc.Users == nil {
+		return false
+	}
+	_, found := desc.Users[username]
+	return found
+}
+
+// validUsername returns true if a string is a valid username.
+// On the one hand, we want to allow usernames such as "jch@work"
+// or "Alice c/o Bob".  On the other hand, not restricting
+// usernames might lead to security vulnaribilities.
+// For now, we just do the minimal validation that avoids path traversal.
+func validUsername(username string) bool {
+	return username == "" || validGroupName(username)
+}
+
+func (desc *Description) GetPermission(groupname string, creds ClientCredentials) (string, []string, error) {
+	var username string
+	var perms []string
+	if creds.Token != "" {
+		tok, err := token.Parse(creds.Token, desc.AuthKeys)
+		if err != nil {
+			return "", nil, &NotAuthorisedError{err: err}
+		}
+
+		if creds.Username == nil && tok.NeedsUsername() {
+			return "", nil, ErrUsernameRequired
+		}
+
+		conf, err := GetConfiguration()
+		if err != nil {
+			return "", nil, err
+		}
+
+		username, perms, err =
+			tok.Check(conf.CanonicalHost, groupname)
+		if err != nil {
+			return "", nil, &NotAuthorisedError{err: err}
+		}
+		if username == "" && creds.Username != nil {
+			if desc.userExists(*creds.Username) {
+				return "", nil, ErrDuplicateUsername
+			}
+			username = *creds.Username
+		}
+	} else if creds.Username != nil {
+		username = *creds.Username
+		ps, err := desc.getPasswordPermission(creds)
+		if err != nil {
+			return "", nil, err
+		}
+		perms = ps.Permissions(desc)
+	} else {
+		return "", nil, errors.New("neither username nor token provided")
+	}
+
+	if !validUsername(username) {
+		return "", nil, &NotAuthorisedError{
+			errors.New("invalid username"),
+		}
+	}
+
+	return username, perms, nil
+}
+
+type Status struct {
+	Name              string `json:"name"`
+	Redirect          string `json:"redirect,omitempty"`
+	Location          string `json:"location,omitempty"`
+	Endpoint          string `json:"endpoint,omitempty"`
+	DisplayName       string `json:"displayName,omitempty"`
+	Description       string `json:"description,omitempty"`
+	AuthServer        string `json:"authServer,omitempty"`
+	AuthPortal        string `json:"authPortal,omitempty"`
+	Locked            bool   `json:"locked,omitempty"`
+	Locked1on1        bool   `json:"locked1on1,omitempty"`
+	ClientCount       *int   `json:"clientCount,omitempty"`
+	CanChangePassword bool   `json:"canChangePassword,omitempty"`
+	Lobby             bool   `json:"lobby,omitempty"`
+	E2EE              bool   `json:"e2ee,omitempty"`
+	RequireE2EE       bool   `json:"requireE2ee,omitempty"`
+	OperatorRoom      bool   `json:"operatorRoom,omitempty"`
+}
+
+// Status returns a group's status.
+// Base is the base URL for groups; if omitted, then both the Location and
+// Endpoint members are omitted from the result.
+func (g *Group) Status(authentified bool, base *url.URL) Status {
+	desc := g.Description()
+
+	if desc.Redirect != "" {
+		return Status{
+			Name:        g.name,
+			Redirect:    desc.Redirect,
+			DisplayName: desc.DisplayName,
+			Description: desc.Description,
+		}
+	}
+
+	var location, endpoint string
+	if base != nil {
+		wss := "wss"
+		if base.Scheme == "http" {
+			wss = "ws"
+		}
+		l := url.URL{
+			Scheme: base.Scheme,
+			Host:   base.Host,
+			Path: path.Join(
+				path.Join(base.Path, "/group/"),
+				g.Name()) + "/",
+		}
+		location = l.String()
+		e := url.URL{
+			Scheme: wss,
+			Host:   base.Host,
+			Path:   path.Join(base.Path, "/ws"),
+		}
+		endpoint = e.String()
+	}
+
+	d := Status{
+		Name:        g.name,
+		Location:    location,
+		Endpoint:    endpoint,
+		DisplayName: desc.DisplayName,
+		AuthServer:  desc.AuthServer,
+		AuthPortal:  desc.AuthPortal,
+		Description: desc.Description,
+		Lobby:        desc.Lobby,
+		E2EE:         desc.E2EE,
+		RequireE2EE:  desc.E2EE && desc.RequireE2EE,
+		OperatorRoom: desc.OperatorRoom,
+	}
+
+	if authentified || desc.Public {
+		// these are considered private information
+		locked, _ := g.Locked()
+		count := g.ClientCount()
+		d.Locked = locked
+		d.Locked1on1 = g.Locked1on1()
+		d.ClientCount = &count
+	}
+	if authentified {
+		conf, err := GetConfiguration()
+		if err == nil {
+			d.CanChangePassword = conf.WritableGroups
+		}
+	}
+	return d
+}
+
+func GetPublic(base *url.URL) []Status {
+	gs := make([]Status, 0)
+	Range(func(g *Group) bool {
+		if g.Description().Public {
+			gs = append(gs, g.Status(false, base))
+		}
+		return true
+	})
+	sort.Slice(gs, func(i, j int) bool {
+		return gs[i].Name < gs[j].Name
+	})
+	return gs
+}
+
+// Update checks that all in-memory groups are up-to-date and updates the
+// list of public groups.  It also removes from memory any non-public
+// groups that haven't been accessed in maxHistoryAge.
+func Update() {
+	_, err := GetConfiguration()
+	if err != nil {
+		log.Printf("%v: %v",
+			filepath.Join(DataDirectory, "config.json"),
+			err,
+		)
+	}
+
+	names := GetNames()
+	for _, name := range names {
+		g := Get(name)
+		if g == nil {
+			continue
+		}
+
+		deleted := false
+		if g.mayExpire() {
+			// Delete checks if the group is still empty
+			deleted = Delete(name)
+		}
+
+		// update group description
+		if !deleted {
+			Add(name, nil)
+		}
+	}
+
+	err = filepath.WalkDir(
+		Directory,
+		func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				log.Printf("Group file %v: %v", path, err)
+				return nil
+			}
+			if d.IsDir() {
+				base := filepath.Base(path)
+				if base[0] == '.' {
+					log.Printf(
+						"Ignoring group directory %v",
+						path,
+					)
+					return fs.SkipDir
+				}
+				return nil
+			}
+			filename, err := filepath.Rel(Directory, path)
+			if err != nil {
+				log.Printf("Group file %v: %v", path, err)
+				return nil
+			}
+			if !strings.HasSuffix(filename, ".json") {
+				log.Printf(
+					"Unexpected extension for group file %v",
+					path,
+				)
+				return nil
+			}
+			base := filepath.Base(filename)
+			if base[0] == '.' {
+				log.Printf("Ignoring group file %v", filename)
+				return nil
+			}
+			name := strings.TrimSuffix(filename, ".json")
+			desc, err := GetDescription(name)
+			if err != nil {
+				log.Printf("Group file %v: %v", path, err)
+				return nil
+			}
+			if desc.Public {
+				Add(name, desc)
+			}
+			return nil
+		},
+	)
+
+	if err != nil {
+		log.Printf("Couldn't read groups: %v", err)
+	}
+}

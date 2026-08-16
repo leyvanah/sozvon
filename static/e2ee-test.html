@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<!-- Standalone harness for the Sozvon E2EE handshake + emoji SAS.  It runs two
+     controllers in one page, relaying the signalling between them in JS, so the
+     ECDH key agreement and the Short Authentication String can be exercised in
+     a real browser without the full Galène stack or any media devices.
+
+     The encrypted-media path (getUserMedia -> RTCRtpScriptTransform -> SFU ->
+     decode) is NOT covered here: that needs two real browsers on a running
+     Sozvon server with an `"e2ee": true` group.  See the live-test recipe. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SOZVON E2EE — handshake & SAS test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto;
+           padding: 0 1rem; background: #0b0f14; color: #e8eaed; }
+    h1 { font-size: 1.3rem; }
+    .row { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+    .peer { flex: 1 1 320px; border: 1px solid #2a3340; border-radius: 10px; padding: 1rem;
+            background: #121821; }
+    .peer h2 { font-size: 1rem; margin: 0 0 .5rem; }
+    .sas { font-size: 2rem; letter-spacing: .3rem; min-height: 2.4rem; }
+    .state { font-family: monospace; color: #9aa4b2; }
+    .verdict { font-size: 1.1rem; font-weight: 600; margin: 1rem 0; padding: .6rem .9rem;
+               border-radius: 8px; }
+    .ok { background: rgba(110,231,183,.15); border: 1px solid #6ee7b7; color: #6ee7b7; }
+    .bad { background: rgba(239,83,80,.15); border: 1px solid #ef5350; color: #ef5350; }
+    button { border: none; border-radius: 8px; padding: .5rem 1rem; font-weight: 600;
+             cursor: pointer; background: #6ee7b7; color: #0b0f14; }
+    label { display: inline-flex; align-items: center; gap: .4rem; margin-left: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>SOZVON E2EE — handshake &amp; SAS test</h1>
+  <p>Two controllers negotiate an ephemeral ECDH key over an in-page relay and
+     derive the emoji SAS. With an honest relay both sides must show the
+     <em>same</em> emoji. Toggle the attacker to see the man-in-the-middle
+     detected.</p>
+  <div>
+    <button id="run">Run handshake</button>
+    <label><input type="checkbox" id="mitm"> Simulate man-in-the-middle</label>
+  </div>
+  <div id="verdict" class="verdict"></div>
+  <div class="row">
+    <div class="peer">
+      <h2>Peer A (initiator)</h2>
+      <div class="sas" id="sas-a"></div>
+      <div class="state" id="state-a"></div>
+    </div>
+    <div class="peer">
+      <h2>Peer B (responder)</h2>
+      <div class="sas" id="sas-b"></div>
+      <div class="state" id="state-b"></div>
+    </div>
+  </div>
+
+  <script src="/e2ee-crypto.js"></script>
+  <script src="/e2ee.js"></script>
+  <script>
+    'use strict';
+    const C = window.SozvonE2EECrypto;
+
+    function makeSC(id, deliver) {
+      return {id, userMessage: (kind, dest, payload) => deliver(id, dest, payload)};
+    }
+
+    async function run() {
+      const mitm = document.getElementById('mitm').checked;
+      for(const s of ['a', 'b']) {
+        document.getElementById('sas-' + s).textContent = '';
+        document.getElementById('state-' + s).textContent = '';
+      }
+      const verdict = document.getElementById('verdict');
+      verdict.className = 'verdict';
+      verdict.textContent = 'running…';
+
+      const queue = [];
+      const ctrl = {};
+      // An attacker that flips a byte of the responder's DH key, modelling an
+      // active tamper. The initiator's commitment check must catch it.
+      function relay(from, dest, payload) {
+        if(mitm && from === 'zzz' && dest === 'aaa' && payload && payload.t === 'dh') {
+          const pub = C.unb64(payload.pub);
+          pub[1] ^= 0x01;
+          payload = {t: 'dh', pub: C.b64(pub)};
+        }
+        queue.push({from, dest, payload});
+      }
+
+      const a = new window.SozvonE2EE(makeSC('aaa', relay));
+      const b = new window.SozvonE2EE(makeSC('zzz', relay));
+      a.supported = b.supported = true; // run even without RTCRtpScriptTransform
+      ctrl['aaa'] = a; ctrl['zzz'] = b;
+      const render = (c, s) => {
+        document.getElementById('sas-' + s).textContent = c.sas ? c.sas.join('') : '—';
+        document.getElementById('state-' + s).textContent =
+            c.state + (c.detail ? ' (' + c.detail + ')' : '');
+      };
+      a.onstate = () => render(a, 'a'); a.onsas = () => render(a, 'a');
+      b.onstate = () => render(b, 'b'); b.onsas = () => render(b, 'b');
+
+      a.users = new Set(['zzz']); b.users = new Set(['aaa']);
+      await a.startWith('zzz'); await b.startWith('aaa');
+      let steps = 0;
+      while(queue.length && steps++ < 2000) {
+        const m = queue.shift();
+        if(m.payload == null) continue;
+        await ctrl[m.dest].onMessage(m.from, m.payload);
+      }
+      render(a, 'a'); render(b, 'b');
+
+      const same = a.sas && b.sas && a.sas.join('') === b.sas.join('');
+      if(a.state === 'established' && b.state === 'established' && same) {
+        verdict.className = 'verdict ok';
+        verdict.textContent = '✓ Secure: both sides agree on the SAS (no interception).';
+      } else if(a.state === 'failed') {
+        verdict.className = 'verdict bad';
+        verdict.textContent = '✗ Attack detected: ' + (a.detail || 'handshake failed') +
+            ' — the emoji would not have matched.';
+      } else {
+        verdict.className = 'verdict bad';
+        verdict.textContent = '✗ Handshake did not complete (A=' + a.state + ', B=' + b.state + ').';
+      }
+    }
+
+    document.getElementById('run').onclick = run;
+    run();
+  </script>
+</body>
+</html>

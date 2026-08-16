@@ -1,0 +1,39 @@
+[Unit]
+Description=Sozvon video conferencing server
+Documentation=https://github.com/leyvanah/sozvon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# A dedicated unprivileged user; create it once with e.g.
+#   useradd --system --home-dir /opt/sozvon --shell /usr/sbin/nologin sozvon
+User=sozvon
+Group=sozvon
+WorkingDirectory=/opt/sozvon
+
+# Automatic TLS from Let's Encrypt for your domain(s).  Needs a real DNS name
+# (not a bare IP) and ports 443 + 80 reachable from the internet.  To use your
+# own certificate instead, drop -letsencrypt and put cert.pem + key.pem in
+# data/; behind a TLS-terminating reverse proxy use -insecure instead.
+ExecStart=/opt/sozvon/sozvon -http :443 -letsencrypt meet.example.com
+
+Restart=on-failure
+RestartSec=5
+
+# Bind the privileged ports 80 and 443 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Hardening: the server only ever writes under its own directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictNamespaces=true
+ReadWritePaths=/opt/sozvon/data /opt/sozvon/groups /opt/sozvon/recordings
+
+[Install]
+WantedBy=multi-user.target

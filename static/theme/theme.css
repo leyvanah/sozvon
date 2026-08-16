@@ -1,0 +1,40 @@
+/* Sozvon deployment theme hook.
+ *
+ * This stylesheet is loaded last on every visitor-facing page — landing,
+ * login / waiting room, 404, statistics and change-password — so its rules
+ * win the cascade.  In the stock distribution it is intentionally empty:
+ * Sozvon looks the same as always.
+ *
+ * A deployment may replace the contents of static/theme/ at deploy time to
+ * reskin its instance without touching the rest of the tree — keep site
+ * themes out of this repository.  Extra assets (fonts, textures, SVG)
+ * belong in this directory too and are referenced by relative URL: the CSP
+ * is same-origin only ('self'), so cross-origin resources and data: images
+ * will be blocked.
+ *
+ * Everything a theme needs is reachable from CSS; nothing here requires
+ * editing the markup.  In particular:
+ *
+ *   * Recolouring is best done by redefining the design tokens rather than
+ *     by restyling individual rules:
+ *
+ *         :root, :root[data-theme] { --bg: #F2EBDB; --text: #1B1B1B; }
+ *
+ *     Note the second selector.  The client ships two themes, and the light
+ *     one lives in a `:root[data-theme="light"]` block in common.css — which
+ *     outranks a bare `:root` here, however late this file loads, because it
+ *     is one specificity step higher.  Matching `[data-theme]` puts a theme
+ *     back on top of both.  A theme that means to override only one of them
+ *     can say so: `:root[data-theme="dark"] { … }`.
+ *
+ *     common.css paints `html` with var(--bg) before first paint, so this
+ *     also covers the brief window before galene.css applies.  The markup
+ *     deliberately carries no bgcolor= attribute, which CSS cannot override.
+ *
+ *   * Native controls (form widgets, scrollbars, the browser canvas) follow
+ *     the CSS color-scheme property, so a light theme declares:
+ *
+ *         :root, :root[data-theme] { color-scheme: light; }
+ *
+ * See also theme.js in this directory for text/branding overrides.
+ */

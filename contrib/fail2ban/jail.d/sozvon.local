@@ -1,0 +1,20 @@
+# Fail2ban jail for Sozvon.  Copy to /etc/fail2ban/jail.d/sozvon.local.
+#
+# This is a second, firewall-level layer on top of the server's built-in
+# throttle: Sozvon itself delays failed logins exponentially and refuses an
+# address for 15 minutes after 10 failures.  While an address is refused
+# its attempts are not logged (they never reach a password check), so a
+# persistent guesser produces at most 10 log lines per ~16-minute cycle —
+# the findtime below spans two such cycles, and fail2ban then takes over
+# with a much longer ban.
+#
+# Adjust `port` to the ports Sozvon actually listens on.
+
+[sozvon]
+enabled = true
+backend = systemd
+port = 443,8443
+filter = sozvon
+maxretry = 15
+findtime = 1h
+bantime = 6h

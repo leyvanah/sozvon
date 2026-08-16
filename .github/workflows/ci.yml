@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main, sozvon-rebrand]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build, vet & test
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build all packages
+        run: go build ./...
+      # -composites=false silences "unkeyed fields" warnings on third-party
+      # (pion) and inherited upstream structs; every other vet analyzer runs.
+      - name: Vet
+        run: go vet -composites=false ./...
+      - name: Test
+        run: go test ./...
+
+  govulncheck:
+    name: Known-vulnerability scan (informational)
+    runs-on: ubuntu-latest
+    # Reports known vulnerabilities but does NOT block CI: the vulnerability
+    # database updates independently of our code, so a hard gate could turn
+    # red with no change on our side. Review the log and fix deliberately.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Scan dependencies and stdlib
+        run: govulncheck ./...
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install gitleaks
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+      - name: Scan full history for secrets
+        run: |
+          "$(go env GOPATH)/bin/gitleaks" git --config .gitleaks.toml --redact --no-banner .
+
+  desktop:
+    name: Desktop client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      # Only the runtime dependency is needed to load and check the sources;
+      # installing Electron here would download ~100 MB for nothing.
+      - name: Install dependencies
+        run: npm ci --omit=dev
+        working-directory: desktop
+      - name: Syntax check
+        working-directory: desktop
+        run: |
+          for f in src/main.js src/preload.js src/deploy/deployer.js \
+                   src/renderer/launcher.js src/renderer/deploy.js \
+                   scripts/test-deploy.js scripts/sync-installer.js; do
+              node --check "$f"
+          done
+      # The deployer must load, and must find the installer it uploads.
+      - name: Check the installer is reachable
+        working-directory: desktop
+        run: |
+          npm run sync-installer
+          node -e "
+            const { Deployer } = require('./src/deploy/deployer');
+            const fs = require('fs');
+            const p = new Deployer({ host: 'x' }).scriptPath;
+            if (!fs.existsSync(p)) { console.error('installer not found at ' + p); process.exit(1); }
+            console.log('installer resolved: ' + p);
+          "
+      # contrib/install.sh is executed by /bin/sh on a server; dash is what
+      # Debian actually uses, and it is stricter than bash.
+      - name: Check the installer parses under dash
+        run: |
+          sudo apt-get install -y -qq dash
+          dash -n contrib/install.sh
