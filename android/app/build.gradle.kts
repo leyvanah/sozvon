@@ -1,3 +1,7 @@
+import java.io.File
+import java.net.URL
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -52,7 +56,7 @@ val fetchServerRelease by tasks.registering {
         fun fetch(name: String, target: File) {
             if (target.exists() && target.length() > 0L) return
             logger.lifecycle("fetching $name")
-            java.net.URL("$base/$name").openStream().use { input ->
+            URL("$base/$name").openStream().use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             }
             if (target.length() == 0L) {
@@ -72,7 +76,7 @@ val fetchServerRelease by tasks.registering {
             // The release's own checksum, checked here rather than trusting
             // the download: a corrupt archive baked into an APK would only
             // surface on someone else's server.
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val digest = MessageDigest.getInstance("SHA-256")
             f.inputStream().use { s ->
                 val buf = ByteArray(1 shl 16)
                 while (true) {
