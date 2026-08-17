@@ -95,7 +95,7 @@ class SshDeployer(
         val version: String,
         /** Contents of the release's SHA256SUMS, verbatim. */
         val sums: String,
-        /** Opens an asset by path, e.g. "server/sozvon_v0.2.0_linux_amd64.tar.gz". */
+        /** Opens an asset by path, e.g. "server/amd64.pkg". */
         private val openAsset: (String) -> java.io.InputStream,
         /** Size of each archive, by architecture, for the progress bar. */
         private val sizes: Map<String, Long>,
@@ -103,8 +103,14 @@ class SshDeployer(
         fun archiveName(arch: String) = "sozvon_${version}_linux_$arch.tar.gz"
         fun has(arch: String) = sizes.containsKey(arch)
         fun size(arch: String) = sizes[arch] ?: 0L
+        /**
+         * The archive as it is stored in the APK.  Not under its release
+         * name: the Android packager unwraps a ".gz" asset -- gunzipping it
+         * and dropping the extension -- so it is shipped as "<arch>.pkg" and
+         * only takes its real name when it is written to the server.
+         */
         fun openArchive(arch: String): java.io.InputStream =
-            openAsset("server/" + archiveName(arch))
+            openAsset("server/$arch.pkg")
     }
 
     class DeployException(

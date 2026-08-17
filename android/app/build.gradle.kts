@@ -52,6 +52,17 @@ val fetchServerRelease by tasks.registering {
     outputs.dir(outDir)
     doLast {
         outDir.mkdirs()
+        // Anything left from an earlier version -- or from an earlier naming
+        // scheme -- would otherwise be packaged alongside the current one and
+        // quietly bloat the APK.
+        val expected = serverArches.map { "$it.pkg" } +
+            listOf("SHA256SUMS", "latest", "manifest")
+        outDir.listFiles()?.forEach { f ->
+            if (f.name !in expected) {
+                logger.lifecycle("removing stale asset ${f.name}")
+                f.delete()
+            }
+        }
         val base = "https://github.com/$serverRepo/releases/download/$serverVersion"
         fun fetch(name: String, target: File) {
             if (target.exists() && target.length() > 0L) return
@@ -71,7 +82,14 @@ val fetchServerRelease by tasks.registering {
         val manifest = StringBuilder()
         for (arch in serverArches) {
             val name = "sozvon_${serverVersion}_linux_$arch.tar.gz"
-            val f = File(outDir, name)
+            // Stored under a neutral extension on purpose.  The Android
+            // packager treats a ".gz" asset as something to unwrap: it
+            // gunzips the file and drops the extension, so an asset named
+            // *.tar.gz arrives in the APK as a 21 MB *.tar that no longer
+            // matches the release's checksum and no longer has the name the
+            // app looks for.  ".pkg" is passed through untouched; the archive
+            // gets its real name back when it lands on the server.
+            val f = File(outDir, "$arch.pkg")
             fetch(name, f)
             // The release's own checksum, checked here rather than trusting
             // the download: a corrupt archive baked into an APK would only
@@ -122,7 +140,7 @@ android {
         // The release archives are gzip already.  Packing them again gains
         // nothing, costs build time, and -- worse -- a compressed asset
         // cannot be streamed straight out of the APK.
-        noCompress += "gz"
+        noCompress += "pkg"
     }
 
     buildTypes {
