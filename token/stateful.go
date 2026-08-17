@@ -26,6 +26,13 @@ type Stateful struct {
 	NotBefore        *time.Time `json:"not-before,omitempty"`
 	IssuedAt         *time.Time `json:"issuedAt,omitempty"`
 	IssuedBy         *string    `json:"issuedBy,omitempty"`
+	// Link marks a per-client invite link that an operator hub minted for
+	// one of its child rooms -- the links its dashboard lists.  It is set
+	// by the server at mint time and never read from the client request,
+	// so a token cannot claim to be a link.  Tokens minted inside a room
+	// (a remembered device, an /invite) are not links, even though they
+	// belong to the same group. (Sozvon)
+	Link bool `json:"link,omitempty"`
 }
 
 func (token *Stateful) Clone() *Stateful {
@@ -39,6 +46,7 @@ func (token *Stateful) Clone() *Stateful {
 		NotBefore:        token.NotBefore,
 		IssuedAt:         token.IssuedAt,
 		IssuedBy:         token.IssuedBy,
+		Link:             token.Link,
 	}
 }
 
@@ -128,7 +136,6 @@ func (token *Stateful) Check(host, group string) (string, []string, error) {
 func (token *Stateful) NeedsUsername() bool {
 	return token.Username == nil
 }
-
 
 // called locked
 func (state *state) reset() {

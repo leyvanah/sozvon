@@ -1322,6 +1322,11 @@ type Status struct {
 	E2EE              bool   `json:"e2ee,omitempty"`
 	RequireE2EE       bool   `json:"requireE2ee,omitempty"`
 	OperatorRoom      bool   `json:"operatorRoom,omitempty"`
+	// OperatorRoomChild marks a per-client room of an operator hub.  The
+	// client needs to know: a token minted here would belong to the child
+	// room, where the hub dashboard lists it as if it were a client's
+	// invite link, so "remember me" is not offered in such a room. (Sozvon)
+	OperatorRoomChild bool `json:"operatorRoomChild,omitempty"`
 }
 
 // Status returns a group's status.
@@ -1362,17 +1367,18 @@ func (g *Group) Status(authentified bool, base *url.URL) Status {
 	}
 
 	d := Status{
-		Name:        g.name,
-		Location:    location,
-		Endpoint:    endpoint,
-		DisplayName: desc.DisplayName,
-		AuthServer:  desc.AuthServer,
-		AuthPortal:  desc.AuthPortal,
-		Description: desc.Description,
-		Lobby:        desc.Lobby,
-		E2EE:         desc.E2EE,
-		RequireE2EE:  desc.E2EE && desc.RequireE2EE,
-		OperatorRoom: desc.OperatorRoom,
+		Name:              g.name,
+		Location:          location,
+		Endpoint:          endpoint,
+		DisplayName:       desc.DisplayName,
+		AuthServer:        desc.AuthServer,
+		AuthPortal:        desc.AuthPortal,
+		Description:       desc.Description,
+		Lobby:             desc.Lobby,
+		E2EE:              desc.E2EE,
+		RequireE2EE:       desc.E2EE && desc.RequireE2EE,
+		OperatorRoom:      desc.OperatorRoom,
+		OperatorRoomChild: desc.isOperatorRoomChild,
 	}
 
 	if authentified || desc.Public {

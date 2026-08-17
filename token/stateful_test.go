@@ -30,7 +30,8 @@ func equal(a, b *Stateful) bool {
 		!reflect.DeepEqual(a.Permissions, b.Permissions) ||
 		!timeEqual(a.Expires, b.Expires) ||
 		!reflect.DeepEqual(a.IssuedBy, b.IssuedBy) ||
-		!timeEqual(a.IssuedAt, b.IssuedAt) {
+		!timeEqual(a.IssuedAt, b.IssuedAt) ||
+		a.Link != b.Link {
 		return false
 	}
 
@@ -316,6 +317,9 @@ func TestTokenStorage(t *testing.T) {
 			Username:    &user3,
 			Permissions: []string{"present", "message"},
 			Expires:     &nearFuture,
+			// a per-client invite link: the flag must survive the
+			// round trip through the file (Sozvon)
+			Link: true,
 		},
 	}
 	for i, token := range tokens {
@@ -375,6 +379,31 @@ func TestTokenStorage(t *testing.T) {
 	_, err = os.Stat(s.filename)
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("existence check: %v", err)
+	}
+}
+
+// A clone must carry Link: edittoken (rtpconn) builds the updated token
+// from a clone of the stored one, so a field missing here would silently
+// demote a client's invite link to an ordinary token the next time its
+// expiry was extended, and the operator dashboard would stop listing it.
+// (Sozvon)
+func TestCloneLink(t *testing.T) {
+	user := "user"
+	expires := time.Now().Add(time.Hour)
+	tok := &Stateful{
+		Token:       "tok",
+		Group:       "hub/room",
+		Username:    &user,
+		Permissions: []string{"present", "message"},
+		Expires:     &expires,
+		Link:        true,
+	}
+	clone := tok.Clone()
+	if !clone.Link {
+		t.Errorf("Clone: Link not preserved")
+	}
+	if !equal(clone, tok) {
+		t.Errorf("Clone: got %v, expected %v", clone, tok)
 	}
 }
 
