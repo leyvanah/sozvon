@@ -5,6 +5,11 @@ on:
   push:
     paths:
       - 'android/**'
+      # The APK embeds the installer and the server release, so a change to
+      # either one changes the app even though nothing under android/ moved.
+      # A fix to install.sh that never reached a build is exactly how a stale
+      # installer shipped once before.
+      - 'contrib/install.sh'
       - '.github/workflows/android-apk.yml'
 
 jobs:
