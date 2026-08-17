@@ -1058,6 +1058,22 @@ h1 {
     margin: 0;
 }
 
+/* The upstream credit at the foot of the drawer.  It shares .signature with
+   the landing page's footer, but that one is sized for a page: here it takes
+   the drawer's own group step above it and drops the page footer's min-height,
+   which would otherwise leave a band of empty drawer under one line of text.
+   Quieter than a setting, because it is not one. */
+.drawer-signature {
+    margin-top: var(--group-gap);
+    min-height: 0;
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+}
+
+.drawer-signature p {
+    margin: 12px 0 0;
+}
+
 fieldset {
     margin: 0;
     margin-top: 20px;
