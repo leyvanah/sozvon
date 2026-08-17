@@ -1,3 +1,5 @@
+**English** · [Русский](README.ru.md)
+
 # Sozvon
 
 Sozvon is a self-hosted video conferencing service, built as a fork of
