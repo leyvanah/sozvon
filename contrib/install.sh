@@ -738,9 +738,23 @@ stage verify "waiting for the server to answer"
 
 ok=no
 i=0
+# Ask for the server's real name, but pin that name to the loopback.
+#
+# Probing https://127.0.0.1 directly does not work in the Let's Encrypt
+# modes, and fails in a way that looks like the server is dead: the
+# certificate is issued for $HOSTNAME, the handshake for any other name is
+# refused before a certificate is offered, and the connection dies with an
+# internal-error alert.  -k does not help -- the refusal is the server's, not
+# curl's.  Resolving the real name to 127.0.0.1 keeps the check local, and
+# needs no working DNS or return path through the provider's network, while
+# still presenting the name the certificate is for.
+PROBE_URL="https://$HOSTNAME:$HTTPS_PORT/healthz"
 # Let's Encrypt issuance can take a little while on first start.
 while [ $i -lt 60 ]; do
-	if curl -fsk --max-time 5 "https://127.0.0.1:$HTTPS_PORT/healthz" 2>/dev/null | grep -q ok; then
+	# shellcheck disable=SC2086
+	if curl -fsk --max-time 5 \
+	    --resolve "$HOSTNAME:$HTTPS_PORT:127.0.0.1" \
+	    "$PROBE_URL" 2>/dev/null | grep -q ok; then
 		ok=yes
 		break
 	fi
@@ -761,7 +775,7 @@ if [ "$ok" != yes ]; then
 		systemctl restart sozvon || true
 		fail "the new version did not come up; rolled back to $(basename "$PREVIOUS")"
 	fi
-	fail "the server did not answer on https://127.0.0.1:$HTTPS_PORT/healthz"
+	fail "the server did not answer on $PROBE_URL"
 fi
 
 if [ "$TLS_MODE" != self-signed ]; then
