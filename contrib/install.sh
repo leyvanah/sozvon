@@ -31,6 +31,8 @@ ADMIN_USER=operator
 ADMIN_PASSWORD=
 GROUP_NAME=meet
 OPERATOR_ROOM=yes
+E2EE=yes
+REQUIRE_E2EE=no
 UDP_PORT=8443
 HTTPS_PORT=443
 DETACH=no
@@ -60,6 +62,14 @@ Usage: $0 [option...]
                         only through such a link.  With "no" the group is an
                         ordinary room behind a waiting room instead, which
                         anyone who has its address may knock on.
+  --e2ee yes|no         end-to-end encryption for the group (default: yes).
+                        Two-party calls are encrypted so the server cannot
+                        read them; a call that cannot be encrypted -- three
+                        or more people, or a browser without the support --
+                        continues and says so.
+  --require-e2ee yes|no refuse anyone who cannot encrypt (default: no).  Only
+                        meaningful with --e2ee yes; turns the notice above
+                        into a closed door.
   --admin-user NAME     operator account (default: $ADMIN_USER)
   --admin-password PW   operator password (default: generated).  Prefer
                         --admin-password-env when other users share the
@@ -104,6 +114,8 @@ while [ $# -gt 0 ]; do
 	--mirror) MIRROR="$2"; shift 2 ;;
 	--group) GROUP_NAME="$2"; shift 2 ;;
 	--operator-room) OPERATOR_ROOM="$2"; shift 2 ;;
+	--e2ee) E2EE="$2"; shift 2 ;;
+	--require-e2ee) REQUIRE_E2EE="$2"; shift 2 ;;
 	--admin-user) ADMIN_USER="$2"; shift 2 ;;
 	--admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
 	--admin-password-env) ADMIN_PASSWORD="${SOZVON_ADMIN_PASSWORD:-}"; shift ;;
@@ -130,6 +142,26 @@ yes|true|1) OPERATOR_ROOM=yes ;;
 no|false|0) OPERATOR_ROOM=no ;;
 *) echo "--operator-room takes yes or no, not: $OPERATOR_ROOM" >&2; exit 2 ;;
 esac
+
+case "$E2EE" in
+yes|true|1) E2EE=yes ;;
+no|false|0) E2EE=no ;;
+*) echo "--e2ee takes yes or no, not: $E2EE" >&2; exit 2 ;;
+esac
+
+case "$REQUIRE_E2EE" in
+yes|true|1) REQUIRE_E2EE=yes ;;
+no|false|0) REQUIRE_E2EE=no ;;
+*) echo "--require-e2ee takes yes or no, not: $REQUIRE_E2EE" >&2; exit 2 ;;
+esac
+
+# "Require" without "enable" would quietly do nothing: the client only tries
+# to encrypt when the group says e2ee, so refusing everyone who cannot would
+# refuse on a promise never made.
+if [ "$REQUIRE_E2EE" = yes ] && [ "$E2EE" != yes ]; then
+	echo "--require-e2ee needs --e2ee yes" >&2
+	exit 2
+fi
 
 if [ "$TLS_MODE" = letsencrypt-domain ] && [ -z "$DOMAIN" ]; then
 	echo "--tls letsencrypt-domain requires --domain" >&2
@@ -621,6 +653,21 @@ else
 	HASHED=$("$DEST/galenectl" hash-password -password "$ADMIN_PASSWORD" 2>/dev/null) ||
 	    fail "could not hash the operator password"
 
+	# Encryption is on unless it was turned off.  A server people install
+	# for themselves should not relay conversations it could just as well
+	# not be able to read, and the client degrades honestly where pairwise
+	# encryption cannot apply: it says the call is not encrypted rather
+	# than pretending or refusing.  Written as lines so an "off" setting
+	# leaves no field behind rather than an explicit false.
+	E2EE_JSON=
+	if [ "$E2EE" = yes ]; then
+		E2EE_JSON='    "e2ee": true,'
+		if [ "$REQUIRE_E2EE" = yes ]; then
+			E2EE_JSON="$E2EE_JSON
+    \"require-e2ee\": true,"
+		fi
+	fi
+
 	if [ "$OPERATOR_ROOM" = yes ]; then
 		# An operator hub: the operator logs in at the site root and
 		# lands on a dashboard, where they create a room per client and
@@ -631,6 +678,7 @@ else
 {
     "displayName": "$GROUP_NAME",
     "operator-room": true,
+$E2EE_JSON
     "users": {
         "$ADMIN_USER": {
             "password": $HASHED,
@@ -644,6 +692,7 @@ EOF
 {
     "displayName": "$GROUP_NAME",
     "lobby": true,
+$E2EE_JSON
     "users": {
         "$ADMIN_USER": {
             "password": $HASHED,
@@ -832,6 +881,21 @@ Sozvon $VERSION is running.
   Address:   $URL
   Operator:  $ADMIN_USER
 EOF
+
+# Say what the server will and will not be able to read.  Whether a call is
+# encrypted is the kind of thing an operator should learn here rather than
+# discover later, in either direction.
+if [ "$E2EE" = yes ]; then
+	if [ "$REQUIRE_E2EE" = yes ]; then
+		echo "  Encryption: end to end, and required -- anyone who cannot"
+		echo "              encrypt is turned away"
+	else
+		echo "  Encryption: end to end for two-party calls.  A call that"
+		echo "              cannot be encrypted says so and continues"
+	fi
+else
+	echo "  Encryption: off -- this server can read the media it relays"
+fi
 
 if [ -n "$ADMIN_PASSWORD" ]; then
 	cat <<EOF
