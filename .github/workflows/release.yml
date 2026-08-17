@@ -88,7 +88,7 @@ jobs:
               cp LICENCE README.md "build/$name/"
               # The rest are documentation: a release should not fail because
               # one of them was renamed or has not landed on this branch yet.
-              for doc in FORK-CHANGES.md SECURITY.md CONTRIBUTING.md \
+              for doc in README.ru.md FORK-CHANGES.md SECURITY.md CONTRIBUTING.md \
                          galene-install.md galene.md galene-api.md; do
                   if [ -f "$doc" ]; then
                       cp "$doc" "build/$name/"
