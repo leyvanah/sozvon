@@ -392,6 +392,22 @@ class Deployer {
     }
   }
 
+  /**
+   * The address to hand the installer as --ip, or undefined to let it work
+   * that out for itself.  A literal address is returned unchanged; a name is
+   * resolved; anything that does not come back as IPv4 is left out.
+   */
+  async publicAddress() {
+    if (/^[0-9.]+$/.test(this.host)) return this.host;
+    try {
+      const { lookup } = require('dns').promises;
+      const r = await lookup(this.host, { family: 4 });
+      return r && /^[0-9.]+$/.test(r.address) ? r.address : undefined;
+    } catch (e) {
+      return undefined;
+    }
+  }
+
   /** The whole thing: upload, start, wait, return the result. */
   async deploy(options) {
     // The address we reached this server at is, by definition, one that works
@@ -400,7 +416,13 @@ class Deployer {
     // -- a VPN endpoint, a NAT gateway -- which is not where the server
     // answers.  Defaulted here rather than in a caller so no caller can
     // forget it.
-    options = { ...options, ip: options.ip || this.host };
+    //
+    // What the user typed may be a name rather than an address, though, and
+    // after one successful deploy it usually is: handing that to --ip makes
+    // the installer refuse it as "an implausible public IP".  So resolve it
+    // first.  IPv6 is left out rather than passed on -- install.sh validates
+    // --ip as an IPv4 literal and would refuse it.
+    options = { ...options, ip: options.ip || (await this.publicAddress()) };
 
     this.emit({ type: 'phase', phase: 'checking' });
     await this.checkPrivileges();

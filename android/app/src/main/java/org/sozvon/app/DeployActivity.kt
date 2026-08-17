@@ -415,13 +415,11 @@ class DeployActivity : AppCompatActivity() {
                     SshDeployer.Options(
                         tlsMode = tlsMode,
                         domain = domain.ifEmpty { null },
-                        // The address this deploy reached the server at is,
-                        // by definition, one that works from here.  Left to
-                        // guess, the installer asks an outside service for
-                        // "your public IP" and gets whatever the server's
-                        // traffic exits through -- a VPN endpoint, a NAT
-                        // gateway -- which is not where this server answers.
-                        ip = host,
+                        // ip is deliberately left unset: SshDeployer fills it
+                        // from the address this deploy actually reached, and
+                        // resolves it first if what was typed was a name.
+                        // Setting it here as well is how it came to be passed
+                        // as a hostname and refused by the installer.
                         group = group,
                         adminUser = "operator",
                         httpsPort = httpsPort,

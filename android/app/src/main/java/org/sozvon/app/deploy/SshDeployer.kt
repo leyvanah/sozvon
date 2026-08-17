@@ -295,6 +295,32 @@ class SshDeployer(
     }
 
     /**
+     * The address to tell the installer this server answers on, or null to
+     * let it work that out for itself.
+     *
+     * The address this deploy reached the server at is, by definition, one
+     * that works -- which is why it is passed at all: left to guess, the
+     * installer asks an outside service for "your public IP" and gets
+     * whatever the server's traffic exits through, a VPN endpoint or a NAT
+     * gateway, which is not where the server answers.
+     *
+     * But what the user typed may be a *name*, not an address -- and after
+     * one successful deploy it usually is, because the host field is filled
+     * in with the server's own hostname.  Handing that to --ip made the
+     * installer refuse it as "an implausible public IP".  So the name is
+     * resolved here; for a literal address getByName returns it unchanged
+     * and looks nothing up.  IPv6 is deliberately dropped rather than
+     * passed on: install.sh validates --ip as an IPv4 literal and would
+     * refuse it, and it detects its own address perfectly well.
+     */
+    private fun publicAddress(): String? = try {
+        val addr = java.net.InetAddress.getByName(host).hostAddress
+        if (addr != null && Regex("^[0-9.]+$").matches(addr)) addr else null
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
      * What the server runs on, in the installer's own vocabulary, or null if
      * it is something the release does not cover -- in which case installing
      * from the APK is not possible and the caller falls back to a download.
@@ -617,7 +643,7 @@ class SshDeployer(
         // the server answers.  Defaulted here rather than in a caller, so no
         // caller can forget it.
         var options = if (rawOptions.ip.isNullOrBlank())
-            rawOptions.copy(ip = host) else rawOptions
+            rawOptions.copy(ip = publicAddress()) else rawOptions
 
         onProgress(Progress.Phase("checking"))
         checkPrivileges()
