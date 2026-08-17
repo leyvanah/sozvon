@@ -112,6 +112,8 @@
     <string name="phase_checking">Checking privileges…</string>
     <string name="phase_uploading">Sending the installer…</string>
     <string name="phase_starting">Starting the install…</string>
+    <string name="phase_sending">Sending the server package…</string>
+    <string name="phase_sending_pct">Sending the server package… %1$d%%</string>
     <string name="phase_installing">Installing…</string>
 
     <string name="advanced_label">Advanced</string>
@@ -119,6 +121,9 @@
     <string name="https_port_hint">Leave empty for 443. A different port is needed when something else already uses 443 — but Let\'s Encrypt only works on 443, so pair it with a self-signed certificate.</string>
     <string name="mirror_label">Download mirror</string>
     <string name="mirror_hint">Leave empty to download from GitHub. Set it when the server cannot reach GitHub.</string>
+    <string name="deploy_use_bundled">Install the copy bundled with this app (%1$s)</string>
+    <string name="deploy_use_bundled_generic">Install the copy bundled with this app</string>
+    <string name="deploy_use_bundled_hint">Sends the server from your phone instead of asking it to download one. Works where GitHub is blocked. Uncheck to fetch the newest release instead.</string>
     <string name="error_cert_untrusted">This server\'s certificate is not trusted. Only a server installed from this app with a self-signed certificate can be opened this way.</string>
     <string name="error_cert_changed">The server\'s certificate has changed since it was installed. The connection was refused.</string>
 

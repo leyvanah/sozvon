@@ -131,6 +131,19 @@ class DeployActivity : AppCompatActivity() {
         wireReveal(R.id.ssh_password, R.id.ssh_password_reveal)
         wireReveal(R.id.ssh_passphrase, R.id.ssh_passphrase_reveal)
 
+        // The bundled-release choice only exists if this build has one to
+        // offer.  Showing an unchecked, unusable box would be worse than
+        // showing nothing: it would suggest the app could do something it
+        // cannot.
+        val bundled = bundledRelease()
+        val bundledBox = findViewById<CheckBox>(R.id.use_bundled)
+        if (bundled == null) {
+            findViewById<View>(R.id.use_bundled_row).visibility = View.GONE
+        } else {
+            bundledBox.text = getString(R.string.deploy_use_bundled, bundled.version)
+            bundledBox.isChecked = true
+        }
+
         mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_INSTALL
         serverUrl = intent.getStringExtra(EXTRA_SERVER_URL)
         intent.getStringExtra(EXTRA_HOST)?.takeIf { it.isNotBlank() }?.let {
@@ -366,6 +379,10 @@ class DeployActivity : AppCompatActivity() {
         val group = text(R.id.room_name).ifEmpty { "meet" }
         val httpsPort = text(R.id.https_port).toIntOrNull()
         val mirror = text(R.id.mirror_url)
+        // Unchecked means "fetch the current release from GitHub instead",
+        // which is what the installer does on its own.  The box is hidden
+        // altogether when this build carries no release to install.
+        val useBundled = findViewById<CheckBox>(R.id.use_bundled).isChecked
         lastDeploy = ServerStore.Deploy(
             sshPort = port,
             sshUser = user,
@@ -409,6 +426,7 @@ class DeployActivity : AppCompatActivity() {
                         adminUser = "operator",
                         httpsPort = httpsPort,
                         mirror = mirror.ifEmpty { null },
+                        useBundled = useBundled,
                     ),
                     prompt,
                 ) { progress -> runOnUiThread { onProgress(progress) } }
@@ -437,7 +455,46 @@ class DeployActivity : AppCompatActivity() {
             .text.toString().ifEmpty { null },
         installerScript = assets.open("install.sh").bufferedReader().use { it.readText() },
         knownFingerprint = knownKey(host, port),
+        bundledRelease = bundledRelease(),
     )
+
+    /**
+     * The server release packed into this APK, or null if this build has none.
+     *
+     * Read from the assets that :app:fetchServerRelease writes before the
+     * build: `latest` names the version, `SHA256SUMS` is the release's own
+     * checksum file, and `manifest` lists the architectures actually shipped
+     * with their sizes.  The manifest exists because an asset's size is not
+     * reliably readable once it is inside the APK, and the upload wants a
+     * total to count against.
+     *
+     * Any failure here means "this build has no bundled release", which is a
+     * legitimate state -- the app then installs the way it always did, by
+     * asking the server to download one.
+     */
+    private fun bundledRelease(): SshDeployer.BundledRelease? = try {
+        val version = assets.open("server/latest")
+            .bufferedReader().use { it.readText() }.trim()
+        val sums = assets.open("server/SHA256SUMS")
+            .bufferedReader().use { it.readText() }
+        val sizes = assets.open("server/manifest").bufferedReader().use { r ->
+            r.readLines().mapNotNull { line ->
+                val parts = line.trim().split(" ")
+                val size = parts.getOrNull(1)?.toLongOrNull()
+                if (parts.size == 2 && size != null && size > 0)
+                    parts[0] to size else null
+            }.toMap()
+        }
+        if (version.isEmpty() || sizes.isEmpty()) null
+        else SshDeployer.BundledRelease(
+            version = version,
+            sums = sums,
+            openAsset = { path -> assets.open(path) },
+            sizes = sizes,
+        )
+    } catch (e: Exception) {
+        null
+    }
 
     /** Take Sozvon off the server; with [purge], its rooms and accounts too. */
     private fun runRemoval(
@@ -561,11 +618,21 @@ class DeployActivity : AppCompatActivity() {
                     when (p.phase) {
                         "checking" -> R.string.phase_checking
                         "uploading" -> R.string.phase_uploading
+                        "sending" -> R.string.phase_sending
                         "starting" -> R.string.phase_starting
                         "removing" -> R.string.phase_removing
                         else -> R.string.phase_installing
                     }
                 )
+            }
+            is SshDeployer.Progress.Transfer -> {
+                // Several megabytes over SSH: without a number moving, this
+                // is the one step long enough to read as a hang.
+                val pct =
+                    if (p.total > 0) (p.sent * 100 / p.total).toInt().coerceIn(0, 100)
+                    else 0
+                findViewById<TextView>(R.id.progress_sub).text =
+                    getString(R.string.phase_sending_pct, pct)
             }
             is SshDeployer.Progress.Stage -> {
                 val at = SshDeployer.STAGES.indexOf(p.stage)

@@ -56,3 +56,8 @@ CLAUDE.md
 # Generated before each Android build from contrib/install.sh (see
 # android/app/build.gradle.kts); a tracked copy would drift.
 /android/app/src/main/assets/install.sh
+
+# Server release fetched before each Android build (see
+# android/app/build.gradle.kts, task fetchServerRelease); 17 MB of binaries
+# per release do not belong in the history.
+/android/app/src/main/assets/server/

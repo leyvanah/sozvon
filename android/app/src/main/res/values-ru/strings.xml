@@ -110,6 +110,8 @@
     <string name="phase_checking">Проверяем права доступа…</string>
     <string name="phase_uploading">Передаём установщик…</string>
     <string name="phase_starting">Запускаем установку…</string>
+    <string name="phase_sending">Передаём пакет сервера…</string>
+    <string name="phase_sending_pct">Передаём пакет сервера… %1$d%%</string>
     <string name="phase_installing">Идёт установка…</string>
 
     <string name="advanced_label">Дополнительно</string>
@@ -117,6 +119,9 @@
     <string name="https_port_hint">Пусто — 443. Другой порт нужен, если 443 уже занят, но Let\'s Encrypt работает только на 443 — используйте его вместе с самоподписанным сертификатом.</string>
     <string name="mirror_label">Зеркало для загрузки</string>
     <string name="mirror_hint">Пусто — качать с GitHub. Укажите, если сервер до GitHub не достучится.</string>
+    <string name="deploy_use_bundled">Ставить копию из приложения (%1$s)</string>
+    <string name="deploy_use_bundled_generic">Ставить копию из приложения</string>
+    <string name="deploy_use_bundled_hint">Сервер передаётся с телефона, а не скачивается им самим. Работает там, где GitHub заблокирован. Снимите галочку, чтобы поставить свежий релиз.</string>
     <string name="error_cert_untrusted">Сертификат сервера не является доверенным. Так можно открыть только сервер, развёрнутый из этого приложения с самоподписанным сертификатом.</string>
     <string name="error_cert_changed">Сертификат сервера изменился с момента установки. Подключение отклонено.</string>
 

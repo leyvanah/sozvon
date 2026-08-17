@@ -205,6 +205,28 @@
                 <TextView style="@style/SozvonHint"
                     android:text="@string/https_port_hint"/>
 
+                <!-- Where the server package comes from.  The bundled copy is
+                     above the mirror field on purpose: it is the answer for
+                     almost everyone, and the mirror is what is left for the
+                     people it does not cover. -->
+                <LinearLayout
+                    android:id="@+id/use_bundled_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:orientation="vertical">
+                    <CheckBox
+                        android:id="@+id/use_bundled"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:buttonTint="@color/sozvon_accent"
+                        android:checked="true"
+                        android:text="@string/deploy_use_bundled_generic"
+                        android:textColor="@color/sozvon_text"/>
+                    <TextView style="@style/SozvonHint"
+                        android:text="@string/deploy_use_bundled_hint"/>
+                </LinearLayout>
+
                 <TextView style="@style/SozvonFieldLabel"
                     android:text="@string/mirror_label"/>
                 <EditText
