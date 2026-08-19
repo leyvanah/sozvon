@@ -346,7 +346,7 @@
                        -- no separate device-check screen in between. Mirrors
                        the login card's precheck (see makePrecheck in
                        galene.js), under the "operator-precheck" id prefix. -->
-                  <div class="operator-section">
+                  <div class="operator-section operator-section-devices">
                     <p class="operator-section-title" data-i18n="operator.devicesTitle">
                       Camera &amp; microphone
                     </p>
@@ -399,7 +399,7 @@
                       </div>
                     </div>
                   </div>
-                  <div class="operator-section">
+                  <div class="operator-section operator-section-create">
                   <p class="operator-section-title" data-i18n="operator.createTitle">
                     New link
                   </p>
@@ -656,16 +656,15 @@
           </fieldset>
         </details>
 
-        <!-- Attribution, at the foot of the drawer as well as on the landing
-             page.  A participant who arrives by a room link never sees the
-             landing page, so without this the client never names the project
-             it is built on to most of the people using it.  Last in the
-             drawer on purpose: it is a credit, not a setting. -->
+        <!-- One quiet line naming the project, last in the drawer because it
+             is not a setting.  It used to carry the upstream credit in full,
+             three lines of it, which on a themed deployment read as a
+             signature on someone else's letterhead.  The credit itself has
+             not gone anywhere: it is on the landing page, in the README and
+             in LICENCE, which is where a fork owes it. -->
         <footer class="signature drawer-signature">
-          <p>SOZVON — a fork of
-            <a href="https://galene.org/" target="_blank" rel="noopener">Galène</a>
-            by <a href="https://www.irif.fr/~jch/" target="_blank"
-                  rel="noopener author">Juliusz Chroboczek</a></p>
+          <p><a href="https://github.com/leyvanah/sozvon" target="_blank"
+                rel="noopener">SOZVON</a></p>
         </footer>
       </div>
     </div>

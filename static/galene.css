@@ -3804,11 +3804,11 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     /* Horizontal padding is the phone's gutter, not a card's inset — same as
        the join screen, and the vertical margin gives way the same way. */
     padding: 0 1.25rem;
-    margin: clamp(1.5rem, 8vh, 4.5rem) auto;
+    margin: clamp(1.25rem, 5vh, 3rem) auto;
     background: transparent;
     border: none;
 }
-.operator-header { margin-bottom: 2.5rem; }
+.operator-header { margin-bottom: 2rem; }
 .operator-header-row {
     display: flex;
     align-items: flex-start;
@@ -3849,8 +3849,37 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
    drawer's caps micro-header and is separated by the space around it, which is
    the same trade the drawer made and for the same reason: on a page of three
    things, two full-width lines are the longest marks on it. */
-.operator-section { margin-bottom: 2.75rem; }
+.operator-section { margin-bottom: 2.25rem; }
 .operator-section-last { margin-bottom: 0; }
+
+/* Wide screens: two columns.  On the left is what an operator sets up once --
+   the device check, and the form that makes a link; on the right is the list
+   they opened the page for.  Stacked in one column the list sat under both of
+   them, which on a laptop put it below the fold: the page asked you to scroll
+   past two things you had already done to reach the one thing you came for.
+   The header keeps the full width, so the title stays at one edge and the way
+   out at the other.  Under this width it folds back to a single column, in the
+   order it always had.  (Sozvon) */
+@media (min-width: 62rem) {
+    .operator-box {
+        width: min(1080px, 94vw);
+        display: grid;
+        grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+        grid-template-areas:
+            "header  header"
+            "devices links"
+            "create  links";
+        column-gap: clamp(2rem, 5vw, 4rem);
+        align-content: start;
+    }
+    .operator-header { grid-area: header; }
+    .operator-section-devices { grid-area: devices; }
+    .operator-section-create { grid-area: create; }
+    .operator-section-last { grid-area: links; }
+    /* The list runs beside both sections rather than after them, so the last
+       thing in the left column no longer needs to hold space under itself. */
+    .operator-section-create { margin-bottom: 0; }
+}
 .operator-section-title {
     margin: 0 0 1rem;
     font-size: var(--fs-sm);
