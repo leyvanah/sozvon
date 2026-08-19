@@ -1052,6 +1052,15 @@ h1 {
     height: calc(100% - 56px);
     overflow-y: auto;
     overflow-x: hidden;
+    /* Reserve the scrollbar's track whether or not it is showing.  Opening the
+       Advanced disclosure makes the column overflow, and without this the
+       scrollbar appearing takes its width out of the content: every control in
+       the drawer jumps left by ~15px at the moment of the click, which reads as
+       the panel flinching.  A gutter that is always there costs a little inset
+       on the right and nothing else -- and on platforms with overlay
+       scrollbars, where nothing was ever displaced, it reserves nothing.
+       (Sozvon) */
+    scrollbar-gutter: stable;
 }
 
 .sidenav-content h2 {
@@ -3792,6 +3801,10 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     justify-content: center;
     overflow-y: auto;
     overflow-x: hidden;
+    /* Same reason as the drawer: the dashboard is a centred column, so a
+       scrollbar arriving as the list grows shifts the whole page sideways by
+       half a gutter.  (Sozvon) */
+    scrollbar-gutter: stable;
     background: var(--bg);
 }
 /* This rule sets display, so it would beat the global `.invisible { display:none }`
