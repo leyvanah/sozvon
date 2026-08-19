@@ -100,7 +100,9 @@ let pendingRemember = null;
 /**
  * Set while a maketoken request is in flight specifically to remember this
  * device, so the token reply is stored instead of shown as an invite link.
- * @type {{group: string, username: string}|null}
+ * "previous" is the remember-token being replaced, revoked once the new one
+ * is stored.
+ * @type {{group: string, username: string, previous: string|null}|null}
  */
 let storingRememberToken = null;
 
@@ -186,6 +188,39 @@ function clearRememberToken(group) {
                 'sozvon.remember', JSON.stringify(all));
         }
     } catch(e) {
+    }
+}
+
+/**
+ * Number of token lists we expect as replies to a silent revocation (the
+ * server answers deletetoken with the refreshed list).  Outside the operator
+ * dashboard such a list is printed into the chat -- that is what /listtokens
+ * is for -- so these replies are swallowed instead.  A count rather than a
+ * flag, so two revocations in flight don't swallow one reply too few; it is
+ * reset with the connection, since a reply may never arrive (we revoke on
+ * logout, just before the socket closes). (Sozvon)
+ */
+let silentTokenLists = 0;
+
+/**
+ * Revoke a stateful token server-side.  Forgetting a token client-side only
+ * hides it: it stays valid until it expires, and a remember-token carries the
+ * operator's own permissions, so it must actually be deleted.  Silently does
+ * nothing unless we are in the token's group with the rights to delete it.
+ * (Sozvon)
+ * @param {string} [tok]
+ */
+function revokeToken(tok) {
+    if(!tok || !serverConnection || !serverConnection.permissions)
+        return;
+    if(serverConnection.permissions.indexOf('op') < 0 ||
+       serverConnection.permissions.indexOf('token') < 0)
+        return;
+    try {
+        serverConnection.groupAction('deletetoken', {token: tok});
+        silentTokenLists++;
+    } catch(e) {
+        console.warn("Couldn't revoke token:", e);
     }
 }
 
@@ -501,6 +536,7 @@ function setConnected(connected) {
         connectionbox.classList.remove('invisible');
         hideVideo();
         leaveOperatorRoom();   // stop the dashboard poll if it was running
+        silentTokenLists = 0;  // replies we will never receive now
         window.onresize = null;
         // Only re-evaluate the pre-join guard on disconnect: on connect the user
         // is still authenticating and the sidebar must stay hidden until join
@@ -4781,7 +4817,8 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
             clearRememberToken(group);
             setVisibility('userform', true);
             setVisibility('passwordform', true);
-            setVisibility('rememberform', true);   // back to operator login
+            // back to operator login ("remember me" is hub-only, see below)
+            setVisibility('rememberform', !groupStatus.operatorRoomChild);
             setVisibility('login-container', true);
             displayMessage(Sozvon.i18n.t('toast.rememberExpired'));
             closeSafariStream();
@@ -4895,12 +4932,22 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         stopReconnect();
         if(pendingRemember) {
             let isOp = serverConnection.permissions.indexOf('op') >= 0;
-            if(pendingRemember.remember && isOp) {
+            // Never in a per-client child room: the token would live in that
+            // room's group, and the operator reaches child rooms from the hub
+            // with their session token anyway.  The checkbox is hidden there,
+            // this is the guard behind it. (Sozvon)
+            if(pendingRemember.remember && isOp &&
+               !groupStatus.operatorRoomChild) {
                 // Mint a 30-day revocable token to remember this device; the
                 // 'token' reply is stored by gotUserMessage (storingRememberToken).
+                // Carry the token being replaced, so it is revoked server-side
+                // once the new one is safely stored -- otherwise every re-login
+                // leaves another live operator token behind.
+                let previous = loadRememberToken(pendingRemember.group);
                 storingRememberToken = {
                     group: pendingRemember.group,
                     username: pendingRemember.username,
+                    previous: (previous && previous.token) || null,
                 };
                 makeToken({
                     username: pendingRemember.username,
@@ -5266,6 +5313,10 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
             // This token is for remembering this device, not an invite link.
             saveRememberToken(storingRememberToken.group, message.token,
                               storingRememberToken.username, message.expires);
+            // The device is now remembered by the new token: revoke the one
+            // it replaces, so re-logging in doesn't pile up live operator
+            // tokens on the group. (Sozvon)
+            revokeToken(storingRememberToken.previous);
             storingRememberToken = null;
             return;
         }
@@ -5302,7 +5353,17 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
             console.error(`Got unprivileged message of kind ${kind}`);
             return;
         }
+        // A reply to a revocation nobody asked for out loud (see revokeToken):
+        // useful to the dashboard, which refreshes from it, but not something
+        // to report or to print into the chat.
+        let silent = silentTokenLists > 0;
+        if(silent)
+            silentTokenLists--;
         if(error) {
+            if(silent) {
+                console.warn('token revocation failed:', message);
+                return;
+            }
             displayError(`Token operation failed: ${message}`)
             return
         }
@@ -5311,6 +5372,8 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
             renderOperatorRoom();
             break;
         }
+        if(silent)
+            break;
         let s = '';
         for(let i = 0; i < message.length; i++) {
             let f = formatToken(message[i], true);
@@ -5467,6 +5530,12 @@ function operatorLogout() {
     try {
         window.sessionStorage.removeItem('sozvon.operatorSession');
     } catch(e) { /* ignore */ }
+    // Forgetting this device must also revoke it: the token is still live
+    // server-side otherwise, and it grants op.  Sent before the socket is
+    // closed below -- close() flushes what is already queued. (Sozvon)
+    let remembered = loadRememberToken(group);
+    if(remembered)
+        revokeToken(remembered.token);
     clearRememberToken(group);
     reconnectLastJoin = null;
     usingRememberToken = false;
@@ -5581,9 +5650,24 @@ function renderOperatorRoom() {
         playKnockSound();
 
     list.textContent = '';
-    // A hub's listtokens also returns the hub's own tokens (group === group);
-    // the dashboard only shows per-client child links.
-    let links = operatorRoom.tokens.filter(t => t.group && t.group !== group);
+    // A hub's listtokens returns every token of the subtree: its own
+    // (group === group), the per-client links it minted, and whatever was
+    // minted *inside* a child room -- a remembered operator device, an
+    // /invite.  Only the links belong on the dashboard: showing a token
+    // minted in the room would show several cards for the same room, and a
+    // remembered device carries the operator's own permissions, so copying
+    // that card to a client would hand them the room as an operator. (Sozvon)
+    let links = operatorRoom.tokens.filter(t => {
+        if(!t.group || t.group === group)
+            return false;
+        if(t.link)
+            return true;
+        // Minted before the server recorded `link`: fall back to the old
+        // guess, minus the tokens that no client link can be -- an invite
+        // never grants op.  Drop this once the deployed tokens have been
+        // reissued or migrated.
+        return (t.permissions || []).indexOf('op') < 0;
+    });
 
     // Ordering (Sozvon): listtokens sorts by expiry with an unstable tie-break,
     // so equal-expiry links (all the never-expiring ones) reshuffle on every
@@ -7040,7 +7124,12 @@ document.getElementById('operator-login-link').onclick = function(e) {
     probingState = null;
     setVisibility('userform', true);
     setVisibility('passwordform', true);
-    setVisibility('rememberform', true);   // operator login: offer "remember me"
+    // Operator login: offer "remember me" -- except in a per-client child
+    // room, where the token would land in that room's group and surface on
+    // the hub dashboard as if it were the client's own link.  The operator
+    // enters child rooms from the hub anyway, carrying the session token.
+    // (Sozvon)
+    setVisibility('rememberform', !groupStatus.operatorRoomChild);
     setVisibility('operator-login', false);
     document.getElementById('password').focus();
 };

@@ -437,6 +437,25 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     codecs, keys and `e2ee`, so a per-client call can be end-to-end encrypted.
   * The operator navigates hub → room → hub without re-entering a password via a
     short-lived (12 h) hierarchical **session token** kept per browser tab.
+  * **A link says that it is one.** The dashboard used to decide what to list by
+    the only thing it could see — the token's group: anything belonging to a
+    child room was drawn as a client's link. But a child room's group also
+    collects tokens minted *inside* it: a "remember me on this device" the
+    operator ticked while logging in there, an `/invite` from the room's menu.
+    Those appeared as extra cards on the same room, so one client showed up as
+    three links — and the remembered one, minted with the operator's own
+    permissions, was a card you could copy and send, handing a client the room
+    as an operator. The mint now records what it made: the server sets `link`
+    on a token exactly when a hub mints it for one of its child rooms, which is
+    the only shape a client link has, and never reads the field from the client
+    request, so a token cannot claim to be one. The dashboard lists tokens
+    carrying it; for tokens minted before the flag existed it falls back to the
+    old guess minus what a client link can never be — an invite that grants
+    `op`. "Remember me" is not offered in a child room at all (it belongs to
+    the hub, which is where the operator logs in), and re-logging in now
+    **revokes the token it replaces** rather than leaving another live one
+    behind — as does logging out, which used to forget the device locally while
+    the token stayed valid for its full 30 days.
   * **The dashboard is headed "Operator panel"**, not the hub's `displayName`.
     It had been showing the room's name ("Reception"), which named the thing
     the operator was standing in rather than the page they were looking at, and

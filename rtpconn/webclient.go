@@ -1830,11 +1830,18 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 				return terror("error", "client specified token")
 			}
 
-			if tok.Group != c.group.Name() &&
-				!(isOperatorHub(c.group) &&
-					isDirectChild(tok.Group, c.group.Name())) {
-				// an operator hub may also mint a link for one of its
-				// per-client child rooms (hub/<slug>)
+			// An operator hub may also mint a token for one of its
+			// per-client child rooms (hub/<slug>) -- that, and only
+			// that, is a client invite link.  Record it on the token,
+			// so the dashboard need not guess from the group name: a
+			// token minted *inside* a child room (a remembered device,
+			// an /invite) belongs to the same group but is no link.
+			// The client cannot set this field, only the server. (Sozvon)
+			isLink := isOperatorHub(c.group) &&
+				isDirectChild(tok.Group, c.group.Name())
+			tok.Link = isLink
+
+			if tok.Group != c.group.Name() && !isLink {
 				return terror("error", "wrong group in token")
 			}
 			if tok.IncludeSubgroups &&
@@ -1849,9 +1856,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 					"hierarchical token not allowed",
 				)
 			}
-			if tok.Expires == nil &&
-				!(isOperatorHub(c.group) &&
-					isDirectChild(tok.Group, c.group.Name())) {
+			if tok.Expires == nil && !isLink {
 				// per-client operator-room links may be perpetual;
 				// every other token must carry an expiry
 				return terror("error", "token doesn't expire")
