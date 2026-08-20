@@ -163,7 +163,12 @@ func tlsListener(port int, relay net.IP) *turn.ListenerConfig {
 	s := net.JoinHostPort("", strconv.Itoa(port))
 	l, err := net.Listen("tcp4", s)
 	if err != nil {
+		// Say plainly what is now missing.  This was asked for by an
+		// explicit flag, and a relay that silently is not there looks
+		// from the outside exactly like a network that blocks it.
 		log.Printf("TURN: listen(TLS, %v): %v", s, err)
+		log.Printf("TURN over TLS is NOT available; " +
+			"clients will only be offered the other servers")
 		return nil
 	}
 

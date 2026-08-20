@@ -561,6 +561,19 @@ detect_ip() {
 	printf '%s' "$_ip"
 }
 
+# The relay is offered over TLS as well as in the clear, on a port of its
+# own.  Cleartext TURN carries its magic cookie in the first bytes of every
+# packet, which is the easiest thing on the wire for a middlebox to key on --
+# and on some mobile networks that is enough for media to never arrive, while
+# the web page loads fine.  Wrapped in TLS on 5349 it looks like any other
+# HTTPS connection to this host.
+#
+# Only with a certificate a client will actually trust: browsers validate a
+# turns: URL independently of the page, so a self-signed install cannot use
+# this, and clicking through the page's warning does not help.  That is why
+# it is attached to the letsencrypt modes and not below.
+TURNS_PORT=5349
+
 CERT_FINGERPRINT=
 case "$TLS_MODE" in
 letsencrypt-sslip)
@@ -570,7 +583,7 @@ letsencrypt-sslip)
 	*[!0-9.]*|"") fail "detected an implausible public IP: '$IP'; pass --ip" ;;
 	esac
 	HOSTNAME=$(echo "$IP" | tr '.' '-').sslip.io
-	SOZVON_ARGS="-http :$HTTPS_PORT -letsencrypt $HOSTNAME"
+	SOZVON_ARGS="-http :$HTTPS_PORT -letsencrypt $HOSTNAME -turn-tls $HOSTNAME:$TURNS_PORT"
 	echo "using $HOSTNAME (from $IP)"
 	;;
 letsencrypt-domain)
@@ -585,7 +598,7 @@ letsencrypt-domain)
 	elif [ -z "$resolved" ]; then
 		echo "warning: $DOMAIN does not resolve yet; Let's Encrypt will fail until it does."
 	fi
-	SOZVON_ARGS="-http :$HTTPS_PORT -letsencrypt $HOSTNAME"
+	SOZVON_ARGS="-http :$HTTPS_PORT -letsencrypt $HOSTNAME -turn-tls $HOSTNAME:$TURNS_PORT"
 	;;
 self-signed)
 	IP=$(detect_ip)
@@ -726,16 +739,20 @@ stage firewall "opening the ports"
 
 # 443 web + TLS-ALPN, 80 for the HTTP-01 challenge and the redirect,
 # $UDP_PORT for media (a single multiplexed port, so this stays simple),
-# 1194 for the built-in TURN relay.
+# 1194 for the built-in TURN relay, and $TURNS_PORT for the same relay over
+# TLS where we configured one.
+turns_rule=
+case "$SOZVON_ARGS" in *-turn-tls*) turns_rule=$TURNS_PORT ;; esac
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
 	ufw allow 80/tcp   >/dev/null 2>&1 || true
 	ufw allow "$HTTPS_PORT/tcp" >/dev/null 2>&1 || true
 	ufw allow 1194/tcp >/dev/null 2>&1 || true
 	ufw allow 1194/udp >/dev/null 2>&1 || true
 	ufw allow "$UDP_PORT/udp" >/dev/null 2>&1 || true
+	[ -n "$turns_rule" ] && { ufw allow "$turns_rule/tcp" >/dev/null 2>&1 || true; }
 	echo "ufw rules added"
 else
-	echo "no active ufw; make sure 80/tcp, $HTTPS_PORT/tcp, 1194/tcp+udp and"
+	echo "no active ufw; make sure 80/tcp, $HTTPS_PORT/tcp, 1194/tcp+udp${turns_rule:+, $turns_rule/tcp} and"
 	echo "$UDP_PORT/udp are reachable if your provider filters ports"
 fi
 
