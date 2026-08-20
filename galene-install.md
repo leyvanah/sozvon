@@ -322,6 +322,45 @@ Galene includes an IPv4-only TURN server, which is controlled by the
   * the default value is `auto`, which behaves like `:1194` if there is no
     `data/ice-servers.json` file, and like `""` otherwise.
 
+### TURN over TLS
+
+The listeners described above carry TURN in the clear, which is fine for
+getting through NAT but is trivially recognised on the wire: the protocol's
+magic cookie sits in the first bytes of every packet.  Where that matters —
+a network that filters or throttles what it can identify — Sozvon can also
+offer TURN over TLS, using the same certificate as the web server:
+
+```sh
+sozvon -http :443 -letsencrypt meet.example.com \
+       -turn-tls meet.example.com
+```
+
+`-turn-tls` takes a **hostname** with an optional port (5349 by default),
+not an address: it is what clients are told to connect to, so it has to be
+a name the certificate covers, and it must resolve to this server.
+Clients are then offered a `turns:` URL alongside whatever else is
+configured.
+
+Three things are worth knowing:
+
+  * **It needs a certificate that clients trust.** The listener borrows the
+    web server's, so `-letsencrypt` or a certificate from a real authority
+    works, and a self-signed one does not: browsers validate `turns:`
+    separately from the page, so clicking through a certificate warning on
+    the page does not help.  With `-insecure` there is no certificate at
+    all, and the server says so at startup.
+
+  * **`-turn-tls` is never automatic.** Unlike `-turn auto`, asking for it
+    turns the built-in server on even when `data/ice-servers.json` exists,
+    since a TLS listener is usually meant to sit *alongside* the servers
+    that file configures rather than to replace them.  To offer TLS and
+    nothing else, add `-turn ""`.
+
+  * **Port 443 is the interesting value**, because a call then looks like a
+    request to the host that served the page.  It cannot be the same 443
+    the web server uses — for now that needs a second address, or a port
+    of its own.
+
 If the server is not accessible from the Internet, e.g. because of NAT or
 because it is behind a restrictive firewall, then you should configure
 a TURN server that runs on a host that is accessible by both Galene and

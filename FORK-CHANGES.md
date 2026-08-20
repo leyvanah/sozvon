@@ -822,6 +822,39 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
 
 ### Security hardening
 
+  * **TURN over TLS from the built-in relay** (`-turn-tls`). The built-in
+    TURN server only ever offered cleartext listeners — upstream advertises
+    `turn:` and never `turns:` — so a deployment that wanted a relay whose
+    traffic is not recognisable on the wire had to run coturn beside it. That
+    is a real gap rather than a theoretical one: TURN's magic cookie sits in
+    the first bytes of every packet, which is the easiest thing on the wire
+    for a middlebox to key on, and it is exactly what a network that filters
+    by protocol looks for. `-turn-tls <hostname>[:port]` now wraps a listener
+    in TLS with **the certificate the web server already holds** (Let's
+    Encrypt or `data/cert.pem` alike) and advertises a `turns:` URL, so the
+    single binary that was the point of the project stays a single binary.
+
+    Three details the implementation had to get right. The option takes a
+    *name*, not an address, because a `turns:` URL is validated against the
+    certificate and upstream's listener bookkeeping records bare IPs — hence
+    a distinct address type (`tlsAddr`) that `ICEServers` can tell apart from
+    a cleartext TCP listener. The certificate is read **at handshake time**,
+    not when the listener is built, because `galene.go` calls `ice.Update()`
+    — which starts the TURN server — before `webserver.Serve()`, which is
+    what loads the certificate; binding it eagerly would have captured nil.
+    And `-turn-tls` deliberately does not follow `-turn auto`'s rule of
+    standing down when `data/ice-servers.json` exists: a TLS listener is
+    normally wanted *alongside* the servers that file configures, so asking
+    for one starts the built-in server regardless (`-turn ""` for TLS alone).
+
+    Tested end-to-end rather than by inspection — `turnserver_test.go`
+    allocates on the listener as a client would, TLS on the wire and TURN
+    inside — plus a live run confirming the certificate reaches the TURN
+    port from the web server. Known limitation: a self-signed certificate
+    does not work, since browsers validate `turns:` independently of the
+    page, and sharing the web server's own 443 is not implemented yet (it
+    needs a first-byte demultiplexer; see the note in
+    [galene-install.md](galene-install.md)).
   * **The generated operator password no longer outlives the install.** The
     installer hands its result back through
     `/var/lib/sozvon-install/result.json`, which carries that password in clear

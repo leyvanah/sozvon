@@ -28,6 +28,7 @@ import (
 	"github.com/leyvanah/sozvon/diskwriter"
 	"github.com/leyvanah/sozvon/group"
 	"github.com/leyvanah/sozvon/rtpconn"
+	"github.com/leyvanah/sozvon/turnserver"
 )
 
 var server *http.Server
@@ -100,6 +101,10 @@ func Serve(address string, dataDir string) error {
 			Prompt:     autocert.AcceptTOS,
 			HostPolicy: autocert.HostWhitelist(hosts...),
 		}
+		// The built-in TURN server offers TURN over TLS with the same
+		// certificate.  It starts before us, so it reads this at
+		// handshake time rather than now.  (Sozvon)
+		turnserver.Certificate = m.GetCertificate
 		s.TLSConfig = &tls.Config{
 			MinVersion:     tls.VersionTLS12,
 			GetCertificate: m.GetCertificate,
@@ -134,12 +139,25 @@ func Serve(address string, dataDir string) error {
 			filepath.Join(dataDir, "cert.pem"),
 			filepath.Join(dataDir, "key.pem"),
 		)
-		s.TLSConfig = &tls.Config{
-			MinVersion: tls.VersionTLS12,
-			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return certificate.Get()
-			},
+		get := func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return certificate.Get()
 		}
+		// Same certificate for the built-in TURN server's TLS
+		// listener; see the note above.  (Sozvon)
+		turnserver.Certificate = get
+		s.TLSConfig = &tls.Config{
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: get,
+		}
+	}
+
+	// -insecure leaves us no certificate to lend, so a TLS listener would
+	// accept connections and then fail every handshake.  Say so rather
+	// than let it look like a network problem.  (Sozvon)
+	if Insecure && turnserver.TLSAddress != "" {
+		log.Printf("Warning: -turn-tls needs a certificate, " +
+			"but -insecure means there is none; " +
+			"TURN over TLS will refuse every connection")
 	}
 	s.RegisterOnShutdown(func() {
 		group.Shutdown("server is shutting down")

@@ -82,6 +82,9 @@ func main() {
 		"require use of TURN relays for all media traffic")
 	flag.StringVar(&turnserver.Address, "turn", "auto",
 		"built-in TURN server `address` (\"\" to disable)")
+	flag.StringVar(&turnserver.TLSAddress, "turn-tls", "",
+		"offer TURN over TLS at `hostname`[:port], "+
+			"using the web server's certificate (default port 5349)")
 	flag.BoolVar(&showVersion, "version", false,
 		"print the version and exit")
 	flag.Parse()
