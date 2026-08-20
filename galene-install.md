@@ -341,7 +341,24 @@ a name the certificate covers, and it must resolve to this server.
 Clients are then offered a `turns:` URL alongside whatever else is
 configured.
 
-Three things are worth knowing:
+Both halves of that sentence bite in practice, and neither failure is
+loud:
+
+  * **It must resolve here.** The server resolves the name once, at
+    startup, and hands the resulting address to clients as the address to
+    relay through. Point it at a name that resolves somewhere else — a
+    public name fronted by another machine, say — and every client is
+    politely told to relay through that other machine, which knows nothing
+    about it.
+
+  * **The certificate must cover it.** The listener borrows the web
+    server's certificate, so a relay hostname that differs from the web
+    hostname fails every handshake unless one certificate carries both
+    names. With `-letsencrypt` the two are the same name and this is free;
+    a deployment whose certificate comes from elsewhere has to arrange it
+    (a second SAN), or give the relay a name that certificate already has.
+
+Three more things are worth knowing:
 
   * **It needs a certificate that clients trust.** The listener borrows the
     web server's, so `-letsencrypt` or a certificate from a real authority
