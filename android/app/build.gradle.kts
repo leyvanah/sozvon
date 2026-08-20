@@ -43,12 +43,28 @@ val serverVersion = (project.findProperty("sozvonServerVersion") as String?) ?: 
 val serverRepo = (project.findProperty("sozvonServerRepo") as String?) ?: "leyvanah/sozvon"
 val serverArches = listOf("amd64", "arm64")
 
+// Testing a server change used to require releasing it first: the only way
+// into the APK was a GitHub release URL, so an unreleased build could not be
+// carried to a machine by the app that exists to carry servers to machines.
+// -PsozvonServerDir=<dir> takes the archives from a directory instead, named
+// as the release names them (sozvon_<version>_linux_<arch>.tar.gz), and
+// computes the checksums here rather than checking them against a release
+// that does not exist.
+//
+// Release builds keep the default path deliberately: fetching the published
+// archive and verifying it against the published SHA256SUMS is what makes a
+// shipped APK's provenance checkable, and a local directory cannot offer
+// that.  (Sozvon)
+val serverDir = (project.findProperty("sozvonServerDir") as String?)
+    ?.takeIf { it.isNotBlank() }
+
 val fetchServerRelease by tasks.registering {
     val outDir = layout.projectDirectory.dir("src/main/assets/server").asFile
     // Declared so Gradle can skip the task when nothing changed; a release
     // tag is immutable, so the version alone decides.
     inputs.property("version", serverVersion)
     inputs.property("repo", serverRepo)
+    inputs.property("dir", serverDir ?: "")
     outputs.dir(outDir)
     doLast {
         outDir.mkdirs()
@@ -65,6 +81,22 @@ val fetchServerRelease by tasks.registering {
         }
         val base = "https://github.com/$serverRepo/releases/download/$serverVersion"
         fun fetch(name: String, target: File) {
+            if (serverDir != null) {
+                // Always re-copy: a local build changes while its version
+                // string stays put, so "the file is already there" is not
+                // evidence that it is the right one.
+                val source = File(serverDir, name)
+                if (!source.isFile || source.length() == 0L) {
+                    throw GradleException(
+                        "sozvonServerDir=$serverDir has no $name. Build the " +
+                            "server for each architecture and package it as " +
+                            "the release does."
+                    )
+                }
+                logger.lifecycle("taking $name from $serverDir")
+                source.copyTo(target, overwrite = true)
+                return
+            }
             if (target.exists() && target.length() > 0L) return
             logger.lifecycle("fetching $name")
             URL("$base/$name").openStream().use { input ->
@@ -74,12 +106,31 @@ val fetchServerRelease by tasks.registering {
                 throw GradleException("$name downloaded empty from $base")
             }
         }
+        fun sha256(f: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            f.inputStream().use { s ->
+                val buf = ByteArray(1 shl 16)
+                while (true) {
+                    val n = s.read(buf)
+                    if (n <= 0) break
+                    digest.update(buf, 0, n)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
         val sums = File(outDir, "SHA256SUMS")
-        fetch("SHA256SUMS", sums)
+        // With a local directory there is no published SHA256SUMS to fetch or
+        // to check against; we write one so that everything downstream -- the
+        // app's uploaded mirror, install.sh's own verification -- works
+        // exactly as it does for a release.
+        if (serverDir == null) {
+            fetch("SHA256SUMS", sums)
+        }
         // A manifest of what actually shipped, so the app does not have to
         // guess which architectures this build carries or how big they are:
         // asset sizes are not reliably readable once packed.
         val manifest = StringBuilder()
+        val localSums = StringBuilder()
         for (arch in serverArches) {
             val name = "sozvon_${serverVersion}_linux_$arch.tar.gz"
             // Stored under a neutral extension on purpose.  The Android
@@ -91,27 +142,27 @@ val fetchServerRelease by tasks.registering {
             // gets its real name back when it lands on the server.
             val f = File(outDir, "$arch.pkg")
             fetch(name, f)
-            // The release's own checksum, checked here rather than trusting
-            // the download: a corrupt archive baked into an APK would only
-            // surface on someone else's server.
-            val digest = MessageDigest.getInstance("SHA-256")
-            f.inputStream().use { s ->
-                val buf = ByteArray(1 shl 16)
-                while (true) {
-                    val n = s.read(buf)
-                    if (n <= 0) break
-                    digest.update(buf, 0, n)
+            val got = sha256(f)
+            if (serverDir != null) {
+                // Nothing to check against -- record what we have, in the
+                // format the rest of the chain reads.
+                localSums.append(got).append("  ").append(name).append('\n')
+            } else {
+                // The release's own checksum, checked here rather than
+                // trusting the download: a corrupt archive baked into an APK
+                // would only surface on someone else's server.
+                val want = sums.readLines()
+                    .firstOrNull { it.trimEnd().endsWith(" $name") || it.trimEnd().endsWith("*$name") }
+                    ?.trim()?.substringBefore(' ')
+                    ?: throw GradleException("SHA256SUMS has no entry for $name")
+                if (got != want) {
+                    throw GradleException("checksum mismatch for $name: got $got, expected $want")
                 }
             }
-            val got = digest.digest().joinToString("") { "%02x".format(it) }
-            val want = sums.readLines()
-                .firstOrNull { it.trimEnd().endsWith(" $name") || it.trimEnd().endsWith("*$name") }
-                ?.trim()?.substringBefore(' ')
-                ?: throw GradleException("SHA256SUMS has no entry for $name")
-            if (got != want) {
-                throw GradleException("checksum mismatch for $name: got $got, expected $want")
-            }
             manifest.append(arch).append(' ').append(f.length()).append('\n')
+        }
+        if (serverDir != null) {
+            sums.writeText(localSums.toString())
         }
         File(outDir, "latest").writeText(serverVersion)
         File(outDir, "manifest").writeText(manifest.toString())
