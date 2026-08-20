@@ -246,7 +246,24 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            // Shrinking is off, deliberately, and the keep rules stay in
+            // proguard-rules.pro for whenever it goes back on.
+            //
+            // Until now CI only ever built *debug*, so this build type had
+            // never actually run anywhere.  Its first run failed at the first
+            // SSH connection: R8 had removed 411 JSch classes, which JSch
+            // loads by name, and the deploy died with ClassNotFoundException
+            // on a rented server rather than on anyone's desk.  Keep rules fix
+            // that particular hole, but 5350 classes were removed in all and
+            // no test we can run here proves the rest are unused -- the
+            // evidence would again arrive as a failed install on somebody
+            // else's machine.
+            //
+            // What shrinking buys is a fraction of a megabyte of code inside
+            // an APK whose bundled server payload is nearly seventeen.  That
+            // is not worth a class of failure that is invisible until the
+            // app's most valuable feature runs against a real host.
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
