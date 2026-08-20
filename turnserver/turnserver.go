@@ -38,6 +38,11 @@ var TLSAddress string
 // (Sozvon)
 var Certificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
+// auto records what StartStop was last told, i.e. whether an "auto" server
+// should be running at all.  Start consults it so that a TLS listener can
+// come up without dragging the cleartext ones up with it.  (Sozvon)
+var auto bool
+
 // tlsAddr is the address of the TLS listener.  It is a type of its own so
 // that ICEServers can tell it apart from a cleartext TCP listener and
 // advertise a turns: URL, and it carries a hostname rather than an IP
@@ -225,7 +230,13 @@ func Start() error {
 	var lcs []turn.ListenerConfig
 	var pccs []turn.PacketConnConfig
 
-	if Address != "" {
+	// -turn-tls brings the server up even when data/ice-servers.json says
+	// there are relays elsewhere, but it must not quietly change what
+	// -turn auto means: "auto" still stands the cleartext listeners down
+	// whenever that file supplies servers of its own.  Otherwise asking
+	// for a TLS relay would reopen a cleartext one as a side effect, on
+	// exactly the deployments that took care to close it.  (Sozvon)
+	if Address != "" && (Address != "auto" || auto) {
 		ad := Address
 		if Address == "auto" {
 			ad = ":1194"
@@ -388,6 +399,11 @@ func Stop() error {
 }
 
 func StartStop(start bool) error {
+	// Remember what "auto" resolves to this time round, so that Start can
+	// honour it for the cleartext listeners even when a TLS listener drags
+	// the server up.  (Sozvon)
+	auto = start
+
 	// A TLS listener is never automatic: asking for one is a deliberate
 	// choice, and it is usually meant to sit *alongside* whatever
 	// data/ice-servers.json supplies rather than to replace it.  Say

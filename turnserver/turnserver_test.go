@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,6 +178,47 @@ func TestTLSListener(t *testing.T) {
 
 	if relayed.LocalAddr() == nil {
 		t.Errorf("Allocate: no relayed address")
+	}
+}
+
+// TestTLSListenerLeavesAutoAlone checks that asking for a TLS listener does
+// not reopen the cleartext ones on a deployment whose ice-servers.json took
+// care to close them: -turn auto must still mean "not when that file
+// supplies relays of its own".
+func TestTLSListenerLeavesAutoAlone(t *testing.T) {
+	certificate := selfSigned(t)
+
+	oldAddress, oldTLS, oldCert := Address, TLSAddress, Certificate
+	t.Cleanup(func() {
+		Stop()
+		Address, TLSAddress, Certificate = oldAddress, oldTLS, oldCert
+	})
+
+	port := freePort(t)
+	Address = "auto"
+	TLSAddress = "localhost:" + strconv.Itoa(port)
+	Certificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return certificate, nil
+	}
+
+	// false: an ice-servers.json is present, so "auto" means off.
+	err := StartStop(false)
+	if err != nil {
+		t.Fatalf("StartStop: %v", err)
+	}
+
+	servers := ICEServers()
+	if len(servers) != 1 {
+		t.Fatalf("ICEServers: got %v", servers)
+	}
+	for _, u := range servers[0].URLs {
+		if !strings.HasPrefix(u, "turns:") {
+			t.Errorf("ICEServers: got cleartext %v alongside TLS", u)
+		}
+	}
+	if len(servers[0].URLs) != 1 {
+		t.Errorf("ICEServers: got %v, expected the TLS URL alone",
+			servers[0].URLs)
 	}
 }
 

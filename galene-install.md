@@ -350,11 +350,13 @@ Three things are worth knowing:
     the page does not help.  With `-insecure` there is no certificate at
     all, and the server says so at startup.
 
-  * **`-turn-tls` is never automatic.** Unlike `-turn auto`, asking for it
-    turns the built-in server on even when `data/ice-servers.json` exists,
-    since a TLS listener is usually meant to sit *alongside* the servers
-    that file configures rather than to replace them.  To offer TLS and
-    nothing else, add `-turn ""`.
+  * **It sits alongside `data/ice-servers.json` rather than replacing it.**
+    Asking for a TLS listener starts the built-in server even when that
+    file supplies relays of its own, since that is normally the point: one
+    more relay for ICE to race against the others.  It does *not* change
+    what `-turn auto` means, though — the cleartext listeners still stand
+    down whenever that file is present, so asking for a TLS relay never
+    reopens a cleartext one behind your back.
 
   * **Port 443 is the interesting value**, because a call then looks like a
     request to the host that served the page.  It cannot be the same 443

@@ -842,10 +842,14 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     not when the listener is built, because `galene.go` calls `ice.Update()`
     — which starts the TURN server — before `webserver.Serve()`, which is
     what loads the certificate; binding it eagerly would have captured nil.
-    And `-turn-tls` deliberately does not follow `-turn auto`'s rule of
-    standing down when `data/ice-servers.json` exists: a TLS listener is
-    normally wanted *alongside* the servers that file configures, so asking
-    for one starts the built-in server regardless (`-turn ""` for TLS alone).
+    And `-turn-tls` starts the built-in server even when
+    `data/ice-servers.json` exists — a TLS listener is normally wanted
+    *alongside* the relays that file configures — while leaving what `-turn
+    auto` means alone: the cleartext listeners still stand down whenever
+    that file is present. Without that second half, asking for a TLS relay
+    would silently reopen a cleartext one on exactly the deployments that
+    had taken the trouble to close it, which is how the production
+    deployment here is configured.
 
     Tested end-to-end rather than by inspection — `turnserver_test.go`
     allocates on the listener as a client would, TLS on the wire and TURN
