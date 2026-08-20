@@ -143,6 +143,56 @@ android {
         noCompress += "pkg"
     }
 
+    // Android identifies an app by its signing key, and refuses to install a
+    // build signed with a different one over an existing install: the user
+    // has to uninstall first, losing their saved servers and pinned
+    // certificates.  The debug key does not survive that test -- it is
+    // generated per machine, so a build from CI and a build from a laptop are
+    // two different apps to the device, and every hop between them costs a
+    // reinstall.
+    //
+    // So anything meant to reach a device is signed with a stable key that
+    // lives OUTSIDE this repository.  The four properties below are read from
+    // ~/.gradle/gradle.properties (or -P on the command line, or the matching
+    // SOZVON_* environment variables in CI); the keystore is never committed
+    // and its password is never in the build files.  When they are absent the
+    // release build is simply left unsigned rather than falling back to the
+    // debug key, because a silent fallback is exactly how two differently
+    // signed "releases" get distributed.  (Sozvon)
+    val keystorePath = providers.gradleProperty("sozvonKeystore")
+        .orElse(providers.environmentVariable("SOZVON_KEYSTORE"))
+        .orNull?.takeIf { it.isNotBlank() }
+    val keystorePassword = providers.gradleProperty("sozvonKeystorePassword")
+        .orElse(providers.environmentVariable("SOZVON_KEYSTORE_PASSWORD"))
+        .orNull?.takeIf { it.isNotBlank() }
+    val keyAliasName = providers.gradleProperty("sozvonKeyAlias")
+        .orElse(providers.environmentVariable("SOZVON_KEY_ALIAS"))
+        .orNull?.takeIf { it.isNotBlank() }
+    val keyPasswordValue = providers.gradleProperty("sozvonKeyPassword")
+        .orElse(providers.environmentVariable("SOZVON_KEY_PASSWORD"))
+        .orNull?.takeIf { it.isNotBlank() }
+
+    val signingReady = keystorePath != null && keystorePassword != null &&
+        keyAliasName != null && keyPasswordValue != null &&
+        file(keystorePath).exists()
+
+    if (signingReady) {
+        signingConfigs {
+            create("sozvon") {
+                storeFile = file(keystorePath!!)
+                storePassword = keystorePassword
+                keyAlias = keyAliasName
+                keyPassword = keyPasswordValue
+            }
+        }
+    } else if (keystorePath != null) {
+        logger.warn(
+            "sozvonKeystore is set to $keystorePath but the file is missing " +
+                "or a password/alias property is absent; the release build " +
+                "will be unsigned."
+        )
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -150,7 +200,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (signingReady) {
+                signingConfig = signingConfigs.getByName("sozvon")
+            }
         }
+        // Debug keeps the per-machine key on purpose: throwaway builds should
+        // not be able to masquerade as an update to something a user
+        // installed.  Use assembleRelease for anything that leaves the
+        // machine.
     }
 
     compileOptions {
