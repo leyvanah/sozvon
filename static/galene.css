@@ -2178,10 +2178,15 @@ a:focus-visible {
  * join card ("log in as operator", "log in with different credentials"), were
  * left with the browser's default blue, which is the one colour the whole
  * design does not contain.  :visited too, or Firefox keeps a purple of its
- * own for a link that has been followed.
+ * own for a link that has been followed.  Wrapped in :where() so it carries no
+ * specificity of its own: a bare a:visited is (0,1,1) and outranks any class,
+ * so every link a class colours -- the deployment theme'''s wordmark, .apk-link
+ * -- turned accent-red the moment it had been followed, and only for whoever
+ * had followed it.  The override still beats the browser'''s own purple, which
+ * is a matter of origin rather than specificity. (Sozvon)
  */
 a,
-a:visited {
+a:where(:visited) {
     color: var(--accent);
 }
 a:hover {
