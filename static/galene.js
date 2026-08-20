@@ -101,8 +101,10 @@ let pendingRemember = null;
  * Set while a maketoken request is in flight specifically to remember this
  * device, so the token reply is stored instead of shown as an invite link.
  * "previous" is the remember-token being replaced, revoked once the new one
- * is stored.
- * @type {{group: string, username: string, previous: string|null}|null}
+ * is stored.  "includeSubgroups" records the scope it was minted with, so the
+ * stored entry knows whether it also covers the hub's child rooms.
+ * @type {{group: string, username: string, previous: string|null,
+ *         includeSubgroups: boolean}|null}
  */
 let storingRememberToken = null;
 
@@ -150,15 +152,52 @@ let skipAutoplayProbe = false;
 // via maketoken with the user's own permissions; it is scoped to the group,
 // expires (30 days), and can be revoked server-side.  Only issued to operators
 // (see gotJoined), never to ordinary guests.
-function loadRememberToken(group) {
+/**
+ * The stored group whose remember-token covers `group`: the group's own entry
+ * when there is one, otherwise a hub entry minted with subgroup scope.  That
+ * is what lets an operator who ticked "remember me" on the hub open a client
+ * link -- a per-client child room, where the checkbox is deliberately not
+ * offered -- without retyping the password, giving the remember-token the
+ * reach the session token already has.  Entries written before the scope was
+ * recorded carry no flag and stay exact-only: the server refuses a
+ * hierarchical token they were not minted as.  Most specific hub wins.
+ * (Sozvon)
+ * @param {string} group
+ * @returns {string|null}
+ */
+function rememberTokenGroup(group) {
     try {
         let all = JSON.parse(window.localStorage.getItem('sozvon.remember'));
-        let t = all && all[group];
+        if(!all)
+            return null;
+        if(all[group] && all[group].token)
+            return group;
+        let best = null;
+        for(let g in all) {
+            let t = all[g];
+            if(t && t.token && t.includeSubgroups &&
+               group.startsWith(g + '/') &&
+               (best === null || g.length > best.length))
+                best = g;
+        }
+        return best;
+    } catch(e) {
+        return null;
+    }
+}
+
+function loadRememberToken(group) {
+    try {
+        let key = rememberTokenGroup(group);
+        if(key === null)
+            return null;
+        let all = JSON.parse(window.localStorage.getItem('sozvon.remember'));
+        let t = all && all[key];
         if(!t || !t.token)
             return null;
         // Drop it client-side once expired, so we don't try a dead token.
         if(t.expires && new Date(t.expires).getTime() < Date.now()) {
-            clearRememberToken(group);
+            clearRememberToken(key);
             return null;
         }
         return t;
@@ -167,11 +206,14 @@ function loadRememberToken(group) {
     }
 }
 
-function saveRememberToken(group, token, username, expires) {
+function saveRememberToken(group, token, username, expires, includeSubgroups) {
     try {
         let all = JSON.parse(
             window.localStorage.getItem('sozvon.remember')) || {};
-        all[group] = {token: token, username: username, expires: expires};
+        all[group] = {
+            token: token, username: username, expires: expires,
+            includeSubgroups: !!includeSubgroups,
+        };
         window.localStorage.setItem(
             'sozvon.remember', JSON.stringify(all));
     } catch(e) {
@@ -4944,13 +4986,23 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
                 // once the new one is safely stored -- otherwise every re-login
                 // leaves another live operator token behind.
                 let previous = loadRememberToken(pendingRemember.group);
+                // On an operator hub, cover its child rooms too: the operator
+                // opens a client link straight from a chat, in a fresh tab
+                // where the sessionStorage session token is not there to help,
+                // and the checkbox is not offered inside the child room.  The
+                // server allows the hierarchical form only for an operator
+                // minting it on their own group for their own username, which
+                // is exactly this call. (Sozvon)
+                let subgroups = !!groupStatus.operatorRoom;
                 storingRememberToken = {
                     group: pendingRemember.group,
                     username: pendingRemember.username,
                     previous: (previous && previous.token) || null,
+                    includeSubgroups: subgroups,
                 };
                 makeToken({
                     username: pendingRemember.username,
+                    includeSubgroups: subgroups,
                     expires: new Date(Date.now() + 30 * 24 * 3600 * 1000),
                     permissions: serverConnection.permissions.slice(),
                 });
@@ -5312,7 +5364,8 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
         if(storingRememberToken) {
             // This token is for remembering this device, not an invite link.
             saveRememberToken(storingRememberToken.group, message.token,
-                              storingRememberToken.username, message.expires);
+                              storingRememberToken.username, message.expires,
+                              storingRememberToken.includeSubgroups);
             // The device is now remembered by the new token: revoke the one
             // it replaces, so re-logging in doesn't pile up live operator
             // tokens on the group. (Sozvon)
@@ -5533,10 +5586,14 @@ function operatorLogout() {
     // Forgetting this device must also revoke it: the token is still live
     // server-side otherwise, and it grants op.  Sent before the socket is
     // closed below -- close() flushes what is already queued. (Sozvon)
+    // Forget it under the key it is actually stored as: logging out of a
+    // child room covered by a hub token must clear that hub entry, or the
+    // next visit signs back in with the token we have just revoked.
+    let rememberKey = rememberTokenGroup(group);
     let remembered = loadRememberToken(group);
     if(remembered)
         revokeToken(remembered.token);
-    clearRememberToken(group);
+    clearRememberToken(rememberKey || group);
     reconnectLastJoin = null;
     usingRememberToken = false;
     token = null;
