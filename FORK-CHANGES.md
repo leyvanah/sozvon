@@ -859,6 +859,30 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     page, and sharing the web server's own 443 is not implemented yet (it
     needs a first-byte demultiplexer; see the note in
     [galene-install.md](galene-install.md)).
+
+    **What it does not fix, measured on a real deployment.** Taken to
+    production and tested with the external relay removed, so the TLS relay
+    was the only path media could take: the call failed, and `ss -tin` on the
+    live connections said why. Two clients on different networks, both
+    identical: retransmissions about half of everything sent, the retransmit
+    timeout doubled six or seven times to 31 seconds, the congestion window
+    collapsed to one segment, the segment size driven from 1460 down to 128,
+    and seven kilobytes stuck in the send queue that never drained — while
+    the client-to-server direction stayed healthy, and the server's own
+    connections to the same port were pristine. That is not a blocked port or
+    a recognised protocol; it is an established flow being shaped, in one
+    direction. Both clients being affected rules out any one carrier: what
+    they share is the address answering them, which on that host also
+    terminates VPN protocols.
+
+    So the disguise cannot help there — it hides the content, and what is
+    penalised is the destination. That deployment needs a different address,
+    not a different transport, and the flag was removed from it again rather
+    than leave clients waiting on a path that cannot carry media. The feature
+    is kept because the case it was built for is the ordinary self-hoster,
+    whose alternative today is cleartext TURN on port 1194 — which is the
+    OpenVPN port, and is exactly what stopped working on that same host
+    earlier.
   * **The generated operator password no longer outlives the install.** The
     installer hands its result back through
     `/var/lib/sozvon-install/result.json`, which carries that password in clear
