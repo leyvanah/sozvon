@@ -757,7 +757,7 @@ function onPeerConnection() {
  * @param {string} reason
  */
 function gotClose(code, reason) {
-    closeUpMedia();
+    closeUpMedia(null, this);
     closeSafariStream();
     if(code !== 1000) {
         console.warn('Socket close', code, reason);
@@ -991,6 +991,10 @@ getButtonElement('presentbutton').onclick = async function(e) {
 getButtonElement('unpresentbutton').onclick = async function(e) {
     e.preventDefault();
     let c = findUpMedia('camera');
+    // "camera off" must mean every camera stream, not just the first one we
+    // find, or a duplicate would go on sending video after the user believes
+    // the camera is off. (Sozvon)
+    closeExtraUpMedia('camera', c);
     // turn the camera off, but keep the microphone running if it is on
     if(c && c.stream && c.stream.getAudioTracks().length)
         await addLocalMedia(c.localId, {video: false, audio: true});
@@ -2200,6 +2204,17 @@ function replaceCameraStream() {
 }
 
 /**
+ * Serialises addLocalMedia.  Opening a device takes time -- a permission
+ * prompt, a slow phone camera -- and two calls that overlap would each
+ * publish their own stream, which is two cameras and two microphones from a
+ * single participant.  Queueing them means the second one finds the first
+ * one's stream and replaces it. (Sozvon)
+ *
+ * @type {Promise<void>}
+ */
+let addLocalMediaQueue = Promise.resolve();
+
+/**
  * @param {string} [localId]
  * @param {{audio?: boolean, video?: boolean}} [force]
  *     Optional overrides for which tracks to capture, independent of the saved
@@ -2208,6 +2223,24 @@ function replaceCameraStream() {
  *     disturbing the other.  An empty constraint object means "default device".
  */
 async function addLocalMedia(localId, force) {
+    let next = addLocalMediaQueue.then(
+        () => addLocalMediaNow(localId, force),
+        () => addLocalMediaNow(localId, force),
+    );
+    // the queue must survive a failed call, so swallow the error here; the
+    // caller still sees it through the promise we return
+    addLocalMediaQueue = next.catch(() => {});
+    return next;
+}
+
+/**
+ * Does the work of addLocalMedia.  Do not call directly: go through
+ * addLocalMedia, which serialises these. (Sozvon)
+ *
+ * @param {string} [localId]
+ * @param {{audio?: boolean, video?: boolean}} [force]
+ */
+async function addLocalMediaNow(localId, force) {
     if(serverConnection && serverConnection.e2ee &&
        serverConnection.e2ee.state === 'blocked') {
         // The group requires end-to-end encryption but this call cannot be
@@ -2215,6 +2248,12 @@ async function addLocalMedia(localId, force) {
         displayError(Sozvon.i18n.t('e2ee.blocked'));
         return;
     }
+
+    // The connection this call belongs to.  getUserMedia below can take
+    // seconds -- a permission prompt, a slow phone camera -- and the user may
+    // leave and come back in the meantime, so we check afterwards that we are
+    // still publishing into the session that asked for this. (Sozvon)
+    let sc = serverConnection;
 
     let settings = getSettings();
 
@@ -2298,6 +2337,30 @@ async function addLocalMedia(localId, force) {
         else
             displayError(e);
         return;
+    }
+
+    if(serverConnection !== sc || !sc.group) {
+        // We left the group, or the connection was rebuilt, while the camera
+        // was still opening.  Publishing now would attach this stream to a
+        // session that never asked for it, next to the media that session has
+        // already published -- two cameras and two microphones from one
+        // participant, under a single name in the list.  Drop it. (Sozvon)
+        stopStream(stream);
+        return;
+    }
+
+    if(!localId) {
+        // Another call opened the camera while we were waiting for this one:
+        // a second tap on a button, or a join that raced us.  Take over its
+        // local id so newUpStream replaces that stream below instead of
+        // publishing a second one alongside it. (Sozvon)
+        let existing = findUpMedia('camera');
+        if(existing) {
+            localId = existing.localId;
+            // as above: release the camera before the replacement takes over
+            await removeFilter(existing);
+            stopStream(existing.stream);
+        }
     }
 
     // Permission may have just been granted, which is the first moment the
@@ -2500,12 +2563,40 @@ function stopStream(s) {
  * is null, it closes all up connections.
  *
  * @param {string} [label]
+ * @param {ServerConnection} [sc]
+ *     The connection to close streams on; defaults to the current one.  A
+ *     late socket close must pass its own connection, or it would tear down
+ *     the media of the connection that has already replaced it. (Sozvon)
 */
-function closeUpMedia(label) {
-    for(let id in serverConnection.up) {
-        let c = serverConnection.up[id];
+function closeUpMedia(label, sc) {
+    sc = sc || serverConnection;
+    if(!sc)
+        return;
+    for(let id in sc.up) {
+        let c = sc.up[id];
         if(label && c.label !== label)
             continue
+        c.close();
+    }
+}
+
+/**
+ * closeExtraUpMedia closes every up connection with the given label except
+ * `keep`.  There is only ever meant to be one camera stream; this is the belt
+ * to addLocalMedia's braces, so that a duplicate which somehow got published
+ * cannot keep sending after the user has turned the camera off. (Sozvon)
+ *
+ * @param {string} label
+ * @param {Stream} [keep]
+ */
+function closeExtraUpMedia(label, keep) {
+    if(!serverConnection)
+        return;
+    for(let id in serverConnection.up) {
+        let c = serverConnection.up[id];
+        if(c.label !== label || c === keep)
+            continue;
+        console.warn('Closing duplicate ' + label + ' stream');
         c.close();
     }
 }
