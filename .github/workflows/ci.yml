@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, sozvon-rebrand]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -28,6 +28,39 @@ jobs:
         run: go vet -composites=false ./...
       - name: Test
         run: go test ./...
+
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    # The SFU is heavily concurrent, and the fork adds to it: the waiting
+    # room's knock table and the 1-on-1 lock are shared mutable state touched
+    # from every client's goroutine.  A data race there is invisible in an
+    # ordinary run and shows up in production as a room that will not open.
+    # The detector needs cgo, so this cannot ride along with the static build.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test with -race
+        run: go test -race ./...
+        env:
+          CGO_ENABLED: "1"
+
+  client:
+    name: Web client tests
+    runs-on: ubuntu-latest
+    # The localisation tables and the E2EE core are plain JavaScript with no
+    # dependencies, so Node's own test runner is all that is needed -- there is
+    # no package.json here and deliberately so.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test
+        run: node --test 'static/test/*.test.js'
 
   govulncheck:
     name: Known-vulnerability scan (informational)
