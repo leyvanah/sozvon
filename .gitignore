@@ -36,6 +36,10 @@ CLAUDE.md
 /sozvon-test-stand.md
 /oryn-test-stand.md
 
+# Local-only manual test protocols — the procedures run by hand before a
+# deploy.  TESTING.md is the public half; this is the working document.
+/TEST-PROTOCOLS.local.md
+
 # Local-only remote-device testing notes — hold a LAN address and device
 # details for the test phone, never commit
 /android/REMOTE-TESTING.md

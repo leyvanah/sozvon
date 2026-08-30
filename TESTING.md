@@ -152,20 +152,48 @@ Record anything found but not fixed in [KNOWN-BUGS.md](KNOWN-BUGS.md).
 
 ## Where to take this next
 
-In order of value per hour spent:
+In order of value per hour spent. The first costs nothing but the time; the
+second is the only one that adds a dependency, and is written up as a decision
+rather than a task for that reason.
 
-1. **Browser tests for the client**, with Playwright driving two Chromium
-   instances against a `-dev` server, using fake media devices
-   (`--use-fake-device-for-media-stream`) so no camera is needed. One smoke
-   test — two clients join, see each other, exchange chat — would cover more of
-   the fork than everything above put together, and would catch most of what
-   the checklist's steps 1–5 look for. It is the one step that adds a
-   dependency and CI time, which is why it is a deliberate decision rather than
-   something done in passing.
-2. **A second protocol-test tranche**: token-based invites into an operator
-   room, the 1-on-1 lock, `setgroup` and `deletetoken`, the group status seen
-   by an unauthenticated client.
-3. **Installer tests in CI** — run `install.sh` in a container and assert the
-   service comes up and `/healthz` answers.
-4. **Android instrumentation**, at least for the WebView permission bridge,
+1. **Grow the client's testable surface without a browser.** Most of
+   `galene.js` cannot be unit-tested because it reaches for the DOM, but a good
+   deal of what breaks in it is pure: the label a tile derives for a
+   participant, the mute state read back from user data, the grid geometry, the
+   settings round-trip, the panel's open/closed state across the 1024 px
+   breakpoint — a real, shipped bug that a five-line function would have
+   pinned. Each time such logic is *already* being touched, lift it into a
+   small module and cover it under `static/test/` with `node --test`, which is
+   set up and needs no `package.json`. No dependency, no CI time, and the
+   largest gap becomes a shrinking one.
+
+2. **One browser smoke test.** Playwright driving two Chromium instances
+   against a `-dev` server with `--use-fake-device-for-media-stream` — two
+   clients join, see each other's video both ways, exchange chat — would cover
+   more of the fork than everything above put together, and would catch most of
+   what the checklist's steps 1–5 look for, in about thirty seconds. The cost
+   is worth stating plainly: one dev dependency, a lockfile, a browser download
+   cached in CI, a couple of minutes per run.
+
+   It has two forms, and they are not the same decision:
+   - **Local only** — an ignored `test/browser/` invoked with `npx playwright`,
+     run before a deploy in place of the first half of the checklist. Nothing
+     is added to the repository or to CI, and the check exists as soon as it is
+     written.
+   - **In CI** — the same spec wired into the workflow, so it guards pull
+     requests as well as deploys. That is what turns it from a convenience into
+     coverage.
+
+   Starting local and promoting it once it has proved itself over a few real
+   deploys is the cheap order.
+
+3. **A second protocol-test tranche**: token-based invites into an operator
+   room, the 1-on-1 lock, `setgroup` and `deletetoken`, the group status seen by
+   an unauthenticated client.
+
+4. **Installer tests in CI** — run `install.sh` in a container and assert the
+   service comes up and `/healthz` answers. Three of the four open installer
+   bugs in KNOWN-BUGS.md would have been caught by it.
+
+5. **Android instrumentation**, at least for the WebView permission bridge,
    which is where the file-picker and camera bugs have been.
