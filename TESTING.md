@@ -38,6 +38,33 @@ CI runs all of the above on every pull request, plus a race-detector build, a
 `govulncheck` scan, a `gitleaks` sweep of the full history, and a `dash -n`
 parse of the installer.
 
+## Running them automatically before a push
+
+A push here leads to two things that are awkward to undo: a public repository
+and, shortly after, a deploy. Thirty seconds of checks beforehand is cheaper
+than either. Git will run them for you — `.git/hooks/pre-push` is not tracked,
+so each clone opts in:
+
+```sh
+cat > .git/hooks/pre-push <<'HOOK'
+#!/bin/sh
+[ -n "$SKIP_TESTS" ] && exit 0
+root=$(git rev-parse --show-toplevel) && cd "$root" || exit 1
+CGO_ENABLED=0 go vet -composites=false ./... || exit 1
+CGO_ENABLED=0 go test ./... || exit 1
+command -v node >/dev/null 2>&1 && { node --test 'static/test/*.test.js' || exit 1; }
+exit 0
+HOOK
+chmod +x .git/hooks/pre-push
+```
+
+`SKIP_TESTS=1 git push` skips it deliberately. Prefer that to `--no-verify`,
+which turns off *every* hook — including any guard a clone has against pushing
+something it should not.
+
+A hook is a convenience, not the gate: CI runs the same checks on the pull
+request, and is the thing that actually has to be green.
+
 ## The levels, and what belongs at each
 
 **Go unit tests**, next to the code. Pure logic with no I/O: parsing, name
