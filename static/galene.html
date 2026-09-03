@@ -97,6 +97,14 @@
                   <i class="fas fa-lock" aria-hidden="true"></i>
                   <span id="e2ee-sas" class="e2ee-sas"></span>
                 </span>
+                <!-- Sozvon: how long the call has been running, counted from
+                     the moment a second person joined.  Lives in #header so it
+                     is hidden on every pre-join screen for free (body.pre-join
+                     hides the whole bar); the CSS pins it to the top centre.
+                     Driven by the callTimer* functions in galene.js. -->
+                <span id="call-timer" class="call-timer invisible"
+                      role="timer" aria-live="off"
+                      data-i18n-title="calltimer.title" title="Call duration"></span>
               </div>
 
               <ul class="nav-menu">
@@ -128,6 +136,17 @@
                   <button id="viewtoggle" class="invisible nav-link nav-button" type="button" title="Grid view" data-i18n-title="nav.gridView">
                     <span><i class="fas fa-th-large" aria-hidden="true"></i></span>
                     <label data-i18n="nav.view">View</label>
+                  </button>
+                </li>
+                <!-- Sozvon: the same thing F11 does, reachable from inside the
+                     call.  Hidden when the browser has no Fullscreen API (iOS
+                     Safari), and on the mobile layout, where the dock has no
+                     room to spare and the browser already gets out of the way
+                     on its own (see galene.css). -->
+                <li>
+                  <button id="fullscreenbutton" class="invisible nav-link nav-button" type="button" title="Fullscreen" data-i18n-title="nav.fullscreen">
+                    <span><i class="icon-fullscreen" aria-hidden="true"></i></span>
+                    <label data-i18n="nav.fullscreen">Fullscreen</label>
                   </button>
                 </li>
                 <li>
@@ -528,6 +547,18 @@
             <a id="app-reset-login" class="app-settings-link" href="#" data-i18n="settings.resetLogin">Reset login on this device</a>
           </fieldset>
         </div>
+
+        <!-- Sozvon: the call-duration readout.  A display preference like the
+             two below it rather than a device knob, so it sits with them and
+             not down in Advanced -- a guest who wants the clock has to be able
+             to find it, and it is off for guests by default while the host's
+             is on (see callTimerEnabled() in galene.js). -->
+        <fieldset id="settings-calltimer">
+          <form>
+            <input id="calltimerbox" type="checkbox"/>
+            <label for="calltimerbox" data-i18n="settings.callTimer">Show call duration</label>
+          </form>
+        </fieldset>
 
         <!-- Appearance and language are both set-once preferences, so they sit
              below the devices you opened the drawer to change, with only the

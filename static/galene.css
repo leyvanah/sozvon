@@ -1872,6 +1872,42 @@ body.nav-hidden #e2ee-indicator {
     pointer-events: none;
 }
 
+/* Call clock (Sozvon): the top centre, the one strip nothing else claims --
+   the E2EE lock has the left corner and the dock the bottom.  Tabular figures
+   so a ticking second does not shuffle the readout sideways, and
+   pointer-events:none so it never swallows a tap meant for the immersive
+   toggle underneath it.  It deliberately stays up when the chrome slides away:
+   going fullscreen and taking the clock with it would be a joke on the person
+   who turned the clock on. */
+#call-timer {
+    position: fixed;
+    top: 16px;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: max-content;
+    max-width: calc(100vw - 24px);
+    z-index: 1041;
+    padding: 5px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--dock-bg);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    color: var(--text-2);
+    font-size: var(--fs-md);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    pointer-events: none;
+}
+
+/* Fullscreen is a desktop control: an eighth circle does not fit the dock on a
+   phone, and a phone browser has no F11 for it to stand in for either -- its
+   own chrome already gets out of the way. */
+@media only screen and (max-width: 1024px) {
+    .nav-menu #fullscreenbutton { display: none; }
+}
+
 /* ✕ to close the people + chat panel from its own header (the toggle now lives
    in the dock, which fades when the panel is open on mobile, so this is the
    always-visible way out). */
@@ -2783,6 +2819,61 @@ button.nav-button:focus-visible {
     border-radius: 0.06em;
 }
 
+/* Fullscreen: two opposite corner brackets, drawn here rather than taken
+   from Font Awesome.  The vendored webfonts are subset to the glyphs the
+   client already uses, so an fa- class the subset does not carry renders as
+   nothing until contrib/subset-fontawesome.py is re-run -- and it renders as
+   nothing *silently*, which is the failure this avoids.  .view-pip above is
+   drawn the same way for the same kind of reason.  (Sozvon) */
+.icon-fullscreen {
+    position: relative;
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1em;
+    height: 1em;
+    vertical-align: -0.1em;
+}
+.icon-fullscreen::before,
+.icon-fullscreen::after {
+    content: "";
+    position: absolute;
+    box-sizing: border-box;
+    width: 0.44em;
+    height: 0.44em;
+    border: 0 solid currentColor;
+}
+.icon-fullscreen::before {
+    top: 0;
+    left: 0;
+    border-top-width: 0.13em;
+    border-left-width: 0.13em;
+    border-top-left-radius: 0.12em;
+}
+.icon-fullscreen::after {
+    right: 0;
+    bottom: 0;
+    border-bottom-width: 0.13em;
+    border-right-width: 0.13em;
+    border-bottom-right-radius: 0.12em;
+}
+/* Leaving fullscreen: the same two brackets, turned inwards. */
+.icon-fullscreen-exit::before {
+    border-top-width: 0;
+    border-left-width: 0;
+    border-bottom-width: 0.13em;
+    border-right-width: 0.13em;
+    border-top-left-radius: 0;
+    border-bottom-right-radius: 0.12em;
+}
+.icon-fullscreen-exit::after {
+    border-bottom-width: 0;
+    border-right-width: 0;
+    border-top-width: 0.13em;
+    border-left-width: 0.13em;
+    border-bottom-right-radius: 0;
+    border-top-left-radius: 0.12em;
+}
+
 /* --- Clean login / waiting-room screen (hide sidebar, chat + top bar) ----- */
 /* The bottom control dock (.nav-menu) is position:fixed, so it floats over any
    pre-join screen (login, lobby, operator dashboard) unless explicitly hidden;
@@ -3413,7 +3504,8 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
        beside it.  The opacity transition matches the panel's slide, so they fade
        back in instead of flashing on close (the old phantom-flash failure). */
     .topnav .nav-menu,
-    #header > #e2ee-indicator {
+    #header > #e2ee-indicator,
+    #header > #call-timer {
         transition: opacity var(--t-base) var(--ease);
     }
     /* Chat mode: the lock and the dock both go while the panel is open.
@@ -3426,7 +3518,8 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
        different things, stacked on top of each other, and it read as a
        mistake.  One thing at a time is the better answer. */
     #left-sidebar.active ~ .container .nav-menu,
-    #left-sidebar.active ~ .container #e2ee-indicator {
+    #left-sidebar.active ~ .container #e2ee-indicator,
+    #left-sidebar.active ~ .container #call-timer {
         opacity: 0;
         pointer-events: none;
     }
