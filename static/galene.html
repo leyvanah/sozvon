@@ -548,18 +548,6 @@
           </fieldset>
         </div>
 
-        <!-- Sozvon: the call-duration readout.  A display preference like the
-             two below it rather than a device knob, so it sits with them and
-             not down in Advanced -- a guest who wants the clock has to be able
-             to find it, and it is off for guests by default while the host's
-             is on (see callTimerEnabled() in galene.js). -->
-        <fieldset id="settings-calltimer">
-          <form>
-            <input id="calltimerbox" type="checkbox"/>
-            <label for="calltimerbox" data-i18n="settings.callTimer">Show call duration</label>
-          </form>
-        </fieldset>
-
         <!-- Appearance and language are both set-once preferences, so they sit
              below the devices you opened the drawer to change, with only the
              advanced disclosure under them.  Appearance stacks its label: three
@@ -653,6 +641,16 @@
           <form>
             <input id="mirrorbox" type="checkbox" checked/>
             <label for="mirrorbox" data-i18n="settings.mirror">Mirror view</label>
+          </form>
+
+          <!-- Sozvon: the call-duration readout, beside the other things that
+               change what the call looks like rather than how it is sent.  It
+               is set once and forgotten, which is what this section is for --
+               and it is only the guest who has to come looking, since the
+               host's is on by default (see callTimerEnabled() in galene.js). -->
+          <form id="settings-calltimer">
+            <input id="calltimerbox" type="checkbox"/>
+            <label for="calltimerbox" data-i18n="settings.callTimer">Show call duration</label>
           </form>
 
           <form>
