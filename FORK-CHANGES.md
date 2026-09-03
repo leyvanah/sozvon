@@ -319,6 +319,18 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     raised hand stays — it is a request, not a state. The **room title** drops
     to medium weight: at 700 the one word everybody in the room already knows
     was the boldest text on the screen.
+  * **The alert dot says what is still outstanding.** It was set and cleared
+    by hand, and the only thing that cleared it was opening the panel. So
+    admitting a knocker straight from the toast — which is the entire point of
+    the toast carrying an Admit button — left the dot pulsing about somebody
+    who was already in the room, and the only way to stop it was to open and
+    close the panel you had just been spared. It is derived now, from the two
+    conditions it stands for: a chat message that has not been on screen, and
+    a lobby row still waiting. Whichever of them ends takes the dot with it,
+    and a knock still unanswered keeps it after the panel has been read.
+    Pending knocks are also **dropped on disconnect** — the server never
+    withdraws them, so a hang-up used to leave a knocker as a row and a live
+    Admit button for a room you had left.
   * **Ephemeral 1-on-1 chat**: when the other party leaves a two-person call
     the chat is wiped. An operator also clears the **server-side history**, so
     a private conversation is not replayed to whoever joins next; a non-operator

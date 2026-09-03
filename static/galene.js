@@ -577,6 +577,9 @@ function setConnected(connected) {
         userbox.classList.add('invisible');
         connectionbox.classList.remove('invisible');
         hideVideo();
+        unreadChat = false;
+        clearKnocks();          // ... and nobody is waiting at its door
+        refreshPanelAlert();
         leaveOperatorRoom();   // stop the dashboard poll if it was running
         silentTokenLists = 0;  // replies we will never receive now
         window.onresize = null;
@@ -1036,6 +1039,7 @@ function collapsePanelsOnJoin() {
         }
     }
     resizePeers();
+    refreshPanelAlert();   // the panel just changed sides
 }
 
 /**
@@ -1051,8 +1055,14 @@ function panelVisible() {
 }
 
 /**
- * Show or hide the unobtrusive alert dot on the panel toggle (unread chat or a
- * new lobby knock that arrived while the panel was closed).
+ * Whether a chat message has arrived that has not been on screen yet.  Only
+ * half of what the alert dot means; see refreshPanelAlert.  (Sozvon)
+ */
+let unreadChat = false;
+
+/**
+ * Paint the unobtrusive alert dot on the panel toggle.  Nothing outside
+ * refreshPanelAlert() should call this.
  *
  * @param {boolean} on
  */
@@ -1060,6 +1070,23 @@ function setPanelAlert(on) {
     let btn = document.getElementById('sidebarCollapse');
     if(btn)
         btn.classList.toggle('panel-alert', on);
+}
+
+/**
+ * Re-derive the alert dot from what is genuinely outstanding: an unread chat
+ * message, or somebody still waiting in the lobby.
+ *
+ * The dot used to be set and cleared by hand, and the clearing only happened
+ * when the panel was opened.  Admitting a knocker straight from the toast --
+ * which is the whole point of the toast having an Admit button -- therefore
+ * left the dot blinking about a person who was already in the room, until you
+ * opened and closed the panel you had just been spared.  Nothing sets the dot
+ * directly any more: both conditions are read back from the live state here,
+ * so whichever of them ends takes the dot with it.  (Sozvon)
+ */
+function refreshPanelAlert() {
+    let knocking = !!document.querySelector('#users .knock-p');
+    setPanelAlert(!panelVisible() && (unreadChat || knocking));
 }
 
 /**
@@ -4797,6 +4824,26 @@ function displayKnockToast(id, username) {
 }
 
 /**
+ * Drop every pending knock: the rows in the participants panel and the toasts
+ * offering to admit them.  The server never withdraws them for us on a
+ * disconnect, so without this a knocker survives a hang-up as a row and a live
+ * Admit button for a room we have left -- and, since the alert dot is derived
+ * from those rows, as a dot about nobody.  (Sozvon)
+ */
+function clearKnocks() {
+    document.querySelectorAll('#users .knock-p').forEach(function(row) {
+        row.remove();
+    });
+    for(let id in knockToasts) {
+        let toast = knockToasts[id];
+        delete knockToasts[id];
+        if(toast)
+            toast.hideToast();
+    }
+    refreshPanelAlert();
+}
+
+/**
  * gotKnock is called (on operators) when a user knocks at the waiting
  * room, or when such a knock is withdrawn.
  *
@@ -4815,6 +4862,9 @@ function gotKnock(id, username, present) {
             delete knockToasts[id];
             toast.hideToast();
         }
+        // Admitted, denied or gone: if the dot was about them, it stops now,
+        // whether or not the panel was ever opened.  (Sozvon)
+        refreshPanelAlert();
         return;
     }
     if(existing)
@@ -4847,8 +4897,7 @@ function gotKnock(id, username, present) {
     else
         div.appendChild(knock);
 
-    if(!panelVisible())
-        setPanelAlert(true);   // someone is knocking and the panel is closed
+    refreshPanelAlert();   // someone is knocking
 
     knockToasts[id] = displayKnockToast(id, username);
 }
@@ -6233,8 +6282,10 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
     // else arrives while the panel isn't on screen.
     if(peerId && !history &&
        (!serverConnection || peerId !== serverConnection.id) &&
-       !panelVisible())
-        setPanelAlert(true);
+       !panelVisible()) {
+        unreadChat = true;
+        refreshPanelAlert();
+    }
 
     let row = document.createElement('div');
     row.classList.add('message-row');
@@ -7916,7 +7967,8 @@ function togglePanel() {
     document.getElementById("left-sidebar").classList.toggle("active");
     document.getElementById("mainrow").classList.toggle("full-width-active");
     if(panelVisible())
-        setPanelAlert(false);   // opening the panel marks it seen
+        unreadChat = false;   // opening the panel marks the chat seen
+    refreshPanelAlert();
     resizePeers();   // the video area changed width, re-fit the grid
 }
 
