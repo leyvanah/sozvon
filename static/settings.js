@@ -41,6 +41,7 @@
  * @property {boolean} [selfHidden] - Sozvon: self-view hidden by the eye button
  * @property {string} [videoRotation] - Sozvon: fixed offset for mobile orientation
  * @property {boolean} [autoRotate] - Sozvon: follow the live device orientation
+ * @property {boolean} [showCallTimer] - Sozvon: show the call clock (unset = follow the role)
  */
 
 /**

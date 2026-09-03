@@ -97,6 +97,14 @@
                   <i class="fas fa-lock" aria-hidden="true"></i>
                   <span id="e2ee-sas" class="e2ee-sas"></span>
                 </span>
+                <!-- Sozvon: how long the call has been running, counted from
+                     the moment a second person joined.  Lives in #header so it
+                     is hidden on every pre-join screen for free (body.pre-join
+                     hides the whole bar); the CSS pins it to the top centre.
+                     Driven by the callTimer* functions in galene.js. -->
+                <span id="call-timer" class="call-timer invisible"
+                      role="timer" aria-live="off"
+                      data-i18n-title="calltimer.title" title="Call duration"></span>
               </div>
 
               <ul class="nav-menu">
@@ -128,6 +136,17 @@
                   <button id="viewtoggle" class="invisible nav-link nav-button" type="button" title="Grid view" data-i18n-title="nav.gridView">
                     <span><i class="fas fa-th-large" aria-hidden="true"></i></span>
                     <label data-i18n="nav.view">View</label>
+                  </button>
+                </li>
+                <!-- Sozvon: the same thing F11 does, reachable from inside the
+                     call.  Hidden when the browser has no Fullscreen API (iOS
+                     Safari), and on the mobile layout, where the dock has no
+                     room to spare and the browser already gets out of the way
+                     on its own (see galene.css). -->
+                <li>
+                  <button id="fullscreenbutton" class="invisible nav-link nav-button" type="button" title="Fullscreen" data-i18n-title="nav.fullscreen">
+                    <span><i class="icon-fullscreen" aria-hidden="true"></i></span>
+                    <label data-i18n="nav.fullscreen">Fullscreen</label>
                   </button>
                 </li>
                 <li>
@@ -622,6 +641,16 @@
           <form>
             <input id="mirrorbox" type="checkbox" checked/>
             <label for="mirrorbox" data-i18n="settings.mirror">Mirror view</label>
+          </form>
+
+          <!-- Sozvon: the call-duration readout, beside the other things that
+               change what the call looks like rather than how it is sent.  It
+               is set once and forgotten, which is what this section is for --
+               and it is only the guest who has to come looking, since the
+               host's is on by default (see callTimerEnabled() in galene.js). -->
+          <form id="settings-calltimer">
+            <input id="calltimerbox" type="checkbox"/>
+            <label for="calltimerbox" data-i18n="settings.callTimer">Show call duration</label>
           </form>
 
           <form>

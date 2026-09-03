@@ -319,6 +319,18 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     raised hand stays — it is a request, not a state. The **room title** drops
     to medium weight: at 700 the one word everybody in the room already knows
     was the boldest text on the screen.
+  * **The alert dot says what is still outstanding.** It was set and cleared
+    by hand, and the only thing that cleared it was opening the panel. So
+    admitting a knocker straight from the toast — which is the entire point of
+    the toast carrying an Admit button — left the dot pulsing about somebody
+    who was already in the room, and the only way to stop it was to open and
+    close the panel you had just been spared. It is derived now, from the two
+    conditions it stands for: a chat message that has not been on screen, and
+    a lobby row still waiting. Whichever of them ends takes the dot with it,
+    and a knock still unanswered keeps it after the panel has been read.
+    Pending knocks are also **dropped on disconnect** — the server never
+    withdraws them, so a hang-up used to leave a knocker as a row and a live
+    Admit button for a room you had left.
   * **Ephemeral 1-on-1 chat**: when the other party leaves a two-person call
     the chat is wiped. An operator also clears the **server-side history**, so
     a private conversation is not replayed to whoever joins next; a non-operator
@@ -351,6 +363,26 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     `reflectPreJoin()`) hides the top bar, participant sidebar and chat on the
     authentication and waiting-room screens; they return once joined.
   * **Media defaults**: high-quality audio and unlimited send bitrate by default.
+  * **Fullscreen from inside the call**: a dock button that does what F11 does,
+    for the people who are in a call rather than at a keyboard with a function
+    row. Its icon and tooltip describe what a click will do. Shown only where
+    the Fullscreen API can take the page (iOS Safari only ever offers it for a
+    `<video>`, so there the button is absent rather than dead), and only on the
+    desktop layout — an eighth circle does not fit the dock on a phone, whose
+    browser has no F11 to stand in for anyway. The glyph is **drawn in CSS**,
+    not taken from Font Awesome: the vendored webfonts are subset to the icons
+    already in use, and a new `fa-` class renders as nothing, silently, until
+    `contrib/subset-fontawesome.py` is re-run.
+  * **Call duration**, in a small pill at the top centre — the one strip
+    nothing else claims. It counts from the moment a **second person joined**,
+    not from when you did: an operator who opens the room twenty minutes early
+    is not in a twenty-minute call. A peer dropping and coming straight back
+    (a phone changing network, a reload, our own reconnect) keeps the same
+    clock; only two minutes alone in the room end it. It is a setting, and the
+    default follows the role — **on for the host**, who is running a session
+    and needs to know how far into it they are, **off for the guest**, who did
+    not ask for a stopwatch on their conversation but gets the switch. Touching
+    the switch pins it either way.
   * **Auto-hiding call chrome**: the top bar and bottom control dock slide away
     after 3 seconds of inactivity so the video fills the screen, and return on
     any pointer move, tap, key press or scroll. Paused wherever it would get in
