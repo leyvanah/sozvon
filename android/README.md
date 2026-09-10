@@ -37,6 +37,17 @@ The app appends `SozvonApp/<version>` to its user agent; the web client uses
 this to hide its own "Download the Android app" button when already running
 inside the app.
 
+## Getting the app
+
+Every release carries a signed APK, and this link always points at the newest
+one:
+
+<https://github.com/leyvanah/sozvon/releases/latest/download/sozvon.apk>
+
+A server installed by [contrib/install.sh](../contrib/install.sh) downloads
+that same file and serves it at `/sozvon.apk`, which is the address to give
+someone who is being invited to a call there.
+
 ## Building
 
 There is no Gradle wrapper checked in; use one of:
@@ -92,7 +103,22 @@ gradle -p android assembleRelease
 
 The same four values are also read from the environment as
 `SOZVON_KEYSTORE`, `SOZVON_KEYSTORE_PASSWORD`, `SOZVON_KEY_ALIAS` and
-`SOZVON_KEY_PASSWORD`, which is how a CI job would take them from secrets.
+`SOZVON_KEY_PASSWORD`, which is how the release workflow takes them from the
+repository's secrets. It expects four of them: `SOZVON_KEYSTORE_BASE64` (the
+keystore file itself, base64-encoded, since a secret is text), and the three
+passwords/alias under their own names. Set them once with:
+
+```sh
+base64 -w0 ~/keys/sozvon-release.jks |
+    gh secret set SOZVON_KEYSTORE_BASE64 --repo leyvanah/sozvon
+gh secret set SOZVON_KEYSTORE_PASSWORD --repo leyvanah/sozvon
+gh secret set SOZVON_KEY_ALIAS --repo leyvanah/sozvon
+gh secret set SOZVON_KEY_PASSWORD --repo leyvanah/sozvon
+```
+
+Without them a tagged release fails rather than publishing an APK nobody can
+install: the build leaves it unsigned, and the workflow checks with
+`apksigner` before attaching it.
 
 If the properties are absent the release build is left **unsigned** rather
 than falling back to the debug key — a silent fallback is exactly how two

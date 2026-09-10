@@ -57,10 +57,11 @@ The upstream documentation in this repository still applies:
   * **Interface redesign** — a dark-first theme, reworked video/chat layout
     (grid/speaker view, unified people+chat panel), and Russian/English
     localisation.
-  * **Android app** — a thin WebView shell ([android/](android/README.md));
-    drop the built APK into the server's `data/` directory and the login card
-    offers it for download at `/sozvon.apk`. It can also **install Sozvon on your
-    VPS over SSH**, so a first server can be set up from the phone.
+  * **Android app** — a thin WebView shell ([android/](android/README.md)),
+    published with every release and served by the server itself at
+    `/sozvon.apk`, so whoever is sent a room link can install it from the same
+    address. It can also **install Sozvon on your VPS over SSH**, so a first
+    server can be set up from the phone.
   * **Desktop app** — an Electron client ([desktop/](desktop/README.md)) with
     the same server-deployment wizard. Both clients drive
     [contrib/install.sh](contrib/install.sh) rather than reimplementing the
@@ -120,6 +121,34 @@ The script is also meant to be driven by a program: `--detach` runs it in the
 background and every stage reports progress as JSON in
 `/var/lib/sozvon-install/state.json`, so a caller whose connection drops can
 reconnect and read the state rather than holding the session open.
+
+## Getting the app
+
+The Android app is attached to every release, and this link always points at
+the newest one:
+
+<https://github.com/leyvanah/sozvon/releases/latest/download/sozvon.apk>
+
+Open it on the phone and tap the file once it has downloaded. Android asks
+whether to allow installing apps from that source — it asks that of anything
+that did not come from a store, and it is asking about the browser, not about
+Sozvon.
+
+A server installed with the script above serves the same file at
+`https://<your-server>/sozvon.apk`, and its login page offers it on a phone.
+That is usually the better link to send someone: it is the address they are
+already going to, and it works where GitHub does not. Pass `--apk no` to the
+installer if you would rather it did not download the app at all.
+
+Every release is signed with the same key, so an app installed from any of
+these places upgrades in place from any other. Update managers that watch
+GitHub releases — [Obtainium](https://github.com/ImranR98/Obtainium),
+[Komi Store](https://github.com/kurikomi-labs/komi-store) — can therefore
+track `leyvanah/sozvon` and keep the app current on their own.
+
+The desktop app is not packaged yet: build it from
+[desktop/](desktop/README.md), or use a browser, which needs nothing
+installed.
 
 ## Running as a service with automatic TLS
 

@@ -652,6 +652,18 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     reload the page (an ongoing call survives it).
   * A GitHub Actions workflow (`.github/workflows/android-apk.yml`) builds
     the APK; no app store involved. See `android/README.md`.
+  * **The APK is a release asset** (`.github/workflows/release.yml`): every
+    tagged release builds it from the very archives it is about to publish
+    (`-PsozvonServerDir`, so the app carries the server version it shipped
+    with), signs it with the stable key from the repository's secrets, and
+    refuses to publish it unless `apksigner` confirms the signature. The
+    fixed asset name makes `releases/latest/download/sozvon.apk` a permanent
+    link, which is also what the GitHub-release app stores (Obtainium, Komi
+    Store) follow. The version code is derived from the tag so an install
+    upgrades in place.
+  * `contrib/install.sh` downloads that APK into the server's `data/`
+    directory (`--apk no` to skip it), so a freshly installed server offers
+    the app at `/sozvon.apk` without the operator having to build one.
   * The server serves `data/sozvon.apk` at **`/sozvon.apk`** when the file is
     present (`webserver`), and the login card shows a **"Download the
     Android app (APK)"** button only in that case (it probes with a HEAD
