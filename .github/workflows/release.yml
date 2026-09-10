@@ -136,7 +136,15 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
           KEYSTORE_BASE64: ${{ secrets.SOZVON_KEYSTORE_BASE64 }}
           SOZVON_KEYSTORE_PASSWORD: ${{ secrets.SOZVON_KEYSTORE_PASSWORD }}
-          SOZVON_KEY_ALIAS: ${{ secrets.SOZVON_KEY_ALIAS }}
+          # Not from a secret, deliberately.  GitHub redacts every secret
+          # VALUE it finds in a log, and this one is the word "sozvon" --
+          # which turned every archive name, path and task name in the
+          # release log into "***" and made the log useless for working out
+          # what a failed release actually did.  The alias names a key inside
+          # a keystore nobody else has; it protects nothing.  A repository
+          # whose keystore uses a different alias can still set the secret,
+          # and it wins here.
+          SOZVON_KEY_ALIAS: ${{ secrets.SOZVON_KEY_ALIAS || 'sozvon' }}
           SOZVON_KEY_PASSWORD: ${{ secrets.SOZVON_KEY_PASSWORD }}
         run: |
           set -eu
