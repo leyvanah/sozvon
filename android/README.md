@@ -37,6 +37,17 @@ The app appends `SozvonApp/<version>` to its user agent; the web client uses
 this to hide its own "Download the Android app" button when already running
 inside the app.
 
+## Getting the app
+
+Every release carries a signed APK, and this link always points at the newest
+one:
+
+<https://github.com/leyvanah/sozvon/releases/latest/download/sozvon.apk>
+
+A server installed by [contrib/install.sh](../contrib/install.sh) downloads
+that same file and serves it at `/sozvon.apk`, which is the address to give
+someone who is being invited to a call there.
+
 ## Building
 
 There is no Gradle wrapper checked in; use one of:
@@ -53,23 +64,86 @@ There is no Gradle wrapper checked in; use one of:
   # → android/app/build/outputs/apk/debug/app-debug.apk
   ```
 
-The debug APK is signed with a debug key, which is fine for self-hosted
-distribution (Android shows the usual "unknown sources" prompt). For a
-release build, configure a `signingConfig` with your own keystore in
-`app/build.gradle.kts` and run `assembleRelease`.
+## Signing
+
+Android identifies an app by its signing key. A build signed with a
+different key is a *different app* to the device: it refuses to install over
+the existing one, and the user has to uninstall first — losing their saved
+servers and pinned certificates.
+
+The debug key does not survive that test. It is generated per machine, so a
+build from CI and a build from your laptop are two different apps, and every
+hop between them costs a reinstall. **Debug builds are for throwaway testing
+on one machine.** Anything that reaches somebody else's device — including
+the APK you drop into the server's `data/` directory — should be an
+`assembleRelease` build signed with a stable key.
+
+Create that key once, somewhere outside this checkout:
+
+```sh
+keytool -genkeypair -keystore ~/keys/sozvon-release.jks -storetype PKCS12 \
+    -alias sozvon -keyalg RSA -keysize 4096 -validity 10000 \
+    -dname "CN=Sozvon, O=Sozvon"
+```
+
+Then name it in `~/.gradle/gradle.properties` — outside the repository, so
+neither the key nor its password can be committed:
+
+```properties
+sozvonKeystore=/home/you/keys/sozvon-release.jks
+sozvonKeystorePassword=…
+sozvonKeyAlias=sozvon
+sozvonKeyPassword=…
+```
+
+```sh
+gradle -p android assembleRelease
+# → android/app/build/outputs/apk/release/app-release.apk
+```
+
+The same four values are also read from the environment as
+`SOZVON_KEYSTORE`, `SOZVON_KEYSTORE_PASSWORD`, `SOZVON_KEY_ALIAS` and
+`SOZVON_KEY_PASSWORD`, which is how the release workflow takes them from the
+repository's secrets. It expects four of them: `SOZVON_KEYSTORE_BASE64` (the
+keystore file itself, base64-encoded, since a secret is text), and the three
+passwords/alias under their own names. Set them once with:
+
+```sh
+base64 -w0 ~/keys/sozvon-release.jks |
+    gh secret set SOZVON_KEYSTORE_BASE64 --repo leyvanah/sozvon
+gh secret set SOZVON_KEYSTORE_PASSWORD --repo leyvanah/sozvon
+gh secret set SOZVON_KEY_ALIAS --repo leyvanah/sozvon
+gh secret set SOZVON_KEY_PASSWORD --repo leyvanah/sozvon
+```
+
+Without them a tagged release fails rather than publishing an APK nobody can
+install: the build leaves it unsigned, and the workflow checks with
+`apksigner` before attaching it.
+
+If the properties are absent the release build is left **unsigned** rather
+than falling back to the debug key — a silent fallback is exactly how two
+differently signed "releases" end up in circulation. Check what you actually
+produced before distributing it:
+
+```sh
+apksigner verify --print-certs app-release.apk
+```
+
+**Back the keystore up.** Losing it means no existing install can ever be
+upgraded again; every user would have to uninstall and start over.
 
 ## Distributing from your server
 
 Copy the APK into the server's data directory:
 
 ```sh
-cp app-debug.apk /path/to/server/data/sozvon.apk
+cp app-release.apk /path/to/server/data/sozvon.apk
 ```
 
 The server then serves it at `/sozvon.apk`, and the web client's login card
 automatically shows a **Download the Android app (APK)** button. Remove the
 file to hide the button again.
 
-When updating, bump `versionCode` in `app/build.gradle.kts` and keep the
-signing key the same, otherwise Android refuses to install the update over
-the old version.
+When updating, bump `versionCode` in `app/build.gradle.kts` and sign with the
+same key as last time (see *Signing* above), otherwise Android refuses to
+install the update over the old version.
