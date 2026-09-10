@@ -179,8 +179,25 @@ android {
         applicationId = "org.sozvon.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.1"
+        // The release workflow stamps the tag it is building, so the APK
+        // attached to a release reports that release's version instead of
+        // whatever was last committed here -- and an app store watching those
+        // releases sees the version go up.  Android will only upgrade an
+        // install when the version *code* increases, and that has to be an
+        // integer, so derive one from the same three numbers:
+        // 0.3.0 -> 300, 1.2.4 -> 10204.  (Sozvon)
+        val stamped = (project.findProperty("sozvonVersionName") as String?)
+            ?.removePrefix("v")?.takeIf { it.isNotBlank() }
+        versionName = stamped ?: "0.2.1"
+        versionCode = if (stamped != null) {
+            val n = stamped.split(".", "-").mapNotNull { it.toIntOrNull() }
+            require(n.size >= 3) {
+                "sozvonVersionName should look like 1.2.3, got $stamped"
+            }
+            n[0] * 10000 + n[1] * 100 + n[2]
+        } else {
+            2
+        }
     }
 
     buildFeatures {
