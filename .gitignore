@@ -77,3 +77,8 @@ CLAUDE.md
 *.keystore
 *.p12
 /android/keystore.properties
+
+# Shared working context, synced between machines outside git (a junction into
+# a sync folder).  Session notes and decision logs -- working material, not
+# project documentation, and the repository is public.
+/context/
