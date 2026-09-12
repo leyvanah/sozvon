@@ -49,10 +49,15 @@ real certificate — see [galene-install.md](galene-install.md).
 go build ./...
 go vet -composites=false ./...
 go test ./...
+node --test 'static/test/*.test.js'
 ```
 
 `-composites=false` silences unkeyed-field warnings from Pion and inherited
 upstream structs; every other analyzer runs. The same checks run in CI.
+
+[TESTING.md](TESTING.md) describes what those tests cover, what they do not,
+and the manual checklist for the parts no test reaches -- read it before adding
+a test, and before shipping anything that touches the web client.
 
 The web client is plain JavaScript, type-checked through JSDoc annotations:
 
