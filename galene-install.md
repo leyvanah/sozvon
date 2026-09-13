@@ -322,6 +322,64 @@ Galene includes an IPv4-only TURN server, which is controlled by the
   * the default value is `auto`, which behaves like `:1194` if there is no
     `data/ice-servers.json` file, and like `""` otherwise.
 
+### TURN over TLS
+
+The listeners described above carry TURN in the clear, which is fine for
+getting through NAT but is trivially recognised on the wire: the protocol's
+magic cookie sits in the first bytes of every packet.  Where that matters —
+a network that filters or throttles what it can identify — Sozvon can also
+offer TURN over TLS, using the same certificate as the web server:
+
+```sh
+sozvon -http :443 -letsencrypt meet.example.com \
+       -turn-tls meet.example.com
+```
+
+`-turn-tls` takes a **hostname** with an optional port (5349 by default),
+not an address: it is what clients are told to connect to, so it has to be
+a name the certificate covers, and it must resolve to this server.
+Clients are then offered a `turns:` URL alongside whatever else is
+configured.
+
+Both halves of that sentence bite in practice, and neither failure is
+loud:
+
+  * **It must resolve here.** The server resolves the name once, at
+    startup, and hands the resulting address to clients as the address to
+    relay through. Point it at a name that resolves somewhere else — a
+    public name fronted by another machine, say — and every client is
+    politely told to relay through that other machine, which knows nothing
+    about it.
+
+  * **The certificate must cover it.** The listener borrows the web
+    server's certificate, so a relay hostname that differs from the web
+    hostname fails every handshake unless one certificate carries both
+    names. With `-letsencrypt` the two are the same name and this is free;
+    a deployment whose certificate comes from elsewhere has to arrange it
+    (a second SAN), or give the relay a name that certificate already has.
+
+Three more things are worth knowing:
+
+  * **It needs a certificate that clients trust.** The listener borrows the
+    web server's, so `-letsencrypt` or a certificate from a real authority
+    works, and a self-signed one does not: browsers validate `turns:`
+    separately from the page, so clicking through a certificate warning on
+    the page does not help.  With `-insecure` there is no certificate at
+    all, and the server says so at startup.
+
+  * **It sits alongside `data/ice-servers.json` rather than replacing it.**
+    Asking for a TLS listener starts the built-in server even when that
+    file supplies relays of its own, since that is normally the point: one
+    more relay for ICE to race against the others.  It does *not* change
+    what `-turn auto` means, though — the cleartext listeners still stand
+    down whenever that file is present, so asking for a TLS relay never
+    reopens a cleartext one behind your back.
+
+  * **Port 443 is the interesting value**, because a call then looks like a
+    request to the host that served the page.  It cannot be the same 443
+    the web server uses — for now that needs a second address, or a port
+    of its own.
+
 If the server is not accessible from the Internet, e.g. because of NAT or
 because it is behind a restrictive firewall, then you should configure
 a TURN server that runs on a host that is accessible by both Galene and

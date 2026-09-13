@@ -2,11 +2,13 @@ package turnserver
 
 import (
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/pion/turn/v5"
@@ -16,6 +18,48 @@ import (
 var username string
 var password string
 var Address string
+
+// TLSAddress makes the built-in server offer TURN over TLS in addition to
+// the cleartext listeners.  Unlike Address it is a *name* with an optional
+// port, not an address: it is what clients are told to connect to, so it
+// must be a name the server's certificate covers.  Empty disables it.
+//
+// Wrapping the relay in TLS matters where cleartext TURN is recognised on
+// the wire: the protocol's magic cookie sits in the first bytes of every
+// packet, which is trivially identified by a middlebox.  Pointing this at
+// port 443 goes further, making a call look like a request to the same
+// host that served the page.  (Sozvon)
+var TLSAddress string
+
+// Certificate returns the certificate for the TLS listener.  The web
+// server owns certificate loading and renewal and sets this; since it
+// starts *after* us (galene.go calls ice.Update before webserver.Serve),
+// we read it at handshake time rather than when the listener is built.
+// (Sozvon)
+var Certificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
+
+// auto records what StartStop was last told, i.e. whether an "auto" server
+// should be running at all.  Start consults it so that a TLS listener can
+// come up without dragging the cleartext ones up with it.  (Sozvon)
+var auto bool
+
+// tlsAddr is the address of the TLS listener.  It is a type of its own so
+// that ICEServers can tell it apart from a cleartext TCP listener and
+// advertise a turns: URL, and it carries a hostname rather than an IP
+// because that is what the client must connect to for the certificate to
+// validate.  (Sozvon)
+type tlsAddr struct {
+	host string
+	port int
+}
+
+func (a *tlsAddr) Network() string {
+	return "tcp"
+}
+
+func (a *tlsAddr) String() string {
+	return net.JoinHostPort(a.host, strconv.Itoa(a.port))
+}
 
 var server struct {
 	mu        sync.Mutex
@@ -92,6 +136,79 @@ func listener(a net.IP, port int, relay net.IP) (*turn.PacketConnConfig, *turn.L
 	return pcc, lc
 }
 
+// splitTLSAddress parses TLSAddress, a hostname with an optional port.  We
+// default to 5349, the registered port for TURN over TLS; a deployment that
+// wants the relay to be indistinguishable from web traffic says 443
+// explicitly.  (Sozvon)
+func splitTLSAddress(a string) (string, int, error) {
+	host, port, err := net.SplitHostPort(a)
+	if err != nil {
+		// no port given: the whole value is the hostname
+		return a, 5349, nil
+	}
+	if host == "" {
+		return "", 0, errors.New("TURN over TLS needs a hostname")
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil || p <= 0 || p > 65535 {
+		return "", 0, errors.New("bad port for TURN over TLS")
+	}
+	return host, p, nil
+}
+
+// tlsListener builds the TURN-over-TLS listener.  It binds every interface,
+// since it is the hostname in TLSAddress that clients connect to, and
+// relays from relay, the address that hostname resolves to.  (Sozvon)
+func tlsListener(port int, relay net.IP) *turn.ListenerConfig {
+	s := net.JoinHostPort("", strconv.Itoa(port))
+	l, err := net.Listen("tcp4", s)
+	if err != nil {
+		// Say plainly what is now missing.  This was asked for by an
+		// explicit flag, and a relay that silently is not there looks
+		// from the outside exactly like a network that blocks it.
+		log.Printf("TURN: listen(TLS, %v): %v", s, err)
+		log.Printf("TURN over TLS is NOT available; " +
+			"clients will only be offered the other servers")
+		return nil
+	}
+
+	cf := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			get := Certificate
+			if get == nil {
+				return nil, errors.New(
+					"no certificate for TURN over TLS",
+				)
+			}
+			return get(hello)
+		},
+	}
+
+	return &turn.ListenerConfig{
+		Listener: tls.NewListener(l, cf),
+		RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{
+			RelayAddress: relay,
+			Address:      "0.0.0.0",
+		},
+	}
+}
+
+// relayAddress resolves the TLS hostname to the IPv4 address that the
+// server relays from.  (Sozvon)
+func relayAddress(host string) (net.IP, error) {
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range ips {
+		if a := ip.To4(); a != nil {
+			return a, nil
+		}
+	}
+	return nil, errors.New("no IPv4 address for " + host)
+}
+
 func Start() error {
 	server.mu.Lock()
 	defer server.mu.Unlock()
@@ -100,22 +217,13 @@ func Start() error {
 		return nil
 	}
 
-	if Address == "" {
+	if Address == "" && TLSAddress == "" {
 		return errors.New("built-in TURN server disabled")
-	}
-
-	ad := Address
-	if Address == "auto" {
-		ad = ":1194"
-	}
-	addr, err := net.ResolveUDPAddr("udp4", ad)
-	if err != nil {
-		return err
 	}
 
 	username = "galene"
 	buf := make([]byte, 6)
-	_, err = rand.Read(buf)
+	_, err := rand.Read(buf)
 	if err != nil {
 		return err
 	}
@@ -127,56 +235,94 @@ func Start() error {
 	var lcs []turn.ListenerConfig
 	var pccs []turn.PacketConnConfig
 
-	if addr.IP != nil && !addr.IP.IsUnspecified() {
-		a := addr.IP.To4()
-		if a == nil {
-			return errors.New("couldn't parse address")
+	// -turn-tls brings the server up even when data/ice-servers.json says
+	// there are relays elsewhere, but it must not quietly change what
+	// -turn auto means: "auto" still stands the cleartext listeners down
+	// whenever that file supplies servers of its own.  Otherwise asking
+	// for a TLS relay would reopen a cleartext one as a side effect, on
+	// exactly the deployments that took care to close it.  (Sozvon)
+	if Address != "" && (Address != "auto" || auto) {
+		ad := Address
+		if Address == "auto" {
+			ad = ":1194"
 		}
-		pcc, lc := listener(net.IP{0, 0, 0, 0}, addr.Port, a)
-		if pcc != nil {
-			pccs = append(pccs, *pcc)
-			server.addresses = append(server.addresses, &net.UDPAddr{
-				IP:   a,
-				Port: addr.Port,
-			})
-		}
-		if lc != nil {
-			lcs = append(lcs, *lc)
-			server.addresses = append(server.addresses, &net.TCPAddr{
-				IP:   a,
-				Port: addr.Port,
-			})
-		}
-	} else {
-		as, err := publicAddresses()
+		addr, err := net.ResolveUDPAddr("udp4", ad)
 		if err != nil {
 			return err
 		}
 
-		if len(as) == 0 {
-			return errors.New("no public addresses")
-		}
-
-		for _, a := range as {
-			pcc, lc := listener(a, addr.Port, nil)
+		if addr.IP != nil && !addr.IP.IsUnspecified() {
+			a := addr.IP.To4()
+			if a == nil {
+				return errors.New("couldn't parse address")
+			}
+			pcc, lc := listener(net.IP{0, 0, 0, 0}, addr.Port, a)
 			if pcc != nil {
 				pccs = append(pccs, *pcc)
-				server.addresses = append(server.addresses,
-					&net.UDPAddr{
-						IP:   a,
-						Port: addr.Port,
-					},
-				)
+				server.addresses = append(server.addresses, &net.UDPAddr{
+					IP:   a,
+					Port: addr.Port,
+				})
 			}
 			if lc != nil {
 				lcs = append(lcs, *lc)
-				server.addresses = append(server.addresses,
-					&net.TCPAddr{
-						IP:   a,
-						Port: addr.Port,
-					},
-				)
+				server.addresses = append(server.addresses, &net.TCPAddr{
+					IP:   a,
+					Port: addr.Port,
+				})
 			}
+		} else {
+			as, err := publicAddresses()
+			if err != nil {
+				return err
+			}
+
+			if len(as) == 0 {
+				return errors.New("no public addresses")
+			}
+
+			for _, a := range as {
+				pcc, lc := listener(a, addr.Port, nil)
+				if pcc != nil {
+					pccs = append(pccs, *pcc)
+					server.addresses = append(server.addresses,
+						&net.UDPAddr{
+							IP:   a,
+							Port: addr.Port,
+						},
+					)
+				}
+				if lc != nil {
+					lcs = append(lcs, *lc)
+					server.addresses = append(server.addresses,
+						&net.TCPAddr{
+							IP:   a,
+							Port: addr.Port,
+						},
+					)
+				}
+			}
+		}
+
+	}
+
+	// TURN over TLS.  Advertised under a name rather than an address, so
+	// that the certificate validates in the client.  (Sozvon)
+	if TLSAddress != "" {
+		host, port, err := splitTLSAddress(TLSAddress)
+		if err != nil {
+			return err
+		}
+		relay, err := relayAddress(host)
+		if err != nil {
+			return err
+		}
+		lc := tlsListener(port, relay)
+		if lc != nil {
+			lcs = append(lcs, *lc)
+			server.addresses = append(server.addresses,
+				&tlsAddr{host: host, port: port},
+			)
 		}
 	}
 
@@ -184,7 +330,12 @@ func Start() error {
 		return errors.New("couldn't establish any listeners")
 	}
 
-	log.Printf("Starting built-in TURN server on %v", addr.String())
+	var bound []string
+	for _, a := range server.addresses {
+		bound = append(bound, a.String())
+	}
+	log.Printf("Starting built-in TURN server on %v",
+		strings.Join(bound, ", "))
 
 	server.server, err = turn.NewServer(turn.ServerConfig{
 		Realm: "galene.org",
@@ -221,6 +372,8 @@ func ICEServers() []webrtc.ICEServer {
 			urls = append(urls, "turn:"+a.String())
 		case *net.TCPAddr:
 			urls = append(urls, "turn:"+a.String()+"?transport=tcp")
+		case *tlsAddr:
+			urls = append(urls, "turns:"+a.String()+"?transport=tcp")
 		default:
 			log.Printf("unexpected TURN address %T", a)
 		}
@@ -251,6 +404,18 @@ func Stop() error {
 }
 
 func StartStop(start bool) error {
+	// Remember what "auto" resolves to this time round, so that Start can
+	// honour it for the cleartext listeners even when a TLS listener drags
+	// the server up.  (Sozvon)
+	auto = start
+
+	// A TLS listener is never automatic: asking for one is a deliberate
+	// choice, and it is usually meant to sit *alongside* whatever
+	// data/ice-servers.json supplies rather than to replace it.  Say
+	// -turn "" to run the TLS listener on its own.  (Sozvon)
+	if TLSAddress != "" {
+		return Start()
+	}
 	if Address == "auto" {
 		if start {
 			return Start()

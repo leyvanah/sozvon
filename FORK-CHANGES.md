@@ -866,6 +866,67 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
 
 ### Security hardening
 
+  * **TURN over TLS from the built-in relay** (`-turn-tls`). The built-in
+    TURN server only ever offered cleartext listeners — upstream advertises
+    `turn:` and never `turns:` — so a deployment that wanted a relay whose
+    traffic is not recognisable on the wire had to run coturn beside it. That
+    is a real gap rather than a theoretical one: TURN's magic cookie sits in
+    the first bytes of every packet, which is the easiest thing on the wire
+    for a middlebox to key on, and it is exactly what a network that filters
+    by protocol looks for. `-turn-tls <hostname>[:port]` now wraps a listener
+    in TLS with **the certificate the web server already holds** (Let's
+    Encrypt or `data/cert.pem` alike) and advertises a `turns:` URL, so the
+    single binary that was the point of the project stays a single binary.
+
+    Three details the implementation had to get right. The option takes a
+    *name*, not an address, because a `turns:` URL is validated against the
+    certificate and upstream's listener bookkeeping records bare IPs — hence
+    a distinct address type (`tlsAddr`) that `ICEServers` can tell apart from
+    a cleartext TCP listener. The certificate is read **at handshake time**,
+    not when the listener is built, because `galene.go` calls `ice.Update()`
+    — which starts the TURN server — before `webserver.Serve()`, which is
+    what loads the certificate; binding it eagerly would have captured nil.
+    And `-turn-tls` starts the built-in server even when
+    `data/ice-servers.json` exists — a TLS listener is normally wanted
+    *alongside* the relays that file configures — while leaving what `-turn
+    auto` means alone: the cleartext listeners still stand down whenever
+    that file is present. Without that second half, asking for a TLS relay
+    would silently reopen a cleartext one on exactly the deployments that
+    had taken the trouble to close it, which is how the production
+    deployment here is configured.
+
+    Tested end-to-end rather than by inspection — `turnserver_test.go`
+    allocates on the listener as a client would, TLS on the wire and TURN
+    inside — plus a live run confirming the certificate reaches the TURN
+    port from the web server. Known limitation: a self-signed certificate
+    does not work, since browsers validate `turns:` independently of the
+    page, and sharing the web server's own 443 is not implemented yet (it
+    needs a first-byte demultiplexer; see the note in
+    [galene-install.md](galene-install.md)).
+
+    **What it does not fix, measured on a real deployment.** Taken to
+    production and tested with the external relay removed, so the TLS relay
+    was the only path media could take: the call failed, and `ss -tin` on the
+    live connections said why. Two clients on different networks, both
+    identical: retransmissions about half of everything sent, the retransmit
+    timeout doubled six or seven times to 31 seconds, the congestion window
+    collapsed to one segment, the segment size driven from 1460 down to 128,
+    and seven kilobytes stuck in the send queue that never drained — while
+    the client-to-server direction stayed healthy, and the server's own
+    connections to the same port were pristine. That is not a blocked port or
+    a recognised protocol; it is an established flow being shaped, in one
+    direction. Both clients being affected rules out any one carrier: what
+    they share is the address answering them, which on that host also
+    terminates VPN protocols.
+
+    So the disguise cannot help there — it hides the content, and what is
+    penalised is the destination. That deployment needs a different address,
+    not a different transport, and the flag was removed from it again rather
+    than leave clients waiting on a path that cannot carry media. The feature
+    is kept because the case it was built for is the ordinary self-hoster,
+    whose alternative today is cleartext TURN on port 1194 — which is the
+    OpenVPN port, and is exactly what stopped working on that same host
+    earlier.
   * **The generated operator password no longer outlives the install.** The
     installer hands its result back through
     `/var/lib/sozvon-install/result.json`, which carries that password in clear
