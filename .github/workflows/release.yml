@@ -33,6 +33,19 @@ jobs:
           go-version: stable
           cache: true
 
+      # For the Android app, which ships as an asset of the release: see the
+      # "Build the Android app" step below.  Its debug-signed counterpart is
+      # built on every push that touches android/ by
+      # .github/workflows/android-apk.yml.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
       # Never ship a release that does not pass what CI asks of every commit.
       - name: Test
         run: go test ./...
@@ -107,6 +120,72 @@ jobs:
           (cd dist && sha256sum * > SHA256SUMS)
           ls -l dist
 
+      # The APK carries the server release inside it (so it can install a
+      # server that cannot reach GitHub), and it is built from dist/ rather
+      # than from GitHub: the release it belongs to does not exist yet at this
+      # point, and an APK that installs a different version than the release
+      # it shipped in is a support case nobody can reproduce.
+      #
+      # Signed with the project's stable key, taken from the repository's
+      # secrets: Android treats a differently signed build as a different app
+      # and refuses to install it over an existing one, so a release signed
+      # with anything else -- CI's per-run debug key above all -- would cost
+      # every user an uninstall, and their saved servers with it.
+      - name: Build the Android app
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          KEYSTORE_BASE64: ${{ secrets.SOZVON_KEYSTORE_BASE64 }}
+          SOZVON_KEYSTORE_PASSWORD: ${{ secrets.SOZVON_KEYSTORE_PASSWORD }}
+          # Not from a secret, deliberately.  GitHub redacts every secret
+          # VALUE it finds in a log, and this one is the word "sozvon" --
+          # which turned every archive name, path and task name in the
+          # release log into "***" and made the log useless for working out
+          # what a failed release actually did.  The alias names a key inside
+          # a keystore nobody else has; it protects nothing.  A repository
+          # whose keystore uses a different alias can still set the secret,
+          # and it wins here.
+          SOZVON_KEY_ALIAS: ${{ secrets.SOZVON_KEY_ALIAS || 'sozvon' }}
+          SOZVON_KEY_PASSWORD: ${{ secrets.SOZVON_KEY_PASSWORD }}
+        run: |
+          set -eu
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+              echo "SOZVON_KEYSTORE_BASE64 is not set for this repository." >&2
+              echo "The release APK must be signed with the stable key -- see" >&2
+              echo "the Signing section of android/README.md." >&2
+              exit 1
+          fi
+          # $RUNNER_TEMP is scoped to this job and is never uploaded anywhere.
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          export SOZVON_KEYSTORE="$RUNNER_TEMP/release.jks"
+
+          gradle -p android assembleRelease --no-daemon \
+              -PsozvonServerVersion="$VERSION" \
+              -PsozvonServerDir="$PWD/dist" \
+              -PsozvonVersionName="$VERSION"
+          rm -f "$RUNNER_TEMP/release.jks"
+
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          # The build leaves the APK unsigned rather than falling back to a
+          # debug key when the credentials are missing, and an unsigned APK
+          # cannot be installed at all -- so prove it was signed before it
+          # becomes a release asset.  The certificate printed here is also
+          # what an update has to match: a different one, and every existing
+          # install has to be removed by hand before it can upgrade.
+          sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:?no Android SDK on this runner}}
+          apksigner=$(ls -d "$sdk"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$apk"
+
+          # A fixed asset name on purpose: it makes
+          # releases/latest/download/sozvon.apk a permanent link that a person
+          # can be sent, that contrib/install.sh fetches by exactly this name,
+          # and that the GitHub-release app stores follow.
+          cp "$apk" dist/sozvon.apk
+          # Re-made now that the APK is in dist/ as well; the copy embedded in
+          # the APK covers only the server archives, which is all the
+          # installer looks up there.
+          (cd dist && rm -f SHA256SUMS && sha256sum * > SHA256SUMS)
+          ls -l dist
+
       - name: Upload artefacts to the workflow run
         uses: actions/upload-artifact@v4
         with:
@@ -127,6 +206,12 @@ jobs:
             echo 'tool, the `static/` web client the server serves at runtime,'
             echo 'sample systemd and fail2ban configuration under `contrib/`, and'
             echo 'the documentation.'
+            echo
+            echo '`sozvon.apk` is the Android app, for phones and tablets. It is'
+            echo 'installed from the file rather than from a store, so Android will'
+            echo 'ask you to allow installing from this source. The server the'
+            echo 'installer sets up offers the same app for download on its login'
+            echo 'page.'
             echo
             echo 'To install on a fresh Debian or Ubuntu VPS, see `contrib/install.sh`.'
           } > release-notes.md

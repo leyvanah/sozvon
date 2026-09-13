@@ -33,6 +33,8 @@ GROUP_NAME=meet
 OPERATOR_ROOM=yes
 E2EE=yes
 REQUIRE_E2EE=no
+ANDROID_APK=yes
+APK_INSTALLED=no
 UDP_PORT=8443
 HTTPS_PORT=443
 DETACH=no
@@ -70,6 +72,9 @@ Usage: $0 [option...]
   --require-e2ee yes|no refuse anyone who cannot encrypt (default: no).  Only
                         meaningful with --e2ee yes; turns the notice above
                         into a closed door.
+  --apk yes|no          also download the Android app and serve it from the
+                        login page (default: $ANDROID_APK).  About 20 MB; the
+                        server works the same either way.
   --admin-user NAME     operator account (default: $ADMIN_USER)
   --admin-password PW   operator password (default: generated).  Prefer
                         --admin-password-env when other users share the
@@ -116,6 +121,7 @@ while [ $# -gt 0 ]; do
 	--operator-room) OPERATOR_ROOM="$2"; shift 2 ;;
 	--e2ee) E2EE="$2"; shift 2 ;;
 	--require-e2ee) REQUIRE_E2EE="$2"; shift 2 ;;
+	--apk) ANDROID_APK="$2"; shift 2 ;;
 	--admin-user) ADMIN_USER="$2"; shift 2 ;;
 	--admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
 	--admin-password-env) ADMIN_PASSWORD="${SOZVON_ADMIN_PASSWORD:-}"; shift ;;
@@ -147,6 +153,11 @@ case "$E2EE" in
 yes|true|1) E2EE=yes ;;
 no|false|0) E2EE=no ;;
 *) echo "--e2ee takes yes or no, not: $E2EE" >&2; exit 2 ;;
+esac
+
+case "$ANDROID_APK" in
+yes|no) ;;
+*) echo "--apk takes yes or no, not: $ANDROID_APK" >&2; exit 2 ;;
 esac
 
 case "$REQUIRE_E2EE" in
@@ -274,6 +285,9 @@ if [ "$DETACH" = yes ]; then
 	    ${MIRROR:+--mirror "$MIRROR"} \
 	    --group "$GROUP_NAME" \
 	    --operator-room "$OPERATOR_ROOM" \
+	    --e2ee "$E2EE" \
+	    --require-e2ee "$REQUIRE_E2EE" \
+	    --apk "$ANDROID_APK" \
 	    --admin-user "$ADMIN_USER" \
 	    --admin-password-env \
 	    --port "$HTTPS_PORT" \
@@ -525,6 +539,35 @@ mkdir -p "$DEST"
 tar -xzf "$TMP/$ARCHIVE" -C "$TMP" || { cleanup_tmp; fail "could not unpack $ARCHIVE"; }
 mv "$TMP/sozvon_${VERSION}_linux_${ARCH}"/* "$DEST/" ||
 	{ cleanup_tmp; fail "unexpected archive layout"; }
+
+# The Android app, served by this server at /sozvon.apk so that whoever is
+# handed a room link can install it from the same address -- no store account,
+# no second place to trust.  Never fatal: a server without the app is a
+# working server, and a release from before the app was published has no APK
+# to offer.
+if [ "$ANDROID_APK" = yes ]; then
+	if [ -n "$MIRROR" ]; then
+		APK_URL="$MIRROR/sozvon.apk"
+	else
+		APK_URL="$BASE/download/$VERSION/sozvon.apk"
+	fi
+	if ! curl -fsSL -o "$TMP/sozvon.apk" "$APK_URL" 2>/dev/null; then
+		echo "note: no Android app at $APK_URL -- skipping it" >&2
+	elif ! grep -q " [ *]\{0,1\}sozvon.apk\$" "$TMP/SHA256SUMS"; then
+		# Publishing an app for other people to install on their phones
+		# is exactly the wrong place to relax about provenance.
+		echo "WARNING: SHA256SUMS has no entry for sozvon.apk -- not" >&2
+		echo "         installing it.  The server itself is unaffected." >&2
+	elif ( cd "$TMP" && grep " [ *]\{0,1\}sozvon.apk\$" SHA256SUMS > apk.txt &&
+	       sha256sum -c apk.txt >/dev/null 2>&1 ); then
+		mv "$TMP/sozvon.apk" "$PREFIX/data/sozvon.apk"
+		APK_INSTALLED=yes
+	else
+		echo "WARNING: checksum mismatch for sozvon.apk -- not installing" >&2
+		echo "         it.  The server itself is unaffected." >&2
+	fi
+fi
+
 cleanup_tmp
 
 [ -x "$DEST/sozvon" ] || chmod +x "$DEST/sozvon" "$DEST/galenectl" 2>/dev/null || true
@@ -924,6 +967,18 @@ delete that file once you have it.
 EOF
 else
 	echo "  Password:  unchanged (the group file already existed)"
+fi
+
+if [ "$APK_INSTALLED" = yes ]; then
+	cat <<EOF
+
+The Android app is served from this server as well, so anyone you send a room
+link to can install it from the same address:
+
+  $ORIGIN/sozvon.apk
+
+The login page offers it too, on a phone.
+EOF
 fi
 
 if [ "$OPERATOR_ROOM" = yes ]; then

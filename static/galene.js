@@ -101,8 +101,10 @@ let pendingRemember = null;
  * Set while a maketoken request is in flight specifically to remember this
  * device, so the token reply is stored instead of shown as an invite link.
  * "previous" is the remember-token being replaced, revoked once the new one
- * is stored.
- * @type {{group: string, username: string, previous: string|null}|null}
+ * is stored.  "includeSubgroups" records the scope it was minted with, so the
+ * stored entry knows whether it also covers the hub's child rooms.
+ * @type {{group: string, username: string, previous: string|null,
+ *         includeSubgroups: boolean}|null}
  */
 let storingRememberToken = null;
 
@@ -150,15 +152,52 @@ let skipAutoplayProbe = false;
 // via maketoken with the user's own permissions; it is scoped to the group,
 // expires (30 days), and can be revoked server-side.  Only issued to operators
 // (see gotJoined), never to ordinary guests.
-function loadRememberToken(group) {
+/**
+ * The stored group whose remember-token covers `group`: the group's own entry
+ * when there is one, otherwise a hub entry minted with subgroup scope.  That
+ * is what lets an operator who ticked "remember me" on the hub open a client
+ * link -- a per-client child room, where the checkbox is deliberately not
+ * offered -- without retyping the password, giving the remember-token the
+ * reach the session token already has.  Entries written before the scope was
+ * recorded carry no flag and stay exact-only: the server refuses a
+ * hierarchical token they were not minted as.  Most specific hub wins.
+ * (Sozvon)
+ * @param {string} group
+ * @returns {string|null}
+ */
+function rememberTokenGroup(group) {
     try {
         let all = JSON.parse(window.localStorage.getItem('sozvon.remember'));
-        let t = all && all[group];
+        if(!all)
+            return null;
+        if(all[group] && all[group].token)
+            return group;
+        let best = null;
+        for(let g in all) {
+            let t = all[g];
+            if(t && t.token && t.includeSubgroups &&
+               group.startsWith(g + '/') &&
+               (best === null || g.length > best.length))
+                best = g;
+        }
+        return best;
+    } catch(e) {
+        return null;
+    }
+}
+
+function loadRememberToken(group) {
+    try {
+        let key = rememberTokenGroup(group);
+        if(key === null)
+            return null;
+        let all = JSON.parse(window.localStorage.getItem('sozvon.remember'));
+        let t = all && all[key];
         if(!t || !t.token)
             return null;
         // Drop it client-side once expired, so we don't try a dead token.
         if(t.expires && new Date(t.expires).getTime() < Date.now()) {
-            clearRememberToken(group);
+            clearRememberToken(key);
             return null;
         }
         return t;
@@ -167,11 +206,14 @@ function loadRememberToken(group) {
     }
 }
 
-function saveRememberToken(group, token, username, expires) {
+function saveRememberToken(group, token, username, expires, includeSubgroups) {
     try {
         let all = JSON.parse(
             window.localStorage.getItem('sozvon.remember')) || {};
-        all[group] = {token: token, username: username, expires: expires};
+        all[group] = {
+            token: token, username: username, expires: expires,
+            includeSubgroups: !!includeSubgroups,
+        };
         window.localStorage.setItem(
             'sozvon.remember', JSON.stringify(all));
     } catch(e) {
@@ -535,6 +577,10 @@ function setConnected(connected) {
         userbox.classList.add('invisible');
         connectionbox.classList.remove('invisible');
         hideVideo();
+        resetCallTimer();       // the call is over (Sozvon)
+        unreadChat = false;
+        clearKnocks();          // ... and nobody is waiting at its door
+        refreshPanelAlert();
         leaveOperatorRoom();   // stop the dashboard poll if it was running
         silentTokenLists = 0;  // replies we will never receive now
         window.onresize = null;
@@ -715,7 +761,7 @@ function onPeerConnection() {
  * @param {string} reason
  */
 function gotClose(code, reason) {
-    closeUpMedia();
+    closeUpMedia(null, this);
     closeSafariStream();
     if(code !== 1000) {
         console.warn('Socket close', code, reason);
@@ -949,6 +995,10 @@ getButtonElement('presentbutton').onclick = async function(e) {
 getButtonElement('unpresentbutton').onclick = async function(e) {
     e.preventDefault();
     let c = findUpMedia('camera');
+    // "camera off" must mean every camera stream, not just the first one we
+    // find, or a duplicate would go on sending video after the user believes
+    // the camera is off. (Sozvon)
+    closeExtraUpMedia('camera', c);
     // turn the camera off, but keep the microphone running if it is on
     if(c && c.stream && c.stream.getAudioTracks().length)
         await addLocalMedia(c.localId, {video: false, audio: true});
@@ -990,6 +1040,7 @@ function collapsePanelsOnJoin() {
         }
     }
     resizePeers();
+    refreshPanelAlert();   // the panel just changed sides
 }
 
 /**
@@ -1005,8 +1056,14 @@ function panelVisible() {
 }
 
 /**
- * Show or hide the unobtrusive alert dot on the panel toggle (unread chat or a
- * new lobby knock that arrived while the panel was closed).
+ * Whether a chat message has arrived that has not been on screen yet.  Only
+ * half of what the alert dot means; see refreshPanelAlert.  (Sozvon)
+ */
+let unreadChat = false;
+
+/**
+ * Paint the unobtrusive alert dot on the panel toggle.  Nothing outside
+ * refreshPanelAlert() should call this.
  *
  * @param {boolean} on
  */
@@ -1014,6 +1071,23 @@ function setPanelAlert(on) {
     let btn = document.getElementById('sidebarCollapse');
     if(btn)
         btn.classList.toggle('panel-alert', on);
+}
+
+/**
+ * Re-derive the alert dot from what is genuinely outstanding: an unread chat
+ * message, or somebody still waiting in the lobby.
+ *
+ * The dot used to be set and cleared by hand, and the clearing only happened
+ * when the panel was opened.  Admitting a knocker straight from the toast --
+ * which is the whole point of the toast having an Admit button -- therefore
+ * left the dot blinking about a person who was already in the room, until you
+ * opened and closed the panel you had just been spared.  Nothing sets the dot
+ * directly any more: both conditions are read back from the live state here,
+ * so whichever of them ends takes the dot with it.  (Sozvon)
+ */
+function refreshPanelAlert() {
+    let knocking = !!document.querySelector('#users .knock-p');
+    setPanelAlert(!panelVisible() && (unreadChat || knocking));
 }
 
 /**
@@ -1113,6 +1187,12 @@ function setButtonsVisibility() {
     setVisibility('simulcastform', canPresent);
 
     setVisibility('collapse-video', mediacount && mobilelayout);
+
+    // Sozvon: the call clock defaults to the role, so both the readout and the
+    // drawer checkbox are re-derived whenever our permissions may have changed.
+    reflectCallTimerBox();
+    reflectCallTimer();
+    reflectFullscreenButton();
 }
 
 /**
@@ -2158,6 +2238,17 @@ function replaceCameraStream() {
 }
 
 /**
+ * Serialises addLocalMedia.  Opening a device takes time -- a permission
+ * prompt, a slow phone camera -- and two calls that overlap would each
+ * publish their own stream, which is two cameras and two microphones from a
+ * single participant.  Queueing them means the second one finds the first
+ * one's stream and replaces it. (Sozvon)
+ *
+ * @type {Promise<void>}
+ */
+let addLocalMediaQueue = Promise.resolve();
+
+/**
  * @param {string} [localId]
  * @param {{audio?: boolean, video?: boolean}} [force]
  *     Optional overrides for which tracks to capture, independent of the saved
@@ -2166,6 +2257,24 @@ function replaceCameraStream() {
  *     disturbing the other.  An empty constraint object means "default device".
  */
 async function addLocalMedia(localId, force) {
+    let next = addLocalMediaQueue.then(
+        () => addLocalMediaNow(localId, force),
+        () => addLocalMediaNow(localId, force),
+    );
+    // the queue must survive a failed call, so swallow the error here; the
+    // caller still sees it through the promise we return
+    addLocalMediaQueue = next.catch(() => {});
+    return next;
+}
+
+/**
+ * Does the work of addLocalMedia.  Do not call directly: go through
+ * addLocalMedia, which serialises these. (Sozvon)
+ *
+ * @param {string} [localId]
+ * @param {{audio?: boolean, video?: boolean}} [force]
+ */
+async function addLocalMediaNow(localId, force) {
     if(serverConnection && serverConnection.e2ee &&
        serverConnection.e2ee.state === 'blocked') {
         // The group requires end-to-end encryption but this call cannot be
@@ -2173,6 +2282,12 @@ async function addLocalMedia(localId, force) {
         displayError(Sozvon.i18n.t('e2ee.blocked'));
         return;
     }
+
+    // The connection this call belongs to.  getUserMedia below can take
+    // seconds -- a permission prompt, a slow phone camera -- and the user may
+    // leave and come back in the meantime, so we check afterwards that we are
+    // still publishing into the session that asked for this. (Sozvon)
+    let sc = serverConnection;
 
     let settings = getSettings();
 
@@ -2256,6 +2371,30 @@ async function addLocalMedia(localId, force) {
         else
             displayError(e);
         return;
+    }
+
+    if(serverConnection !== sc || !sc.group) {
+        // We left the group, or the connection was rebuilt, while the camera
+        // was still opening.  Publishing now would attach this stream to a
+        // session that never asked for it, next to the media that session has
+        // already published -- two cameras and two microphones from one
+        // participant, under a single name in the list.  Drop it. (Sozvon)
+        stopStream(stream);
+        return;
+    }
+
+    if(!localId) {
+        // Another call opened the camera while we were waiting for this one:
+        // a second tap on a button, or a join that raced us.  Take over its
+        // local id so newUpStream replaces that stream below instead of
+        // publishing a second one alongside it. (Sozvon)
+        let existing = findUpMedia('camera');
+        if(existing) {
+            localId = existing.localId;
+            // as above: release the camera before the replacement takes over
+            await removeFilter(existing);
+            stopStream(existing.stream);
+        }
     }
 
     // Permission may have just been granted, which is the first moment the
@@ -2458,12 +2597,40 @@ function stopStream(s) {
  * is null, it closes all up connections.
  *
  * @param {string} [label]
+ * @param {ServerConnection} [sc]
+ *     The connection to close streams on; defaults to the current one.  A
+ *     late socket close must pass its own connection, or it would tear down
+ *     the media of the connection that has already replaced it. (Sozvon)
 */
-function closeUpMedia(label) {
-    for(let id in serverConnection.up) {
-        let c = serverConnection.up[id];
+function closeUpMedia(label, sc) {
+    sc = sc || serverConnection;
+    if(!sc)
+        return;
+    for(let id in sc.up) {
+        let c = sc.up[id];
         if(label && c.label !== label)
             continue
+        c.close();
+    }
+}
+
+/**
+ * closeExtraUpMedia closes every up connection with the given label except
+ * `keep`.  There is only ever meant to be one camera stream; this is the belt
+ * to addLocalMedia's braces, so that a duplicate which somehow got published
+ * cannot keep sending after the user has turned the camera off. (Sozvon)
+ *
+ * @param {string} label
+ * @param {Stream} [keep]
+ */
+function closeExtraUpMedia(label, keep) {
+    if(!serverConnection)
+        return;
+    for(let id in serverConnection.up) {
+        let c = serverConnection.up[id];
+        if(c.label !== label || c === keep)
+            continue;
+        console.warn('Closing duplicate ' + label + ' stream');
         c.close();
     }
 }
@@ -4346,6 +4513,160 @@ function maybeClearChatOnSolo() {
 }
 
 /**
+ * Sozvon: the call clock.
+ *
+ * When the call became a call -- the moment a second person appeared in the
+ * room -- or null while we are here on our own.  Deliberately not the moment
+ * *we* joined: an operator who opens the room twenty minutes early is not in
+ * a twenty-minute call, and would be shown a clock that had already run.
+ *
+ * @type {number|null}
+ */
+let callStart = null;
+
+/**
+ * Pending "the room has emptied out" check.  A peer that drops and comes
+ * straight back (a phone changing network, a browser reload, our own
+ * reconnect) must not restart the clock: knowing how far into the session you
+ * are is the entire point of it.  So the clock keeps running for a grace
+ * period after the room drains to one, and only then gives up on the call.
+ *
+ * @type {number|null}
+ */
+let callAloneTimeout = null;
+
+/** How long a call survives being alone in the room, in milliseconds. */
+const callResumeGrace = 2 * 60 * 1000;
+
+/** @type {number|null} */
+let callTimerInterval = null;
+
+/**
+ * The number of real people in the room, ourselves included.  Recorders and
+ * other bots carry the "system" permission and are not company.
+ *
+ * (Permissions are a list of strings -- indexOf, not a lookup.  doSimulcast()
+ * still spells the same test as a property access, which has quietly been a
+ * no-op since upstream changed the shape; not this change to fix.)
+ *
+ * @returns {number}
+ */
+function participantCount() {
+    if(!serverConnection || !serverConnection.users)
+        return 0;
+    let count = 0;
+    for(let id in serverConnection.users) {
+        let u = serverConnection.users[id];
+        if(u && u.permissions && u.permissions.indexOf('system') >= 0)
+            continue;
+        count++;
+    }
+    return count;
+}
+
+/**
+ * Whether the call clock should be on screen.  Once the user has touched the
+ * checkbox the stored answer stands; until then it follows the role, because
+ * the two want opposite defaults.  The host is running a session and needs to
+ * know how far into it they are; the guest did not ask for a stopwatch on
+ * their conversation, so they get the switch but not the clock.  (Sozvon)
+ *
+ * @returns {boolean}
+ */
+function callTimerEnabled() {
+    let s = getSettings();
+    if(typeof s.showCallTimer === 'boolean')
+        return s.showCallTimer;
+    return !!(serverConnection && serverConnection.permissions &&
+              serverConnection.permissions.indexOf('op') >= 0);
+}
+
+/**
+ * Format a duration as mm:ss, or h:mm:ss once it passes the hour.
+ *
+ * @param {number} ms
+ * @returns {string}
+ */
+function formatDuration(ms) {
+    let total = Math.max(0, Math.floor(ms / 1000));
+    let seconds = total % 60;
+    let minutes = Math.floor(total / 60) % 60;
+    let hours = Math.floor(total / 3600);
+    // Not padStart: the client is type-checked against an ES6 lib, and this
+    // would be the only line in it that needed ES2017.
+    /** @param {number} n */
+    let two = function(n) { return (n < 10 ? '0' : '') + n; };
+    let text = two(minutes) + ':' + two(seconds);
+    return hours > 0 ? hours + ':' + text : text;
+}
+
+/** Repaint the readout once. */
+function paintCallTimer() {
+    let elt = document.getElementById('call-timer');
+    if(elt && callStart !== null)
+        elt.textContent = formatDuration(Date.now() - callStart);
+}
+
+/**
+ * Show or hide the readout and own its one-second tick, so no caller has to
+ * remember to start or stop the interval.  Cheap and idempotent: call it
+ * whenever anything it depends on (the clock, the setting, our permissions)
+ * may have changed.
+ */
+function reflectCallTimer() {
+    let on = callStart !== null && callTimerEnabled();
+    if(on)
+        paintCallTimer();
+    setVisibility('call-timer', on);
+    if(on && !callTimerInterval)
+        callTimerInterval = setInterval(paintCallTimer, 1000);
+    else if(!on && callTimerInterval) {
+        clearInterval(callTimerInterval);
+        callTimerInterval = null;
+    }
+}
+
+/** Make the drawer checkbox agree with the effective setting. */
+function reflectCallTimerBox() {
+    let box = document.getElementById('calltimerbox');
+    if(box instanceof HTMLInputElement)
+        box.checked = callTimerEnabled();
+}
+
+/**
+ * Start, keep or drop the call clock after the room population changed.
+ */
+function updateCallTimer() {
+    if(participantCount() >= 2) {
+        if(callAloneTimeout) {
+            clearTimeout(callAloneTimeout);
+            callAloneTimeout = null;
+        }
+        if(callStart === null)
+            callStart = Date.now();
+    } else if(callStart !== null && !callAloneTimeout) {
+        callAloneTimeout = setTimeout(function() {
+            callAloneTimeout = null;
+            if(participantCount() < 2) {
+                callStart = null;   // they are not coming back
+                reflectCallTimer();
+            }
+        }, callResumeGrace);
+    }
+    reflectCallTimer();
+}
+
+/** Forget the current call entirely (a new room, or back to the login). */
+function resetCallTimer() {
+    if(callAloneTimeout) {
+        clearTimeout(callAloneTimeout);
+        callAloneTimeout = null;
+    }
+    callStart = null;
+    reflectCallTimer();
+}
+
+/**
  * @param {string} id
  * @param {string} kind
  */
@@ -4358,6 +4679,7 @@ function gotUser(id, kind) {
         peakUserCount = Math.max(
             peakUserCount, Object.keys(serverConnection.users).length,
         );
+        updateCallTimer();
         if(Object.keys(serverConnection.users).length === 3)
             reconsiderSendParameters();
         break;
@@ -4366,6 +4688,7 @@ function gotUser(id, kind) {
         if(e2eeActive())
             serverConnection.e2ee.delUser(id);
         maybeClearChatOnSolo();
+        updateCallTimer();
         if(Object.keys(serverConnection.users).length < 3)
             scheduleReconsiderParameters();
         break;
@@ -4664,6 +4987,26 @@ function displayKnockToast(id, username) {
 }
 
 /**
+ * Drop every pending knock: the rows in the participants panel and the toasts
+ * offering to admit them.  The server never withdraws them for us on a
+ * disconnect, so without this a knocker survives a hang-up as a row and a live
+ * Admit button for a room we have left -- and, since the alert dot is derived
+ * from those rows, as a dot about nobody.  (Sozvon)
+ */
+function clearKnocks() {
+    document.querySelectorAll('#users .knock-p').forEach(function(row) {
+        row.remove();
+    });
+    for(let id in knockToasts) {
+        let toast = knockToasts[id];
+        delete knockToasts[id];
+        if(toast)
+            toast.hideToast();
+    }
+    refreshPanelAlert();
+}
+
+/**
  * gotKnock is called (on operators) when a user knocks at the waiting
  * room, or when such a knock is withdrawn.
  *
@@ -4682,6 +5025,9 @@ function gotKnock(id, username, present) {
             delete knockToasts[id];
             toast.hideToast();
         }
+        // Admitted, denied or gone: if the dot was about them, it stops now,
+        // whether or not the panel was ever opened.  (Sozvon)
+        refreshPanelAlert();
         return;
     }
     if(existing)
@@ -4714,8 +5060,7 @@ function gotKnock(id, username, present) {
     else
         div.appendChild(knock);
 
-    if(!panelVisible())
-        setPanelAlert(true);   // someone is knocking and the panel is closed
+    refreshPanelAlert();   // someone is knocking
 
     knockToasts[id] = displayKnockToast(id, username);
 }
@@ -4927,6 +5272,7 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         // and clear any reconnect cycle that has just succeeded.
         wantConnected = true;
         reconnectLastJoin = serverConnection.lastJoin || reconnectLastJoin;
+        let wasReconnecting = reconnecting;
         if(reconnecting)
             displayMessage(Sozvon.i18n.t('toast.reconnected'));
         stopReconnect();
@@ -4944,13 +5290,23 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
                 // once the new one is safely stored -- otherwise every re-login
                 // leaves another live operator token behind.
                 let previous = loadRememberToken(pendingRemember.group);
+                // On an operator hub, cover its child rooms too: the operator
+                // opens a client link straight from a chat, in a fresh tab
+                // where the sessionStorage session token is not there to help,
+                // and the checkbox is not offered inside the child room.  The
+                // server allows the hierarchical form only for an operator
+                // minting it on their own group for their own username, which
+                // is exactly this call. (Sozvon)
+                let subgroups = !!groupStatus.operatorRoom;
                 storingRememberToken = {
                     group: pendingRemember.group,
                     username: pendingRemember.username,
                     previous: (previous && previous.token) || null,
+                    includeSubgroups: subgroups,
                 };
                 makeToken({
                     username: pendingRemember.username,
+                    includeSubgroups: subgroups,
                     expires: new Date(Date.now() + 30 * 24 * 3600 * 1000),
                     permissions: serverConnection.permissions.slice(),
                 });
@@ -4991,6 +5347,11 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         if(kind === 'change')
             return;
         peakUserCount = 0;   // fresh call: start counting participants again
+        // A reconnect drops us back into the same conversation, so it keeps the
+        // clock it was already running; anything else is a new call. (Sozvon)
+        if(!wasReconnecting)
+            resetCallTimer();
+        updateCallTimer();
         collapsePanelsOnJoin();
         break;
     default:
@@ -5312,7 +5673,8 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
         if(storingRememberToken) {
             // This token is for remembering this device, not an invite link.
             saveRememberToken(storingRememberToken.group, message.token,
-                              storingRememberToken.username, message.expires);
+                              storingRememberToken.username, message.expires,
+                              storingRememberToken.includeSubgroups);
             // The device is now remembered by the new token: revoke the one
             // it replaces, so re-logging in doesn't pile up live operator
             // tokens on the group. (Sozvon)
@@ -5533,10 +5895,14 @@ function operatorLogout() {
     // Forgetting this device must also revoke it: the token is still live
     // server-side otherwise, and it grants op.  Sent before the socket is
     // closed below -- close() flushes what is already queued. (Sozvon)
+    // Forget it under the key it is actually stored as: logging out of a
+    // child room covered by a hub token must clear that hub entry, or the
+    // next visit signs back in with the token we have just revoked.
+    let rememberKey = rememberTokenGroup(group);
     let remembered = loadRememberToken(group);
     if(remembered)
         revokeToken(remembered.token);
-    clearRememberToken(group);
+    clearRememberToken(rememberKey || group);
     reconnectLastJoin = null;
     usingRememberToken = false;
     token = null;
@@ -6085,8 +6451,10 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
     // else arrives while the panel isn't on screen.
     if(peerId && !history &&
        (!serverConnection || peerId !== serverConnection.id) &&
-       !panelVisible())
-        setPanelAlert(true);
+       !panelVisible()) {
+        unreadChat = true;
+        refreshPanelAlert();
+    }
 
     let row = document.createElement('div');
     row.classList.add('message-row');
@@ -7768,7 +8136,8 @@ function togglePanel() {
     document.getElementById("left-sidebar").classList.toggle("active");
     document.getElementById("mainrow").classList.toggle("full-width-active");
     if(panelVisible())
-        setPanelAlert(false);   // opening the panel marks it seen
+        unreadChat = false;   // opening the panel marks the chat seen
+    refreshPanelAlert();
     resizePeers();   // the video area changed width, re-fit the grid
 }
 
@@ -8224,6 +8593,92 @@ document.getElementById('viewtoggle').onclick = function(e) {
     toggleView();
 };
 
+/**
+ * Sozvon: whether this browser can put the page itself into fullscreen.  iOS
+ * Safari only ever offers fullscreen for a <video> element, so there the
+ * button is not shown at all rather than shown and doing nothing.
+ *
+ * @returns {boolean}
+ */
+function canFullscreen() {
+    return !!(document.fullscreenEnabled &&
+              document.documentElement.requestFullscreen);
+}
+
+/**
+ * Whether the page -- rather than a single video tile, which the browser can
+ * also do on its own -- is currently filling the screen.
+ *
+ * @returns {boolean}
+ */
+function pageFullscreen() {
+    return document.fullscreenElement === document.documentElement;
+}
+
+/**
+ * The dock button behind what F11 does, for everyone who is in a call rather
+ * than at a keyboard with a function row.  (Sozvon)
+ */
+async function toggleFullscreen() {
+    try {
+        if(document.fullscreenElement)
+            await document.exitFullscreen();
+        else
+            await document.documentElement.requestFullscreen();
+    } catch(e) {
+        // A refused request is not worth a toast: the browser has already
+        // said so in its own words, and F11 is still there.
+        console.warn("Couldn't toggle fullscreen:", e);
+    }
+}
+
+/**
+ * Show the button where fullscreen is possible at all, and make its icon and
+ * tooltip describe what a click will do, the way the view toggle does.
+ */
+function reflectFullscreenButton() {
+    let btn = document.getElementById('fullscreenbutton');
+    if(!btn)
+        return;
+    setVisibility('fullscreenbutton', canFullscreen());
+    let full = pageFullscreen();
+    let icon = btn.querySelector('i');
+    if(icon)
+        icon.classList.toggle('icon-fullscreen-exit', full);
+    let key = full ? 'nav.exitFullscreen' : 'nav.fullscreen';
+    btn.setAttribute('data-i18n-title', key);
+    let label = btn.querySelector('label');
+    if(label)
+        label.setAttribute('data-i18n', key);
+    let text = Sozvon.i18n.t(key);
+    btn.title = text;
+    if(label)
+        label.textContent = text;
+}
+
+document.getElementById('fullscreenbutton').onclick = function(e) {
+    e.preventDefault();
+    toggleFullscreen();
+};
+
+document.addEventListener('fullscreenchange', function() {
+    reflectFullscreenButton();
+    // Entering and leaving fullscreen changes the stage size; browsers do fire
+    // a resize for it, but the tile grid is cheap to re-fit and a missed one
+    // leaves the video cropped.
+    resizePeers();
+});
+
+// Sozvon: the call clock, a per-tab display preference like the rest of the
+// drawer.  Writing the setting is what pins it: until the first click the
+// readout follows the role (see callTimerEnabled).
+getInputElement('calltimerbox').onchange = function(e) {
+    if(!(this instanceof HTMLInputElement))
+        throw new Error('Unexpected type for this');
+    updateSettings({showCallTimer: this.checked});
+    reflectCallTimer();
+};
+
 async function serverConnect() {
     if(serverConnection && serverConnection.socket)
         serverConnection.close();
@@ -8426,6 +8881,8 @@ async function start() {
     addFilters();
     await setMediaChoices(false);
     reflectSettings();
+    reflectCallTimerBox();
+    reflectFullscreenButton();
 
     if(parms.has('token')) {
         token = parms.get('token');

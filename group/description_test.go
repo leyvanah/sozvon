@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -231,8 +232,15 @@ func TestWritableGroups(t *testing.T) {
 	if err != nil {
 		t.Errorf("Stat: %v", err)
 	}
-	if mode := fi.Mode(); mode != 0o600 {
-		t.Errorf("Mode is 0o%03o (expected 0o600)\n", mode)
+	// Windows has no Unix permission bits -- os.Chmod there only
+	// toggles the read-only flag, so the file always reports 0o666
+	// and this check fails for a reason that has nothing to do with
+	// the code.  What it guards, a group file not being
+	// world-readable, is a Unix concern.  (Sozvon)
+	if runtime.GOOS != "windows" {
+		if mode := fi.Mode(); mode != 0o600 {
+			t.Errorf("Mode is 0o%03o (expected 0o600)\n", mode)
+		}
 	}
 
 	desc, token, err := GetSanitisedDescription("test")

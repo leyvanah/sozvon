@@ -58,21 +58,58 @@ function putKey(streamId, keyId, key) {
     m.set(keyId, key);
 }
 
+// Live video encrypt transformers.  drop-until-keyed below discards the
+// encoder's initial keyframe while the SAS handshake is still running, and
+// nothing else would ever ask for another one -- the peer then decodes delta
+// frames against a reference it never received, which is the grey-video bug.
+// Holding the transformers lets us ask for a fresh keyframe the moment a key
+// exists. (Sozvon)
+const videoEncoders = new Set();
+
+// A completing handshake posts one 'key' per stream; coalesce that burst into
+// a single request per encoder.
+let keyFrameTimer = null;
+
+function scheduleKeyFrames() {
+    if(keyFrameTimer !== null)
+        return;
+    keyFrameTimer = setTimeout(() => {
+        keyFrameTimer = null;
+        for(let t of videoEncoders) {
+            try {
+                let p = t.generateKeyFrame();
+                if(p && p.catch)
+                    p.catch(() => {});
+            } catch(err) {
+                // Not implemented, or no encoder attached yet: the peer's PLI
+                // remains as a fallback.
+            }
+        }
+    }, 0);
+}
+
 self.onmessage = (e) => {
     let d = e.data || {};
     switch(d.type) {
     case 'key':
         // d.key is a structured-cloned CryptoKey (stays non-extractable).
         putKey(d.streamId, d.keyId, d.key);
+        // What we dropped while unkeyed may have been the encoder's only
+        // keyframe; ask for another now that we can seal it.
+        scheduleKeyFrames();
         break;
     case 'sendKeyId':
         sendKeyId = d.keyId | 0;
+        scheduleKeyFrames();
         break;
     case 'clear':
         keys.clear();
         break;
     case 'mode':
         cleartextMode = !!d.cleartext;
+        // The same race in reverse: frames dropped before the cleartext
+        // fallback was allowed leave the peer without a reference frame.
+        scheduleKeyFrames();
         break;
     }
 };
@@ -107,8 +144,13 @@ function makeEncryptor(streamId, isVideo) {
     };
 }
 
-function makeDecryptor(streamId, isVideo) {
+// An undecryptable stream fails once per frame; throttle so that never turns
+// into a keyframe-request storm.
+const KEYFRAME_REQUEST_MS = 1000;
+
+function makeDecryptor(streamId, isVideo, transformer) {
     let resolver = (keyId) => getKey(streamId, keyId);
+    let lastRequest = 0;
     return async (frame, controller) => {
         if(cleartextMode) {
             controller.enqueue(frame);
@@ -125,6 +167,21 @@ function makeDecryptor(streamId, isVideo) {
             // Undecryptable: wrong key, not-yet-keyed, or a SAS-mismatch attack.
             // Drop the frame (black video) instead of feeding garbage to the
             // decoder.
+            if(isVideo && transformer) {
+                let now = Date.now();
+                if(now - lastRequest >= KEYFRAME_REQUEST_MS) {
+                    lastRequest = now;
+                    try {
+                        let p = transformer.sendKeyFrameRequest();
+                        if(p && p.catch)
+                            p.catch(() => {});
+                    } catch(err2) {
+                        // Best effort only: galene's PLI routing has been
+                        // flaky for simulcast RIDs, so the sender-side
+                        // generateKeyFrame() is the load-bearing fix.
+                    }
+                }
+            }
             reportOnce('decrypt', err);
         }
     };
@@ -144,11 +201,15 @@ self.onrtctransform = (event) => {
     let t = event.transformer;
     let opts = t.options || {};
     let isVideo = opts.kind === 'video';
-    let fn = opts.operation === 'encrypt' ?
+    let encrypt = opts.operation === 'encrypt';
+    let fn = encrypt ?
         makeEncryptor(opts.streamId, isVideo) :
-        makeDecryptor(opts.streamId, isVideo);
+        makeDecryptor(opts.streamId, isVideo, t);
+    if(encrypt && isVideo)
+        videoEncoders.add(t);
     t.readable
         .pipeThrough(new TransformStream({transform: fn}))
         .pipeTo(t.writable)
-        .catch((err) => reportOnce(opts.operation || 'pipe', err));
+        .catch((err) => reportOnce(opts.operation || 'pipe', err))
+        .finally(() => videoEncoders.delete(t));
 };
