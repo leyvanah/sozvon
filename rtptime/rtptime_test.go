@@ -53,26 +53,58 @@ func differs(a, b, delta uint64) bool {
 	return a-b >= delta
 }
 
+// TestTime checks that the clocks advance in real time at the rate asked
+// for.
+//
+// It compares each clock against the interval that actually elapsed, not
+// against the interval that was requested.  time.Sleep guarantees only a
+// lower bound: it overshoots by whatever the timer granularity and the
+// machine's load add -- about 15.6ms on Windows, and unbounded on a loaded
+// CI runner.  Comparing a clock against the sleep it was asked for therefore
+// measures the scheduler rather than the clock, and fails at random; this
+// test did so on Windows and on CI alike.  Bracketing the sleep with
+// time.Now removes the scheduler from the comparison, which lets the
+// tolerance be *tighter* than before -- one millisecond, covering only the
+// gap between the two clock reads.  (Sozvon)
 func TestTime(t *testing.T) {
+	const sleep = 50 * time.Millisecond
+
+	// tolerance is one millisecond expressed in the clock's own units
+	tolerance := func(hz uint32) uint64 {
+		return uint64(FromDuration(time.Millisecond, hz))
+	}
+	expected := func(d time.Duration, hz uint32) uint64 {
+		return uint64(FromDuration(d, hz))
+	}
+
+	start := time.Now()
 	a := Now(48000)
-	time.Sleep(40 * time.Millisecond)
+	time.Sleep(sleep)
 	b := Now(48000) - a
-	if differs(b, 40*48, 160) {
-		t.Errorf("Expected %v, got %v", 4*48, b)
+	elapsed := time.Since(start)
+	if e := expected(elapsed, 48000); differs(b, e, tolerance(48000)) {
+		t.Errorf("Now(48000): expected %v, got %v (elapsed %v)",
+			e, b, elapsed)
 	}
 
+	start = time.Now()
 	c := Microseconds()
-	time.Sleep(4 * time.Millisecond)
+	time.Sleep(sleep)
 	d := Microseconds() - c
-	if differs(d, 4000, 1000) {
-		t.Errorf("Expected %v, got %v", 4000, d)
+	elapsed = time.Since(start)
+	if e := expected(elapsed, 1000000); differs(d, e, tolerance(1000000)) {
+		t.Errorf("Microseconds: expected %v, got %v (elapsed %v)",
+			e, d, elapsed)
 	}
 
+	start = time.Now()
 	c = Jiffies()
-	time.Sleep(time.Second * 10000000 / JiffiesPerSec)
+	time.Sleep(sleep)
 	d = Jiffies() - c
-	if differs(d, 10000000, 1000000) {
-		t.Errorf("Expected %v, got %v", 10000000, d)
+	elapsed = time.Since(start)
+	if e := expected(elapsed, JiffiesPerSec); differs(d, e, tolerance(JiffiesPerSec)) {
+		t.Errorf("Jiffies: expected %v, got %v (elapsed %v)",
+			e, d, elapsed)
 	}
 }
 
