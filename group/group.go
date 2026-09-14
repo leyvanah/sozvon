@@ -181,13 +181,29 @@ func (g *Group) SetLocked1on1(on bool) {
 // and waiting for an operator to admit or deny them.
 var ErrKnocking = errors.New("knocking")
 
-// notifyKnock informs every operator in clients about a change to a knock.
-// kind is "knock" (waiting) or "knockcancel" (gone).  Called unlocked.
-func notifyKnock(g *Group, clients []Client, kind, id, username string) {
-	for _, c := range clients {
+// getOpsUnlocked returns the operators among the group's members.  Called
+// locked, and it must be: a leaving client clears its own permissions,
+// holding no lock, as soon as DelClient has removed it, so only under g.mu is
+// it known not to have left yet.  That is all the lock guarantees here.  A
+// member whose permissions are changed (op, present, ...) rewrites them
+// without g.mu, and that is a separate race this does not address. (Sozvon)
+func (g *Group) getOpsUnlocked() []Client {
+	ops := make([]Client, 0)
+	for _, c := range g.clients {
 		if slices.Contains(c.Permissions(), "op") {
-			c.PushClient(g.Name(), kind, id, username, nil, nil)
+			ops = append(ops, c)
 		}
+	}
+	return ops
+}
+
+// notifyKnock informs operators about a change to a knock.  kind is "knock"
+// (waiting) or "knockcancel" (gone).  ops comes from getOpsUnlocked; filtering
+// a member list here instead, after the lock is released, races with
+// operators leaving.
+func notifyKnock(g *Group, ops []Client, kind, id, username string) {
+	for _, c := range ops {
+		c.PushClient(g.Name(), kind, id, username, nil, nil)
 	}
 }
 
@@ -203,10 +219,10 @@ func (g *Group) Admit(id string) error {
 	}
 	delete(g.knocking, id)
 	g.admitted[id] = true
-	clients := g.getClientsUnlocked(nil)
+	ops := g.getOpsUnlocked()
 	g.mu.Unlock()
 
-	notifyKnock(g, clients, "knockcancel", id, k.username)
+	notifyKnock(g, ops, "knockcancel", id, k.username)
 	return k.client.Joined(g.Name(), "rejoin")
 }
 
@@ -220,10 +236,10 @@ func (g *Group) Deny(id string) error {
 	}
 	delete(g.knocking, id)
 	delete(g.admitted, id)
-	clients := g.getClientsUnlocked(nil)
+	ops := g.getOpsUnlocked()
 	g.mu.Unlock()
 
-	notifyKnock(g, clients, "knockcancel", id, k.username)
+	notifyKnock(g, ops, "knockcancel", id, k.username)
 	return k.client.Joined(g.Name(), "deny")
 }
 
@@ -234,11 +250,11 @@ func (g *Group) RemoveKnock(id string) {
 	k := g.knocking[id]
 	delete(g.knocking, id)
 	delete(g.admitted, id)
-	clients := g.getClientsUnlocked(nil)
+	ops := g.getOpsUnlocked()
 	g.mu.Unlock()
 
 	if k != nil {
-		notifyKnock(g, clients, "knockcancel", id, k.username)
+		notifyKnock(g, ops, "knockcancel", id, k.username)
 	}
 }
 
@@ -828,7 +844,7 @@ func AddClient(group string, c Client, creds ClientCredentials) (*Group, error) 
 						client:   c,
 						username: username,
 					}
-					notifyKnock(g, clients, "knock", cid, username)
+					notifyKnock(g, g.getOpsUnlocked(), "knock", cid, username)
 					return nil, ErrKnocking
 				}
 			} else if g.locked != nil {

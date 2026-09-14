@@ -3,7 +3,10 @@ package group
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
+	"time"
 )
 
 // Tests for the bookkeeping behind the waiting room. (Sozvon)
@@ -207,6 +210,81 @@ func TestLobbyAdmissionDroppedOnDisconnect(t *testing.T) {
 
 	if _, held := g.admitted["guest-1"]; held {
 		t.Errorf("the admission outlived the client it was granted to")
+	}
+}
+
+// memberClient is a fakeClient that knows its group, so that DelClient can
+// remove it the way the websocket layer does when a client leaves.
+type memberClient struct {
+	*fakeClient
+	group *Group
+}
+
+func (c *memberClient) Group() *Group { return c.group }
+
+// A knocker and an operator leaving at the same moment must not race on the
+// operator's permissions.  This test only fails under -race.
+//
+// A client's permissions belong to its own goroutine: rtpconn's leaveGroup
+// clears them as soon as DelClient returns, holding no lock.  The group may
+// therefore read them only under g.mu, while the client is known to be a
+// member.  RemoveKnock used to snapshot the member list, release the lock and
+// only then ask each member whether it was an operator — by which time the
+// operator could have left and be rewriting the very field being read.  The
+// field is a slice, so a torn read is a garbage pointer, not a wrong answer.
+//
+// Waiting for the knock to disappear, under the lock, orders the operator's
+// departure after RemoveKnock's critical section but not after anything
+// RemoveKnock does once it has released the lock.  The detector sees any read
+// of the operator's permissions made there, however the goroutines happen to
+// be scheduled, instead of only when the two leaves collide. (Sozvon)
+func TestLobbyKnockWithdrawnWhileOperatorLeaves(t *testing.T) {
+	dir := setupGroups(t)
+	writeGroup(t, dir, "both", lobbyConf)
+
+	op := &memberClient{fakeClient: &fakeClient{id: "op-1"}}
+	g, err := AddClient("both", op, opCreds())
+	if err != nil {
+		t.Fatalf("AddClient(operator): %v", err)
+	}
+	op.group = g
+
+	guest := &fakeClient{id: "guest-1"}
+	knock(t, "both", guest, "visitor")
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		g.RemoveKnock("guest-1")
+	}()
+
+	// Bounded by the clock, not by waiting on the goroutine: hearing from
+	// it would order everything it did, the read included, before the
+	// operator's departure, and hide the race from the detector.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		g.mu.Lock()
+		pending := g.knocking["guest-1"] != nil
+		g.mu.Unlock()
+		if !pending {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("RemoveKnock did not drop the request")
+		}
+		runtime.Gosched()
+	}
+
+	// What leaveGroup does for the operator.
+	DelClient(op)
+	op.perms = nil
+
+	wg.Wait()
+
+	if !op.wasPushed("knockcancel", "guest-1") {
+		t.Errorf("the operator was not told the request went away: %v",
+			op.pushed)
 	}
 }
 
