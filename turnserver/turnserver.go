@@ -38,11 +38,6 @@ var TLSAddress string
 // (Sozvon)
 var Certificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
-// auto records what StartStop was last told, i.e. whether an "auto" server
-// should be running at all.  Start consults it so that a TLS listener can
-// come up without dragging the cleartext ones up with it.  (Sozvon)
-var auto bool
-
 // tlsAddr is the address of the TLS listener.  It is a type of its own so
 // that ICEServers can tell it apart from a cleartext TCP listener and
 // advertise a turns: URL, and it carries a hostname rather than an IP
@@ -65,6 +60,13 @@ var server struct {
 	mu        sync.Mutex
 	addresses []net.Addr
 	server    *turn.Server
+	// auto records what StartStop was last told, i.e. whether an
+	// "auto" server should be running at all.  Start consults it so
+	// that a TLS listener can come up without dragging the cleartext
+	// ones up with it.  It lives under mu because ice.Update, the
+	// only caller of StartStop, runs from the request path and
+	// refreshes itself in a goroutine of its own.  (Sozvon)
+	auto bool
 }
 
 func publicAddresses() ([]net.IP, error) {
@@ -241,7 +243,7 @@ func Start() error {
 	// whenever that file supplies servers of its own.  Otherwise asking
 	// for a TLS relay would reopen a cleartext one as a side effect, on
 	// exactly the deployments that took care to close it.  (Sozvon)
-	if Address != "" && (Address != "auto" || auto) {
+	if Address != "" && (Address != "auto" || server.auto) {
 		ad := Address
 		if Address == "auto" {
 			ad = ":1194"
@@ -337,13 +339,23 @@ func Start() error {
 	log.Printf("Starting built-in TURN server on %v",
 		strings.Join(bound, ", "))
 
+	// The handler runs in the TURN server's own goroutines, which
+	// hold none of our locks, so it must not read the credentials
+	// from the package globals.  StartStop stops and starts the
+	// server whenever data/ice-servers.json appears or goes away,
+	// and the new Start rewrites those globals while requests to
+	// the old server are still being authenticated.  Capturing
+	// them here also makes each server check the credentials it
+	// was created with rather than whichever pair is current.
+	// (Sozvon)
+	user, pass := username, password
 	server.server, err = turn.NewServer(turn.ServerConfig{
 		Realm: "galene.org",
 		AuthHandler: func(ra *turn.RequestAttributes) (string, []byte, bool) {
-			if ra.Username != username || ra.Realm != "galene.org" {
+			if ra.Username != user || ra.Realm != "galene.org" {
 				return "", nil, false
 			}
-			return ra.Username, turn.GenerateAuthKey(ra.Username, ra.Realm, password), true
+			return ra.Username, turn.GenerateAuthKey(ra.Username, ra.Realm, pass), true
 		},
 		ListenerConfigs:   lcs,
 		PacketConnConfigs: pccs,
@@ -403,11 +415,19 @@ func Stop() error {
 	return err
 }
 
+// setAuto records the resolution of "auto" under the lock Start
+// reads it with.  (Sozvon)
+func setAuto(start bool) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.auto = start
+}
+
 func StartStop(start bool) error {
 	// Remember what "auto" resolves to this time round, so that Start can
 	// honour it for the cleartext listeners even when a TLS listener drags
 	// the server up.  (Sozvon)
-	auto = start
+	setAuto(start)
 
 	// A TLS listener is never automatic: asking for one is a deliberate
 	// choice, and it is usually meant to sit *alongside* whatever
