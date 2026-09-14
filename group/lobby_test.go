@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Tests for the bookkeeping behind the waiting room. (Sozvon)
@@ -258,12 +259,19 @@ func TestLobbyKnockWithdrawnWhileOperatorLeaves(t *testing.T) {
 		g.RemoveKnock("guest-1")
 	}()
 
+	// Bounded by the clock, not by waiting on the goroutine: hearing from
+	// it would order everything it did, the read included, before the
+	// operator's departure, and hide the race from the detector.
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		g.mu.Lock()
 		pending := g.knocking["guest-1"] != nil
 		g.mu.Unlock()
 		if !pending {
 			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("RemoveKnock did not drop the request")
 		}
 		runtime.Gosched()
 	}
