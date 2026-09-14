@@ -182,9 +182,11 @@ func (g *Group) SetLocked1on1(on bool) {
 var ErrKnocking = errors.New("knocking")
 
 // getOpsUnlocked returns the operators among the group's members.  Called
-// locked, and it must be: a client's permissions belong to its own goroutine,
-// which rewrites them as soon as DelClient has removed it, so they may only be
-// read while g.mu guarantees the client is still a member. (Sozvon)
+// locked, and it must be: a leaving client clears its own permissions,
+// holding no lock, as soon as DelClient has removed it, so only under g.mu is
+// it known not to have left yet.  That is all the lock guarantees here.  A
+// member whose permissions are changed (op, present, ...) rewrites them
+// without g.mu, and that is a separate race this does not address. (Sozvon)
 func (g *Group) getOpsUnlocked() []Client {
 	ops := make([]Client, 0)
 	for _, c := range g.clients {
