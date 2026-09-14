@@ -974,63 +974,20 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
 
 ## Planned
 
-### Clients, after the first end-to-end deploy from a phone
+Planned work is no longer listed here. It lives on the task board, one item
+per issue, with a type and a priority — this file kept a second copy that
+nobody reconciled, and for months the board did not carry a single one of the
+thirteen entries this section held.
 
-Found by installing a server from the Android app onto a real machine and
-joining the room from it. In rough order of how much they get in the way.
+**This file records what the fork has already done.** What it is going to do
+is a question for the board.
 
-  * **A tile with the camera off should show who it is, not a play button.**
-    A `<video>` element carrying no picture falls back to the WebView's own
-    play affordance — a large triangle filling the tile, which says nothing
-    about who is there. It should be a card with the participant's name and
-    the same avatar colour the participant list gives them. Started on
-    `feat/videoless-tiles` (`sozvonTileCard()`, keyed off `videoWidth > 0`);
-    needs finishing and testing on a device, including the case where a
-    camera is turned off mid-call and back on.
+## Lessons
 
-  * **Investigate a jump to the browser on first connect.** Reported once,
-    on the first connection after a deploy, and not reproduced since — the
-    same server then opened inside the app. Worth pinning down before it is
-    dismissed: candidates are `shouldOverrideUrlLoading` handing an
-    off-origin URL to the browser, and the web client's own "open in the app"
-    intent link. Needs a reproduction first.
+Not plans, and not visible in any diff — things that cost time once and should
+not cost it twice.
 
-### The rebrand, finishing it
-
-Left over from the monochrome/SOZVON pass. Roughly in order of value.
-
-  * **The light theme's last gap: the pre-join login card.** The card is the
-    only screen a visitor arriving on a room link sees, and it carries no
-    appearance control — the drawer is unreachable until you have joined, and
-    the landing page is a different page. Left out on purpose: a trio of word
-    buttons does not fit beside the brand and the language pair without
-    giving the calmest screen in the client a second row of chrome. Wants an
-    icon-only control, which in turn wants glyphs the Font Awesome subset
-    does not currently carry (see `contrib/subset-fontawesome.py`).
-  * **Inter is not self-hosted.** `--font` asks for it and the identity
-    specifies it, but no font file ships, so it silently falls back to a
-    system face and the identity's typography is not actually in effect.
-    Needs a Latin+Cyrillic woff2 subset in `static/` (the CSP is same-origin,
-    so Google Fonts is not an option) plus the SIL OFL licence text.
-  * **The dead light-theme layer in `galene.css`.** 104 colour literals sit in
-    rules that the Sozvon layer later overrides — upstream's light styling,
-    inert but still there. Shipping a light theme did not revive it: the
-    layer that overrides it reads tokens, and the tokens are what the theme
-    switches. Removing it shortens the file and removes a whole
-    class of future confusion, but the "overridden later" test used to find
-    them does not account for `@media`, so it needs care rather than a script.
-  * **A single icon set.** Font Awesome Solid has no consistent stroke weight,
-    which is the loudest remaining inconsistency. The blocker is that
-    `galene.js` swaps Font Awesome class names in 26 places, so a real
-    migration means a `setIcon()` layer and an SVG sprite, all at once — a
-    half-migration puts two icon languages on one screen. Weight is no longer
-    an argument for it (compression and subsetting settled that); do it only
-    when the look starts to matter.
-  * ~~**The operator room** needs the same economy pass the call screen got~~ —
-    done; see *Operator room* above. It is still worth re-reading for the
-    defect class described next.
-
-**One lesson worth carrying forward.** Replacing 342 colour literals with
+**A token is not always a colour.** Replacing 342 colour literals with
 tokens was mostly mechanical, and every bug it produced had the same shape: a
 value that was not a *colour* but a *difference*. A fully transparent border
 reserving space for the active-speaker ring became a visible grey frame around
@@ -1042,89 +999,3 @@ ended up over a fill that was now pure white. None of these look wrong in a
 diff; they look wrong on screen. When touching the remaining literals, check
 pairs (base vs `:hover`, fill vs text on it) rather than single declarations —
 comparing a rule against its pre-change self is what actually found them.
-
-### Other
-
-  * **The join screen's film grain has never rendered.** It is a `data:` URI in
-    `body.pre-join .login-container::after`, and the server sends
-    `img-src 'self'` (`cspHeader` in `webserver/webserver.go`), so the browser
-    refuses it — the texture the rule describes has been inert for as long as
-    the rule has existed, and the first screen is plain `--bg`. The fix is to
-    serve the speckle as a file rather than widen the policy; it matters more
-    now that the card is gone and nothing else is drawn on that page.
-  * **Group E2EE (3+ participants)**: a sender-key scheme with a single shared
-    "group security code", since pairwise SAS does not scale. Until then,
-    such calls run in the explicit *“not encrypted”* state (or are blocked when
-    `require-e2ee` is set).
-  * A pre-flight **unsupported-browser notice** (e.g. Xiaomi Mi Browser, whose
-    WebRTC hangs) offering to open in a working browser.
-  * **Install errors in the app's language, and actionable.** Asked for
-    2026-08-16. The failure screen prints the installer's own line verbatim —
-    *"the mirror has no 'latest' file; pass --version explicitly"* — which is
-    English, addressed to whoever runs `install.sh` by hand, and names a flag
-    the app never shows. The installer already fails with a small, fixed set
-    of causes; give each a stable machine-readable code (it writes
-    `state.json`, which is the natural place), and let the client map the code
-    to a translated sentence saying what went wrong **and what to do about it**
-    — the raw line staying available underneath for a bug report. Doing it by
-    matching English text in the client would break the moment a message is
-    reworded.
-  * **Closing the chat and the settings panel on a phone.** Asked for
-    2026-08-16. Both open as full-height panels that can only be dismissed
-    with their ✕, and while one is open the bottom dock is gone — so leaving
-    the chat is a hunt for a small target, and the call's own controls are
-    unreachable meanwhile. Wanted: tap outside to dismiss, a swipe (left on
-    the chat, right on the drawer), and the dock staying put underneath.
-  * **A server-settings place, reachable from a deployed server.** Asked for
-    2026-08-16, after deploying from the phone: once the install screen's
-    password has been written down there is nowhere to *change* it, and no way
-    to change the operator's **login** at all. The operator dashboard is the
-    obvious home — it is the first screen an operator sees and it now has room
-    — and the two fields belong together, since renaming the account is a
-    rewrite of the same group file the password lives in. Note the split: the
-    password half is nearly built (see the entry below, and the same
-    `writableGroups` gate applies), while renaming a user has **no upstream
-    API** — `webserver/api.go` exposes `.users/<user>/.password` but nothing
-    that moves a user to a new name, so it needs a create-then-delete over the
-    existing endpoints, or a small endpoint of its own. Renaming also
-    invalidates any remember-token minted for the old name, which the client
-    has to be told about rather than left to fail at the next auto-login.
-  * **Self-service password change, surfaced properly.** Upstream Galène
-    already has the plumbing: a bare `/change-password.html` page and a
-    `.../.users/<user>/.password` API (`webserver/api.go`) that accepts the
-    user's own old password (HTTP Basic auth, checked against the stored
-    hash) or an admin credential, and always re-hashes the new one with
-    bcrypt on save regardless of how the old one was stored. Two things gate
-    it today: the server-wide `writableGroups` config flag (off by default —
-    without it the API refuses to write the group file at all), and the fact
-    that it's just a small "Change password" link next to the username in
-    the settings drawer (`#chpwspan` in `galene.html`) that pops the bare
-    page open in a new tab. Plan: add a proper **"Security" section** to that
-    drawer — old password / new password / confirm, styled like the rest of
-    Sozvon, calling the existing API inline instead of linking out — and turn
-    `writableGroups` on wherever operators should be able to use it. Doing
-    this also happens to fix any operator password still sitting in the
-    group file as plaintext, the first time it's changed through the form.
-  * **Password recovery** — nothing exists yet, upstream or here; today a
-    forgotten password can only be reset by whoever has server/file access
-    (`galenectl set-password`, or hand-editing the group JSON). Needs actual
-    design, not just UI. Options to weigh, roughly in order of how well they
-    fit what's already built:
-    1. Reuse the **stateful invite-token** mechanism already built for the
-       operator hub (see "Operator room" above): an admin-issued, one-time
-       reset link. Fits the existing token infrastructure best.
-    2. A single-use **recovery code** shown once at password-set time (like
-       2FA backup codes) and stored hashed alongside the password. Fully
-       self-service, no new server dependency, but only works if the
-       operator saved the code somewhere safe beforehand.
-    3. **Admin-mediated, but a button instead of a shell command** — a
-       one-click "reset this operator's password" action from the operator
-       hub dashboard that generates a new temporary password. Simplest to
-       build, but not actually self-service.
-    4. **Email-based reset.** Most familiar to users, but by far the most
-       infrastructure: needs a new optional recovery-contact field per user
-       *and* an SMTP relay configured server-side — another site-specific
-       secret that would have to stay out of the repo, the same way TURN
-       credentials and hostnames are kept out today.
-    No decision made yet — revisit once the change-password UI above lands.
-  * Further features, documented here as they land.
