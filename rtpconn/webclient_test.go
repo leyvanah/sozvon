@@ -50,3 +50,20 @@ func TestParseStatefulToken(t *testing.T) {
 		}
 	}
 }
+
+// A client that has left its group keeps its socket and its action queue,
+// and the group pushes notifications to a member list it took before
+// releasing the lock, so an action can still arrive for a client with no
+// group.  Every case in handleAction that looks at the group copes with that
+// except pushClientAction, which used to call Name() on nil.  (Sozvon)
+func TestPushClientAfterLeave(t *testing.T) {
+	err := handleAction(&webClient{}, pushClientAction{
+		group:    "g",
+		kind:     "add",
+		id:       "other",
+		username: "other",
+	})
+	if err != nil {
+		t.Errorf("handleAction: %v", err)
+	}
+}

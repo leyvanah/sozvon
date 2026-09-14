@@ -1154,7 +1154,13 @@ func handleAction(c *webClient, a any) error {
 		}
 
 	case pushClientAction:
-		if a.group != c.group.Name() {
+		// A client that has left its group keeps its socket, and
+		// actions queued while it was still a member arrive after
+		// the departure: the group pushes to a list of members it
+		// took before unlocking, and clientLoop does not order an
+		// incoming leave against its own action queue.  Check the
+		// group the way pushConnAction above does.  (Sozvon)
+		if c.group == nil || a.group != c.group.Name() {
 			log.Printf("got client for wrong group")
 			return nil
 		}
