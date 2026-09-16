@@ -4689,3 +4689,72 @@ body.thumb-over-idle #peers .peer-self {
 #settings-rotate {
     margin-top: var(--row-gap);
 }
+
+/* Call quality indicator (Sozvon).  Three rising bars in the top-left corner
+   of a tile, shown only while the link is not good: two lit for weak, one for
+   poor, none and pulsing for lost.  It sits on the camera picture like the
+   other on-video chrome, so it takes the on-video colours rather than the
+   theme's. */
+.conn-quality {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 2;
+    display: none;
+    align-items: flex-end;
+    gap: 2px;
+    height: 28px;
+    padding: 6px 10px 6px 8px;
+    border-radius: 14px;
+    background: var(--on-video-scrim);
+    color: var(--on-video);
+    pointer-events: auto;
+}
+.conn-quality-text {
+    margin-left: 6px;
+    align-self: center;
+    font-size: 13px;
+    line-height: 1;
+    white-space: nowrap;
+}
+/* On the small floating self tile the words would cover the picture; the
+   bars and the toast carry it there. */
+.peer-self .conn-quality-text { display: none; }
+#peers:not(.speaker):not(.speaker-many) .peer-self .conn-quality-text {
+    display: inline;
+}
+.conn-quality[data-level="weak"],
+.conn-quality[data-level="bad"],
+.conn-quality[data-level="lost"] {
+    display: flex;
+}
+.conn-quality-bar {
+    width: 3px;
+    border-radius: 1px;
+    background: var(--on-video);
+    opacity: 0.3;
+}
+.conn-quality-bar-1 { height: 5px; }
+.conn-quality-bar-2 { height: 9px; }
+.conn-quality-bar-3 { height: 14px; }
+.conn-quality[data-level="weak"] .conn-quality-bar-1,
+.conn-quality[data-level="weak"] .conn-quality-bar-2 {
+    opacity: 1;
+}
+.conn-quality[data-level="bad"] .conn-quality-bar-1 {
+    opacity: 1;
+    background: var(--danger);
+}
+.conn-quality[data-level="bad"],
+.conn-quality[data-level="lost"] {
+    box-shadow: inset 0 0 0 1px var(--danger);
+}
+.conn-quality[data-level="lost"] {
+    animation: conn-quality-pulse 1.2s ease-in-out infinite;
+}
+@keyframes conn-quality-pulse {
+    50% { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .conn-quality[data-level="lost"] { animation: none; }
+}

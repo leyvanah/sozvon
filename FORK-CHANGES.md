@@ -388,6 +388,24 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     any pointer move, tap, key press or scroll. Paused wherever it would get in
     the way — the login/waiting-room screen, an open people+chat panel, or a
     focused input field.
+  * **Call quality you can see.** Upstream said nothing while a call
+    degraded, and when ICE finally failed, only `Cannot receive media from
+    user X, still trying...` — in English, with no hint of the cause or the
+    remedy. Every stream is now polled with `getStats()` every two seconds
+    (its own timer, so it works with activity detection off, and
+    `protocol.js` is untouched) and graded by `static/connection-quality.js`
+    — packet loss, round trip and jitter — as good, weak, poor or lost.
+    Levels get worse after two polls and better after three, so a blip says
+    nothing and a recovering link does not flap. While a link is not good its
+    tile carries a signal-bars pill with the words ("Poor connection"), and a
+    translated toast names the person and the likely effect: "Лена: связь
+    плохая — звук и видео могут прерываться", then "связь восстановилась"
+    once it clears. Your own uplink gets its own advice ("try turning off
+    your camera"), and when every remote link degrades at once the client
+    says the problem is probably on your side instead of blaming each person
+    in turn. The same toast is not repeated within 30 s unless things get
+    worse. Prompted by a live call on 2026-09-16 where both servers were
+    healthy, the path was not, and nobody in the call could tell.
 
 ### Localisation
 
