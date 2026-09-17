@@ -68,6 +68,10 @@
     const GOOD_TO_INCREASE = 8;     // consecutive good intervals
     const MIN_DECREASE_GAP = 6000;  // ms between two decreases
     const MIN_INCREASE_GAP = 15000; // ms after any change before increasing
+    // The first seconds of a stream are not evidence: the audio jitter
+    // buffer settles after connecting, and on a busy machine it reads
+    // 0.7 s before it does.  Nothing is decreased this early.
+    const WARMUP = 10000;
     const REFRESH = 10000;          // receiver resends a standing cap
     const TTL = 35000;              // sender forgets an unrefreshed cap
 
@@ -175,6 +179,8 @@
         this.good = 0;
         this.changedAt = -Infinity;
         this.sentAt = -Infinity;
+        /** @type {number|null} */
+        this.startedAt = null;
         /** @type {number[]} */
         this.rates = [];
     }
@@ -192,6 +198,10 @@
         let sample = assess(this.prev, snap);
         this.prev = snap;
         let old = this.cap;
+        if(this.startedAt === null && sample.state !== 'unknown')
+            this.startedAt = now;
+        let warming = this.startedAt === null ||
+            now - this.startedAt < WARMUP;
 
         if(sample.videoBps > 0) {
             this.rates.push(sample.videoBps);
@@ -199,7 +209,10 @@
                 this.rates.shift();
         }
 
-        if(sample.state === 'bad') {
+        if(sample.state === 'bad' && warming) {
+            this.bad = 0;
+            this.good = 0;
+        } else if(sample.state === 'bad') {
             this.bad++;
             this.good = 0;
         } else if(sample.state === 'good') {
@@ -341,7 +354,7 @@
     const api = {
         CONGESTED, HEALTHY, MIN_CAP, RELEASE_AT, DECREASE, INCREASE,
         INCREASE_UNUSED, UNUSED_BELOW,
-        BAD_TO_DECREASE, GOOD_TO_INCREASE, MIN_DECREASE_GAP,
+        BAD_TO_DECREASE, GOOD_TO_INCREASE, MIN_DECREASE_GAP, WARMUP,
         MIN_INCREASE_GAP, REFRESH, TTL, MESSAGE_KIND,
         snapshot, assess, Controller, Caps, combine,
     };
