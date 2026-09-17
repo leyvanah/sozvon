@@ -4774,3 +4774,21 @@ body:not(.nav-hidden) .peer-remote .conn-quality {
 @media (prefers-reduced-motion: reduce) {
     .conn-quality[data-level="lost"] { animation: none; }
 }
+
+/* A silent microphone beside the name on a tile that has a picture (Sozvon).
+   The label is on-video chrome, so the glyph keeps its colour and shadow;
+   the red backing is what makes it read as a state and not as decoration. */
+.label .label-mic {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 8px;
+    border-radius: 50%;
+    background: var(--danger);
+    color: #fff;
+    font-size: 11px;
+    text-shadow: none;
+    vertical-align: middle;
+}
