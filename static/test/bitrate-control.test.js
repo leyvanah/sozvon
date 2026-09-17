@@ -17,6 +17,8 @@ const assert = require('node:assert');
 const b = require('../bitrate-control.js');
 
 const STEP = 2000; // the polling interval galene.js uses
+// Healthy polls that take a controller past its warm-up.
+const WARM = Math.ceil(b.WARMUP / STEP) + 2;
 
 /**
  * A stream of receiver snapshots.  Each call to next() advances time by one
@@ -98,10 +100,20 @@ test('a healthy call is never capped', () => {
     assert.ok(out.every(o => o.cap === null && !o.send));
 });
 
+test('lag in the first seconds of a stream is not acted on', () => {
+    let ctl = new b.Controller();
+    let rx = receiver();
+    let n = Math.floor(b.WARMUP / STEP);
+    let out = feed(ctl, rx, n, {audioDelay: 0.8});
+    assert.ok(out.every(o => o.cap === null), 'no cap while warming up');
+    feed(ctl, rx, WARM, {audioDelay: 0.8});
+    assert.notStrictEqual(ctl.cap, null, 'lag that outlasts it still counts');
+});
+
 test('a single bad interval does not cap', () => {
     let ctl = new b.Controller();
     let rx = receiver();
-    feed(ctl, rx, 5);
+    feed(ctl, rx, WARM);
     feed(ctl, rx, 1, {audioDelay: 0.5});
     let out = feed(ctl, rx, 20);
     assert.ok(out.every(o => o.cap === null));
@@ -110,7 +122,7 @@ test('a single bad interval does not cap', () => {
 test('sustained lag caps below what was arriving, and says so', () => {
     let ctl = new b.Controller();
     let rx = receiver();
-    feed(ctl, rx, 5, {bps: 5000000});
+    feed(ctl, rx, WARM, {bps: 5000000});
     let out = feed(ctl, rx, b.BAD_TO_DECREASE,
                    {audioDelay: 0.5, bps: 5000000});
     let last = out[out.length - 1];
@@ -121,7 +133,7 @@ test('sustained lag caps below what was arriving, and says so', () => {
 test('lag that persists keeps shrinking, but not below the floor', () => {
     let ctl = new b.Controller();
     let rx = receiver();
-    feed(ctl, rx, 3);
+    feed(ctl, rx, WARM);
     let caps = [];
     for(let i = 0; i < 100; i++) {
         // The sender obeys: what arrives is the cap.
@@ -140,7 +152,7 @@ test('lag that persists keeps shrinking, but not below the floor', () => {
 test('once the link recovers the cap rises step by step and is lifted', () => {
     let ctl = new b.Controller();
     let rx = receiver();
-    feed(ctl, rx, 3, {bps: 1000000});
+    feed(ctl, rx, WARM, {bps: 1000000});
     feed(ctl, rx, 2, {audioDelay: 0.5, bps: 1000000});
     assert.strictEqual(ctl.cap, 600000);
 
@@ -158,7 +170,7 @@ test('once the link recovers the cap rises step by step and is lifted', () => {
 test('a cap the sender does not use opens faster', () => {
     let ctl = new b.Controller();
     let rx = receiver();
-    feed(ctl, rx, 3, {bps: 1000000});
+    feed(ctl, rx, WARM, {bps: 1000000});
     feed(ctl, rx, 2, {audioDelay: 0.5, bps: 1000000});
     assert.strictEqual(ctl.cap, 600000);
     // The sender sends far less than it may (a still picture, say).
@@ -173,7 +185,7 @@ test('a cap the sender does not use opens faster', () => {
 test('a standing cap is refreshed, a lifted one is not', () => {
     let ctl = new b.Controller();
     let rx = receiver();
-    feed(ctl, rx, 3);
+    feed(ctl, rx, WARM);
     feed(ctl, rx, 2, {audioDelay: 0.5});
     let out = feed(ctl, rx, 20, {audioDelay: 0.18}); // hold: no change
     let sends = out.filter(o => o.send).length;

@@ -222,6 +222,12 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     the raised hand uses (no server change: a client may already `setdata` on
     itself), re-published on join because that data does not survive one, and
     read back as a `.user-muted` class on the participant's row.
+  * **A silent microphone shows on the picture too.** A tile with a camera
+    carries a red slashed-microphone mark beside the name while that person
+    is muted (`data.muted`) or publishes no audio. Before, the state was
+    only drawn on tiles without a picture, so the face you were looking at
+    never said it could not be heard. The label is redrawn whenever that
+    person's status changes.
   * **A tile with no picture says whose it is.** Publishing a microphone earns
     you a tile, but the tile is built for a picture: its label carries the
     protocol username, which is empty for anyone who joined without a name,
@@ -383,6 +389,9 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     and needs to know how far into it they are, **off for the guest**, who did
     not ask for a stopwatch on their conversation but gets the switch. Touching
     the switch pins it either way.
+    It is printed over the video, so it wears the on-video pair — white
+    digits on a 60% black backing — rather than theme text on the dock's
+    near-transparent fill, which vanished over a bright picture.
   * **Auto-hiding call chrome**: the top bar and bottom control dock slide away
     after 3 seconds of inactivity so the video fills the screen, and return on
     any pointer move, tap, key press or scroll. Paused wherever it would get in

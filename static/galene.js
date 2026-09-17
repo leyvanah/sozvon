@@ -3687,6 +3687,54 @@ function setLabel(c, fallback) {
         label.textContent = '';
         label.classList.remove('label-fallback');
     }
+
+    // Sozvon: a silent microphone shows on the picture too, not only on
+    // tiles without one -- that is where you look when you wonder whether
+    // they can be heard.  Muting keeps the stream, so ask the user data
+    // (publishMuteState()) as well as whether audio is published at all.
+    if(!c.up && c.label === 'camera' && micSilent(c.source)) {
+        let mic = document.createElement('span');
+        mic.className = 'label-mic';
+        let text = Sozvon.i18n.t('tile.micOff');
+        mic.title = text;
+        mic.setAttribute('role', 'img');
+        mic.setAttribute('aria-label', text);
+        mic.appendChild(stateGlyph('fa-microphone-slash'));
+        label.appendChild(mic);
+    }
+}
+
+/**
+ * Sozvon: whether a participant cannot be heard: muted, or publishing no
+ * audio with their camera.
+ *
+ * @param {string} id
+ * @returns {boolean}
+ */
+function micSilent(id) {
+    let u = serverConnection && id && serverConnection.users[id];
+    if(!u)
+        return false;
+    if(u.data && u.data.muted)
+        return true;
+    let cam = u.streams && u.streams.camera;
+    return !(cam && cam.audio);
+}
+
+/**
+ * Sozvon: redraw the labels of one participant's tiles after their status
+ * changed.
+ *
+ * @param {string} id
+ */
+function refreshTileLabels(id) {
+    if(!serverConnection)
+        return;
+    for(let sid in serverConnection.down) {
+        let c = serverConnection.down[sid];
+        if(c.source === id)
+            setLabel(c);
+    }
 }
 
 /**
@@ -4651,6 +4699,7 @@ function setUserStatus(id, elt, userinfo) {
         elt.classList.remove('user-status-microphone');
         elt.classList.remove('user-status-camera');
     }
+    refreshTileLabels(id);
 
     // Per-user volume slider: shown only when the user has at least one audio
     // track. The slider mutates client-side audio.volume / audio.muted for
