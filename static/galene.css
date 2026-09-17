@@ -4710,6 +4710,15 @@ body.thumb-over-idle #peers .peer-self {
     color: var(--on-video);
     pointer-events: auto;
 }
+/* The E2EE lock and code are pinned to the top-left corner of the screen
+   while the call chrome shows, which is exactly where a full-screen remote
+   tile puts this pill: step below them until the chrome hides again. */
+.peer-remote .conn-quality {
+    transition: top var(--t-base) var(--ease);
+}
+body:not(.nav-hidden) .peer-remote .conn-quality {
+    top: 60px;
+}
 .conn-quality-text {
     margin-left: 6px;
     align-self: center;
