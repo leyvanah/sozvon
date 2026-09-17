@@ -1759,18 +1759,128 @@ async function pollQuality() {
         if(!pc)
             return;
         let snap = null;
+        let report = null;
         try {
-            let report = await pc.getStats();
+            report = await pc.getStats();
             snap = Q.snapshot(report.values(), Date.now());
         } catch(e) {
             console.warn('getStats failed', e);
         }
         feedQuality(c, pc.iceConnectionState, snap);
+        if(report)
+            feedBitrate(c, report);
     }));
     announceQuality();
 }
 
 setInterval(pollQuality, qualityInterval);
+
+// --- Adaptive video bitrate (Sozvon) ---------------------------------------
+//
+// The SFU caps senders from their receivers' loss and REMB, which a TURN
+// relay over TCP hides: nothing is lost, and delay comes in bursts.  So each
+// receiver judges its own playback with bitrate-control.js and asks the
+// sender of a lagging stream, by user message, to cap that stream's video;
+// the sender applies the tightest fresh request on top of its own setting.
+// Down and up streams share an id, which is what the request names.
+
+/** @returns {any} */
+function bitrateApi() {
+    return /** @type {any} */ (window).SozvonBitrate;
+}
+
+/** Caps other receivers have asked of our up streams. */
+let sendCaps = null;
+
+/** @returns {any} */
+function getSendCaps() {
+    let B = bitrateApi();
+    if(!sendCaps && B)
+        sendCaps = new B.Caps();
+    return sendCaps;
+}
+
+/**
+ * Receiver side: judge one poll of a down stream and, when the controller
+ * says so, tell its sender.  Up side: notice caps that have expired.
+ *
+ * @param {Stream} c
+ * @param {RTCStatsReport} report
+ */
+function feedBitrate(c, report) {
+    let B = bitrateApi();
+    if(!B)
+        return;
+    if(c.up) {
+        applySendCap(c).catch(e => console.warn('applySendCap', e));
+        return;
+    }
+    if(!c.userdata.bitrate)
+        c.userdata.bitrate = new B.Controller();
+    let r = c.userdata.bitrate.update(B.snapshot(report.values(), Date.now()));
+    if(r.changed)
+        console.info('bitrate: asking', c.username || c.source,
+                     'to cap', c.id, 'at', r.cap, r.sample);
+    if(!r.send || !c.source || !serverConnection ||
+       !serverConnection.users[c.source])
+        return;
+    serverConnection.userMessage(B.MESSAGE_KIND, c.source,
+                                 {stream: c.id, cap: r.cap}, true);
+}
+
+/**
+ * Sender side: a receiver asked us to cap (or uncap) one of our streams.
+ *
+ * @param {string} from
+ * @param {any} value
+ */
+function gotBitrateRequest(from, value) {
+    let caps = getSendCaps();
+    if(!caps || !value || typeof value.stream !== 'string')
+        return;
+    let cap = typeof value.cap === 'number' ? value.cap : null;
+    let c = serverConnection && serverConnection.up[value.stream];
+    if(!c)
+        return;
+    if(caps.set(value.stream, from, cap, Date.now()))
+        applySendCap(c).catch(e => console.warn('applySendCap', e));
+}
+
+/**
+ * The throughput to send a stream at: the user's setting, tightened by
+ * what receivers asked for.  Requests are not applied while sending
+ * simulcast, where the SFU already hands a weak receiver the low layer.
+ *
+ * @param {Stream} c
+ * @param {number|null} setting
+ * @param {boolean} simulcast
+ * @returns {number|null}
+ */
+function autoThroughput(c, setting, simulcast) {
+    let B = bitrateApi();
+    let caps = getSendCaps();
+    if(!B || !caps || (simulcast && c.label !== 'screenshare'))
+        return setting;
+    return B.combine(setting, caps.get(c.id, Date.now()));
+}
+
+/**
+ * @param {Stream} c
+ */
+async function applySendCap(c) {
+    if(!c.pc)
+        return;
+    let s = doSimulcast();
+    let t = autoThroughput(c, getMaxVideoThroughput(), s);
+    if(c.userdata.sentThroughput === t)
+        return;
+    let first = !('sentThroughput' in c.userdata);
+    c.userdata.sentThroughput = t;
+    if(first)
+        return;
+    console.info('bitrate: sending', c.id, 'at', t === null ? 'full rate' : t);
+    await setSendParameters(c, t, s);
+}
 
 /**
  * Draw the level on the tile.  Nothing is shown while the link is good.
@@ -2225,7 +2335,9 @@ async function reconsiderSendParameters() {
     let promises = [];
     for(let id in serverConnection.up) {
         let c = serverConnection.up[id];
-        promises.push(setSendParameters(c, t, s));
+        let tc = autoThroughput(c, t, s);
+        c.userdata.sentThroughput = tc;
+        promises.push(setSendParameters(c, tc, s));
     }
     await Promise.all(promises);
 }
@@ -5838,6 +5950,10 @@ function gotFileTransferEvent(state, data) {
  */
 function gotUserMessage(id, dest, username, time, privileged, kind, error, message) {
     switch(kind) {
+    case 'sozvon-bitrate':
+        if(id && id !== serverConnection.id)
+            gotBitrateRequest(id, message);
+        return;
     case 'e2ee':
         if(e2eeActive())
             serverConnection.e2ee.onMessage(id, message);

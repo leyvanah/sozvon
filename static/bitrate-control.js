@@ -60,6 +60,10 @@
     const RELEASE_AT = 3000000;     // a cap this high is lifted entirely
     const DECREASE = 0.6;           // new cap = DECREASE x what arrived
     const INCREASE = 1.3;
+    // When far less arrives than the cap allows, the cap is not what limits
+    // the sender, so it can open faster.
+    const INCREASE_UNUSED = 2;
+    const UNUSED_BELOW = 0.7;
     const BAD_TO_DECREASE = 2;      // consecutive bad intervals
     const GOOD_TO_INCREASE = 8;     // consecutive good intervals
     const MIN_DECREASE_GAP = 6000;  // ms between two decreases
@@ -222,7 +226,9 @@
             this.bad = 0;
         } else if(this.cap !== null && this.good >= GOOD_TO_INCREASE &&
                   now - this.changedAt >= MIN_INCREASE_GAP) {
-            let cap = Math.round(this.cap * INCREASE);
+            let factor = arriving > 0 && arriving < this.cap * UNUSED_BELOW ?
+                INCREASE_UNUSED : INCREASE;
+            let cap = Math.round(this.cap * factor);
             this.cap = cap >= RELEASE_AT ? null : cap;
             this.changedAt = now;
             this.good = 0;
@@ -334,6 +340,7 @@
 
     const api = {
         CONGESTED, HEALTHY, MIN_CAP, RELEASE_AT, DECREASE, INCREASE,
+        INCREASE_UNUSED, UNUSED_BELOW,
         BAD_TO_DECREASE, GOOD_TO_INCREASE, MIN_DECREASE_GAP,
         MIN_INCREASE_GAP, REFRESH, TTL, MESSAGE_KIND,
         snapshot, assess, Controller, Caps, combine,

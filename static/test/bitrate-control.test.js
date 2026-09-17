@@ -155,6 +155,21 @@ test('once the link recovers the cap rises step by step and is lifted', () => {
               'no increase right after a decrease');
 });
 
+test('a cap the sender does not use opens faster', () => {
+    let ctl = new b.Controller();
+    let rx = receiver();
+    feed(ctl, rx, 3, {bps: 1000000});
+    feed(ctl, rx, 2, {audioDelay: 0.5, bps: 1000000});
+    assert.strictEqual(ctl.cap, 600000);
+    // The sender sends far less than it may (a still picture, say).
+    let caps = [];
+    for(let i = 0; i < 300 && ctl.cap !== null; i++)
+        caps.push(ctl.update(rx.next({bps: 200000})).cap);
+    assert.strictEqual(ctl.cap, null);
+    let steps = caps.filter((c, i) => i > 0 && c !== caps[i - 1]).length;
+    assert.ok(steps <= 4, `lifted in ${steps} steps`);
+});
+
 test('a standing cap is refreshed, a lifted one is not', () => {
     let ctl = new b.Controller();
     let rx = receiver();
