@@ -406,6 +406,23 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     in turn. The same toast is not repeated within 30 s unless things get
     worse. Prompted by a live call on 2026-09-16 where both servers were
     healthy, the path was not, and nobody in the call could tell.
+  * **Video that shrinks when the link cannot carry it.** The SFU already
+    caps a sender from its receivers' packet loss and REMB, but our TURN
+    relay runs over TCP only: nothing is ever lost, and delay arrives in
+    bursts the delay-based estimator does not read as congestion. With the
+    send default at `unlimited`, a sender pushed 4–6 Mbit/s for an hour on
+    2026-09-17 and the other side heard audio drifting behind the picture.
+    Now each receiver judges its own playback (`static/bitrate-control.js`):
+    audio jitter-buffer delay, video freezes, concealed audio. A stream that
+    lags for two polls gets a `sozvon-bitrate` user message asking its sender
+    to cap that stream at 0.6× what was arriving (at most every 6 s, never
+    below 150 kbit/s). After ~16 s of clean playback the cap opens by 1.3×,
+    or 2× when the sender is not even using it, and above 3 Mbit/s it is
+    lifted: on a good link the call runs at full quality, as before. The
+    sender applies the tightest fresh request on top of its own setting and
+    forgets one that has not been refreshed for 35 s. Requests are ignored
+    while sending simulcast, where the SFU already gives a weak receiver the
+    low layer.
 
 ### Localisation
 
