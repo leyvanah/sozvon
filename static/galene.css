@@ -1890,10 +1890,17 @@ body.nav-hidden #e2ee-indicator {
     z-index: 1041;
     padding: 5px 12px;
     border-radius: var(--radius-pill);
-    background: var(--dock-bg);
+    /* The clock is printed over the video, not over our surfaces, so it
+       takes the on-video pair rather than the theme's: light digits read
+       well over a dark picture and vanished over a bright one on the
+       near-transparent dock fill.  Darker than --on-video-scrim, because
+       a blur over a white wall still leaves it grey: 0.6 black keeps the
+       digits at about 5:1 on pure white. */
+    background: rgba(0, 0, 0, 0.6);
     -webkit-backdrop-filter: blur(18px);
     backdrop-filter: blur(18px);
-    color: var(--text-2);
+    color: var(--on-video);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
     font-size: var(--fs-md);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.04em;

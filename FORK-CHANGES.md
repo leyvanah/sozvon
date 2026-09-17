@@ -383,6 +383,9 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     and needs to know how far into it they are, **off for the guest**, who did
     not ask for a stopwatch on their conversation but gets the switch. Touching
     the switch pins it either way.
+    It is printed over the video, so it wears the on-video pair — white
+    digits on a 60% black backing — rather than theme text on the dock's
+    near-transparent fill, which vanished over a bright picture.
   * **Auto-hiding call chrome**: the top bar and bottom control dock slide away
     after 3 seconds of inactivity so the video fills the screen, and return on
     any pointer move, tap, key press or scroll. Paused wherever it would get in
