@@ -140,3 +140,26 @@ func TestChangePermissionsWhileJoining(t *testing.T) {
 		t.Errorf("still an operator: %v", boss.Permissions())
 	}
 }
+
+// Changing one member's permissions must not change anyone else's.  A
+// named permissions set hands every member the same slice, so editing it
+// in place rewrites the set itself for everyone who logs in later.
+// (Sozvon)
+func TestChangePermissionsLeavesNamedSetAlone(t *testing.T) {
+	setupPermissionsGroup(t, "perms-shared")
+	boss := joinForTest(t, "perms-shared", "boss-1", "boss", "bosspass")
+
+	err := handleAction(boss, changePermissionsAction{kind: "unop"})
+	if err != nil {
+		t.Fatalf("handleAction: %v", err)
+	}
+	if slices.Contains(boss.Permissions(), "op") {
+		t.Errorf("still an operator: %v", boss.Permissions())
+	}
+
+	deputy := joinForTest(t, "perms-shared", "deputy-1", "deputy", "deputypass")
+	if !slices.Contains(deputy.Permissions(), "op") {
+		t.Errorf("the next operator to log in is not one: %v",
+			deputy.Permissions())
+	}
+}

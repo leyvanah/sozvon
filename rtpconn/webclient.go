@@ -941,22 +941,23 @@ type kickAction struct {
 
 var errEmptyId = group.ProtocolError("empty id")
 
+// remove and addnew return a new slice rather than editing l in place.  A
+// client's permissions may share their array with a named permissions set
+// or with a group description, and slices of them already handed out by
+// Permissions() are read by other goroutines.  (Sozvon)
 func remove(v string, l []string) []string {
-	for i, w := range l {
-		if v == w {
-			l = append(l[:i], l[i+1:]...)
-			return l
-		}
+	i := slices.Index(l, v)
+	if i < 0 {
+		return l
 	}
-	return l
+	return slices.Concat(l[:i], l[i+1:])
 }
 
 func addnew(v string, l []string) []string {
 	if slices.Contains(l, v) {
 		return l
 	}
-	l = append(l, v)
-	return l
+	return append(slices.Clip(l), v)
 }
 
 func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
