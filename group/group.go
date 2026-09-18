@@ -1023,7 +1023,12 @@ func DelClient(c Client) {
 			g.Name(), "delete", c.Id(), c.Username(), nil, nil,
 		)
 	}
+
+	// autoLockKick reads the remaining members and their permissions,
+	// and must be called locked.  (Sozvon)
+	g.mu.Lock()
 	autoLockKick(g)
+	g.mu.Unlock()
 }
 
 func (g *Group) GetClients(except Client) []Client {
