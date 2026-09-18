@@ -57,6 +57,9 @@
     };
 
     const MIN_CAP = 150000;         // never ask for less than this
+    // A request above this is not a cap anyone could mean (and above
+    // 2^32 it is not a valid maxBitrate at all).
+    const MAX_CAP = 100000000;
     const RELEASE_AT = 3000000;     // a cap this high is lifted entirely
     const DECREASE = 0.6;           // new cap = DECREASE x what arrived
     const INCREASE = 1.3;
@@ -76,6 +79,22 @@
     const TTL = 35000;              // sender forgets an unrefreshed cap
 
     const MESSAGE_KIND = 'sozvon-bitrate';
+
+    /**
+     * Bring a cap into range: null (no cap) unless it is a finite number in
+     * (0, MAX_CAP], and never below MIN_CAP.  A cap arrives from another
+     * client, so nothing about its type or value is taken on trust.
+     *
+     * @param {any} cap
+     * @returns {number|null}
+     */
+    function sanitizeCap(cap) {
+        if(typeof cap !== 'number' || !Number.isFinite(cap) || !(cap > 0))
+            return null;
+        if(cap > MAX_CAP)
+            return null;
+        return Math.max(MIN_CAP, Math.round(cap));
+    }
 
     /**
      * Reduce a getStats() report of a receiving connection to cumulative
@@ -203,7 +222,24 @@
         let warming = this.startedAt === null ||
             now - this.startedAt < WARMUP;
 
-        if(sample.videoBps > 0) {
+        // No video coming in at all -- the sender stopped it, or we stopped
+        // asking for it: a cap we asked for is not ours to hold any more.
+        if(!snap.video) {
+            this.rates = [];
+            this.bad = 0;
+            this.good = 0;
+            this.cap = null;
+            let changed = old !== null;
+            if(changed) {
+                this.changedAt = now;
+                this.sentAt = now;
+            }
+            return {cap: null, changed, send: changed, sample};
+        }
+
+        // Zero counts too: a rate from before the video stopped arriving
+        // must not pass for what arrives now.
+        if(sample.state !== 'unknown' && Number.isFinite(sample.videoBps)) {
             this.rates.push(sample.videoBps);
             if(this.rates.length > 3)
                 this.rates.shift();
@@ -231,8 +267,8 @@
            now - this.changedAt >= MIN_DECREASE_GAP) {
             let base = this.cap === null ? arriving :
                 Math.min(this.cap, arriving);
-            let cap = Math.max(MIN_CAP, Math.round(base * DECREASE));
-            if(this.cap === null || cap < this.cap) {
+            let cap = sanitizeCap(base * DECREASE);
+            if(cap !== null && (this.cap === null || cap < this.cap)) {
                 this.cap = cap;
                 this.changedAt = now;
             }
@@ -241,8 +277,8 @@
                   now - this.changedAt >= MIN_INCREASE_GAP) {
             let factor = arriving > 0 && arriving < this.cap * UNUSED_BELOW ?
                 INCREASE_UNUSED : INCREASE;
-            let cap = Math.round(this.cap * factor);
-            this.cap = cap >= RELEASE_AT ? null : cap;
+            let cap = sanitizeCap(this.cap * factor);
+            this.cap = cap === null || cap >= RELEASE_AT ? null : cap;
             this.changedAt = now;
             this.good = 0;
         }
@@ -271,14 +307,15 @@
      *
      * @param {string} stream
      * @param {string} from
-     * @param {number|null} cap
+     * @param {any} cap - anything that is not a valid cap lifts the request
      * @param {number} now
      * @returns {boolean}
      */
     Caps.prototype.set = function(stream, from, cap, now) {
         let before = this.get(stream, now);
         let m = this.streams.get(stream);
-        if(cap === null || !(cap > 0)) {
+        cap = sanitizeCap(cap);
+        if(cap === null) {
             if(m) {
                 m.delete(from);
                 if(m.size === 0)
@@ -289,7 +326,7 @@
                 m = new Map();
                 this.streams.set(stream, m);
             }
-            m.set(from, {cap: Math.max(MIN_CAP, cap), at: now});
+            m.set(from, {cap, at: now});
         }
         return this.get(stream, now) !== before;
     };
@@ -352,11 +389,11 @@
     }
 
     const api = {
-        CONGESTED, HEALTHY, MIN_CAP, RELEASE_AT, DECREASE, INCREASE,
+        CONGESTED, HEALTHY, MIN_CAP, MAX_CAP, RELEASE_AT, DECREASE, INCREASE,
         INCREASE_UNUSED, UNUSED_BELOW,
         BAD_TO_DECREASE, GOOD_TO_INCREASE, MIN_DECREASE_GAP, WARMUP,
         MIN_INCREASE_GAP, REFRESH, TTL, MESSAGE_KIND,
-        snapshot, assess, Controller, Caps, combine,
+        sanitizeCap, snapshot, assess, Controller, Caps, combine,
     };
 
     global.SozvonBitrate = api;

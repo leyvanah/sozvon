@@ -859,6 +859,7 @@ async function rejoinAfterReconnect() {
  */
 function gotDownStream(c) {
     c.onclose = function(replace) {
+        releaseBitrateCap(c);
         if(!replace)
             delMedia(c.localId);
     };
@@ -1829,6 +1830,44 @@ function feedBitrate(c, report) {
 }
 
 /**
+ * Receiver side: we no longer receive a down stream, so lift whatever cap
+ * we asked its sender for rather than let it stand until it expires.
+ *
+ * @param {Stream} c
+ */
+function releaseBitrateCap(c) {
+    let B = bitrateApi();
+    let ctl = c.userdata.bitrate;
+    if(!B || !ctl || ctl.cap === null)
+        return;
+    ctl.cap = null;
+    if(!c.source || !serverConnection || !serverConnection.socket ||
+       !serverConnection.users[c.source])
+        return;
+    try {
+        serverConnection.userMessage(B.MESSAGE_KIND, c.source,
+                                     {stream: c.id, cap: null}, true);
+    } catch(e) {
+        console.warn('releaseBitrateCap', e);
+    }
+}
+
+/**
+ * Sender side: a receiver left, so its requests go with it.
+ *
+ * @param {string} id
+ */
+function forgetBitrateRequests(id) {
+    if(!sendCaps || !serverConnection)
+        return;
+    for(let stream of sendCaps.forget(id)) {
+        let c = serverConnection.up[stream];
+        if(c)
+            applySendCap(c).catch(e => console.warn('applySendCap', e));
+    }
+}
+
+/**
  * Sender side: a receiver asked us to cap (or uncap) one of our streams.
  *
  * @param {string} from
@@ -1838,11 +1877,15 @@ function gotBitrateRequest(from, value) {
     let caps = getSendCaps();
     if(!caps || !value || typeof value.stream !== 'string')
         return;
-    let cap = typeof value.cap === 'number' ? value.cap : null;
-    let c = serverConnection && serverConnection.up[value.stream];
+    // Only someone still in the group; a request from anyone else would
+    // stand until the TTL with nobody left to lift it.
+    if(!serverConnection || !serverConnection.users[from])
+        return;
+    let c = serverConnection.up[value.stream];
     if(!c)
         return;
-    if(caps.set(value.stream, from, cap, Date.now()))
+    // Caps.set validates the value: anything but a sane number lifts it.
+    if(caps.set(value.stream, from, value.cap, Date.now()))
         applySendCap(c).catch(e => console.warn('applySendCap', e));
 }
 
@@ -5093,6 +5136,7 @@ function gotUser(id, kind) {
         delUser(id);
         if(e2eeActive())
             serverConnection.e2ee.delUser(id);
+        forgetBitrateRequests(id);
         maybeClearChatOnSolo();
         updateCallTimer();
         if(Object.keys(serverConnection.users).length < 3)
