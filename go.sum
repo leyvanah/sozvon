@@ -6,8 +6,8 @@ github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63Y
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/gorilla/websocket v1.5.0 h1:PPwGk2jz7EePpoHN/+ClbZu8SPxiqlu12wZP/3sWmnc=
-github.com/gorilla/websocket v1.5.0/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/jech/cert v0.0.0-20240301122532-f491cf43a77d h1:On8Zm5Vs4x9x/cHtH8ZoLrSmGRgNPy8CieEOcJoFubA=
 github.com/jech/cert v0.0.0-20240301122532-f491cf43a77d/go.mod h1:ILvE5TtvouQgno/A2RxRuT2qB4/pP1DYXtp6zQcgTUk=
 github.com/jech/samplebuilder v0.0.0-20241027120643-76c654ae55e1 h1:yEtAj1O4YF+dH6yVtF5ujfYLClJhKOJIBZQSnNDlHaI=
