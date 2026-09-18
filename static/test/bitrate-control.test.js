@@ -35,6 +35,7 @@ function receiver() {
          * @param {number} [o.freeze] - seconds frozen in the interval
          * @param {number} [o.concealed] - fraction concealed
          * @param {number} [o.bps] - video arriving
+         * @param {boolean} [o.video] - false: no inbound video at all
          */
         next(o = {}) {
             t += STEP;
@@ -47,7 +48,7 @@ function receiver() {
             c.vDelay += 60 * 0.03;
             c.vFreeze += o.freeze ?? 0;
             c.vBytes += (o.bps ?? 4000000) * STEP / 1000 / 8;
-            return {time: t, audio: true, video: true, ...c};
+            return {time: t, audio: true, video: o.video ?? true, ...c};
         },
     };
 }
@@ -224,4 +225,58 @@ test('combine respects the user setting', () => {
     assert.strictEqual(b.combine(700000, 500000), 500000);
     assert.strictEqual(b.combine(300000, 500000), 300000);
     assert.strictEqual(b.combine(700000, null), 700000);
+});
+
+test('a receiver that stops receiving video lifts its cap at once', () => {
+    let ctl = new b.Controller();
+    let rx = receiver();
+    feed(ctl, rx, WARM);
+    feed(ctl, rx, b.BAD_TO_DECREASE, {audioDelay: 0.5});
+    assert.notStrictEqual(ctl.cap, null);
+    let r = ctl.update(rx.next({video: false}));
+    assert.strictEqual(r.cap, null);
+    assert.ok(r.changed && r.send);
+    // And it does not keep refreshing, or re-cap on audio trouble alone.
+    let later = feed(ctl, rx, 20, {video: false, audioDelay: 0.5});
+    assert.ok(later.every(x => x.cap === null && !x.send));
+});
+
+test('a stale rate does not let audio trouble cap stopped video', () => {
+    let ctl = new b.Controller();
+    let rx = receiver();
+    feed(ctl, rx, WARM);
+    // Video stops flowing (the track stays), and only then audio lags.
+    feed(ctl, rx, 3, {bps: 0});
+    let out = feed(ctl, rx, 10, {audioDelay: 0.5, bps: 0});
+    assert.ok(out.every(x => x.cap === null));
+});
+
+test('invalid caps from the wire never get below the minimum', () => {
+    for(let v of [NaN, Infinity, -Infinity, -1, 0, '1', {}, [], true,
+                  null, undefined, b.MAX_CAP + 1, 1e308])
+        assert.strictEqual(b.sanitizeCap(v), null, String(v));
+    assert.strictEqual(b.sanitizeCap(1), b.MIN_CAP);
+    assert.strictEqual(b.sanitizeCap(1e-300), b.MIN_CAP);
+    assert.strictEqual(b.sanitizeCap(500000.4), 500000);
+
+    let caps = new b.Caps();
+    caps.set('s', 'a', 1, 0);
+    assert.strictEqual(caps.get('s', 0), b.MIN_CAP);
+    for(let v of [NaN, Infinity, '1', -5]) {
+        caps.set('s', 'b', v, 0);
+        assert.strictEqual(caps.get('s', 0), b.MIN_CAP, String(v));
+    }
+    // A garbage value lifts that receiver's request rather than keep it.
+    caps.set('s', 'a', 'x', 0);
+    assert.strictEqual(caps.get('s', 0), null);
+});
+
+test('a receiver that leaves takes its caps with it', () => {
+    let caps = new b.Caps();
+    caps.set('s1', 'a', 400000, 0);
+    caps.set('s2', 'a', 300000, 0);
+    caps.set('s1', 'b', 800000, 0);
+    assert.deepStrictEqual(caps.forget('a').sort(), ['s1', 's2']);
+    assert.strictEqual(caps.get('s1', 1), 800000);
+    assert.strictEqual(caps.get('s2', 1), null);
 });

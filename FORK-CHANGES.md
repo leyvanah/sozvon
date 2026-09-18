@@ -432,6 +432,13 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     forgets one that has not been refreshed for 35 s. Requests are ignored
     while sending simulcast, where the SFU already gives a weak receiver the
     low layer.
+    A receiver lifts its request as soon as it stops receiving the video
+    (stream closed, or no inbound video), and the sender drops every
+    request of someone who leaves; it accepts requests only from people in
+    the group and only as finite numbers, clamped to 150 kbit/s-100 Mbit/s.
+    The sender still cannot check that the requester actually receives the
+    stream -- only the SFU knows -- so this bounds, rather than prevents, what
+    a hostile participant can do: at worst the 150 kbit/s floor.
 
 ### Localisation
 
