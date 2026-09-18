@@ -78,6 +78,16 @@ func TestPushClientAfterLeave(t *testing.T) {
 // the named "op" permissions set, and points the group package at it.
 func setupPermissionsGroup(t *testing.T, name string) {
 	t.Helper()
+	setupGroupWith(t, name, `{"users": {
+		"boss":   {"password": "bosspass", "permissions": "op"},
+		"deputy": {"password": "deputypass", "permissions": "op"}
+	}}`)
+}
+
+// setupGroupWith writes a group with the description conf and points the
+// group package at it.
+func setupGroupWith(t *testing.T, name, conf string) {
+	t.Helper()
 	group.Directory = t.TempDir()
 	group.DataDirectory = t.TempDir()
 	err := os.WriteFile(
@@ -87,10 +97,6 @@ func setupPermissionsGroup(t *testing.T, name string) {
 	if err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	conf := `{"users": {
-		"boss":   {"password": "bosspass", "permissions": "op"},
-		"deputy": {"password": "deputypass", "permissions": "op"}
-	}}`
 	err = os.WriteFile(
 		filepath.Join(group.Directory, name+".json"),
 		[]byte(conf), 0o600,
@@ -162,5 +168,111 @@ func TestChangePermissionsLeavesNamedSetAlone(t *testing.T) {
 	if !slices.Contains(deputy.Permissions(), "op") {
 		t.Errorf("the next operator to log in is not one: %v",
 			deputy.Permissions())
+	}
+}
+
+// Each permission change gives the expected result, and none of them
+// writes into the array it started from, not even into its spare
+// capacity: that array may belong to a group description or a named
+// permissions set, and slices of it may be held by other goroutines.
+// (Sozvon)
+func TestChangePermissionsKinds(t *testing.T) {
+	tests := []struct {
+		kind       string
+		start, end []string
+	}{
+		{"op", []string{"present"}, []string{"present", "op"}},
+		{"op", []string{"op", "present"}, []string{"op", "present"}},
+		{"unop", []string{"op", "record", "present"}, []string{"present"}},
+		{"unop", []string{"present"}, []string{"present"}},
+		{"present", []string{"message"}, []string{"message", "present"}},
+		{"unpresent", []string{"present", "message"}, []string{"message"}},
+		{"shutup", []string{"present", "message"}, []string{"present"}},
+		{"unshutup", []string{"present"}, []string{"present", "message"}},
+	}
+	for _, tt := range tests {
+		// Spare capacity, filled with a marker so that a write into
+		// it shows.
+		backing := make([]string, len(tt.start)+4)
+		for i := range backing {
+			backing[i] = "spare"
+		}
+		copy(backing, tt.start)
+		before := slices.Clone(backing)
+
+		c := &webClient{
+			id:          "c",
+			actions:     unbounded.New[any](),
+			permissions: backing[:len(tt.start)],
+		}
+		err := handleAction(c, changePermissionsAction{kind: tt.kind})
+		if err != nil {
+			t.Errorf("%v %v: %v", tt.kind, tt.start, err)
+			continue
+		}
+		if !slices.Equal(c.permissions, tt.end) {
+			t.Errorf("%v %v: got %v, expected %v",
+				tt.kind, tt.start, c.permissions, tt.end)
+		}
+		if !slices.Equal(backing, before) {
+			t.Errorf("%v %v: the original array changed to %v",
+				tt.kind, tt.start, backing)
+		}
+	}
+
+	c := &webClient{id: "c", actions: unbounded.New[any]()}
+	err := handleAction(c, changePermissionsAction{kind: "sudo"})
+	if err == nil {
+		t.Errorf("an unknown permission was accepted")
+	}
+}
+
+// With recording allowed, "op" also grants "record", and "unop" takes
+// both away.  Changing one member's permissions, which here come from the
+// explicit list of the group's wildcard user, does not change what the
+// next member logging in through that entry gets.  (Sozvon)
+func TestChangePermissionsExplicitListWithRecording(t *testing.T) {
+	setupGroupWith(t, "perms-record", `{
+		"allow-recording": true,
+		"users": {
+			"boss": {"password": "bosspass", "permissions": "op"}
+		},
+		"wildcard-user": {
+			"password": {"type": "wildcard"},
+			"permissions": ["present", "message"]
+		}
+	}`)
+	joinForTest(t, "perms-record", "boss-1", "boss", "bosspass")
+	alice := joinForTest(t, "perms-record", "alice-1", "alice", "")
+
+	steps := []struct {
+		kind string
+		want []string
+	}{
+		// first, since it is the one that edited the array it was
+		// given, here the description's
+		{"unpresent", []string{"message"}},
+		{"present", []string{"message", "present"}},
+		{"op", []string{"message", "present", "op", "record"}},
+		{"unop", []string{"message", "present"}},
+		{"shutup", []string{"present"}},
+		{"unshutup", []string{"present", "message"}},
+	}
+	for _, s := range steps {
+		err := handleAction(alice, changePermissionsAction{kind: s.kind})
+		if err != nil {
+			t.Fatalf("%v: %v", s.kind, err)
+		}
+		if !slices.Equal(alice.Permissions(), s.want) {
+			t.Errorf("after %v: got %v, expected %v",
+				s.kind, alice.Permissions(), s.want)
+		}
+	}
+
+	bob := joinForTest(t, "perms-record", "bob-1", "bob", "")
+	want := []string{"present", "message"}
+	if !slices.Equal(bob.Permissions(), want) {
+		t.Errorf("the next member with that entry got %v, expected %v",
+			bob.Permissions(), want)
 	}
 }
