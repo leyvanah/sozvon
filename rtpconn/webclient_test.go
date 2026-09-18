@@ -111,6 +111,7 @@ func joinForTest(t *testing.T, name, id, username, password string) *webClient {
 		t.Fatalf("AddClient(%v): %v", username, err)
 	}
 	c.group = g
+	t.Cleanup(func() { group.DelClient(c) })
 	return c
 }
 
