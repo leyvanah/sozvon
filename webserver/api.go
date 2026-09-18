@@ -79,7 +79,7 @@ func isAdminOrExplicitPassword(groupname, user string, creds group.ClientCredent
 
 // checkAdmin checks whether the client authentifies as an administrator
 func checkAdmin(w http.ResponseWriter, r *http.Request, groupname string) bool {
-	key := authlimit.HostKey(r.RemoteAddr)
+	key := authlimit.HostKey(remoteAddr(r))
 	if banned, left := authlimit.Banned(key); banned {
 		tooManyLogins(w, left)
 		return false
@@ -112,7 +112,7 @@ func checkAdmin(w http.ResponseWriter, r *http.Request, groupname string) bool {
 // It is used to check whether the client has the right to change a
 // password.
 func checkAdminOrExplicitPassword(w http.ResponseWriter, r *http.Request, groupname, user string) bool {
-	key := authlimit.HostKey(r.RemoteAddr)
+	key := authlimit.HostKey(remoteAddr(r))
 	if banned, left := authlimit.Banned(key); banned {
 		tooManyLogins(w, left)
 		return false

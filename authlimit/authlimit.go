@@ -14,8 +14,10 @@
 // an external tool such as fail2ban can ban persistent guessers at the
 // firewall (see contrib/fail2ban/).
 //
-// NB: the key is the connection's remote address.  Behind a reverse proxy
-// that does not preserve it, all clients share one key — and a ban then
+// NB: the key is the client's address as the web server resolves it: the
+// connection's remote address, or, behind a proxy named by -trusted-proxy,
+// the address that proxy reports in X-Forwarded-For.  Behind a reverse
+// proxy that is not so named, all clients share one key — and a ban then
 // hits everyone behind it.
 package authlimit
 

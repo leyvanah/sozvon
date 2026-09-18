@@ -821,12 +821,9 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var addr net.Addr
-	tcpaddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+	addr, err := remoteTCPAddr(r)
 	if err != nil {
-		log.Printf("ResolveTCPAddr: %v", err)
-	} else {
-		addr = tcpaddr
+		log.Printf("Remote address: %v", err)
 	}
 
 	go func() {
@@ -905,7 +902,7 @@ func recordingsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if banned, left := authlimit.Banned(authlimit.HostKey(r.RemoteAddr)); banned {
+	if banned, left := authlimit.Banned(authlimit.HostKey(remoteAddr(r))); banned {
 		tooManyLogins(w, left)
 		return
 	}
@@ -1012,13 +1009,13 @@ func checkRecordPermission(w http.ResponseWriter, r *http.Request, groupname str
 		var autherr *group.NotAuthorisedError
 		if errors.As(err, &autherr) {
 			// escalating delay slows password guessing (Sozvon)
-			authlimit.Failure(authlimit.HostKey(r.RemoteAddr),
+			authlimit.Failure(authlimit.HostKey(remoteAddr(r)),
 				"recordings")
 		}
 		return false
 	}
 
-	authlimit.Reset(authlimit.HostKey(r.RemoteAddr))
+	authlimit.Reset(authlimit.HostKey(remoteAddr(r)))
 	return true
 }
 

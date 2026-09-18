@@ -49,7 +49,7 @@ func buildVersion() string {
 
 func main() {
 	var cpuprofile, memprofile, mutexprofile, httpAddr string
-	var udpRange string
+	var udpRange, trustedProxies string
 	var showVersion bool
 
 	flag.StringVar(&httpAddr, "http", ":8443", "web server `address`")
@@ -85,9 +85,16 @@ func main() {
 	flag.StringVar(&turnserver.TLSAddress, "turn-tls", "",
 		"offer TURN over TLS at `hostname`[:port], "+
 			"using the web server's certificate (default port 5349)")
+	flag.StringVar(&trustedProxies, "trusted-proxy", "",
+		"comma-separated `addresses` or CIDR prefixes of reverse "+
+			"proxies whose X-Forwarded-For header is trusted")
 	flag.BoolVar(&showVersion, "version", false,
 		"print the version and exit")
 	flag.Parse()
+
+	if err := webserver.SetTrustedProxies(trustedProxies); err != nil {
+		log.Fatalf("trusted-proxy: %v", err)
+	}
 
 	if showVersion {
 		fmt.Printf("sozvon %v (%v %v/%v)\n", buildVersion(),
