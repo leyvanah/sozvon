@@ -1005,11 +1005,26 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     legitimate user who is merely mistyping is never banned without notice.
     A successful login clears the count. Note the flip side of any ban:
     everyone behind the same NAT/proxy address shares it.
+  * **Real client address behind a reverse proxy** (`-trusted-proxy`): a
+    comma-separated list of proxy addresses or CIDR prefixes whose
+    `X-Forwarded-For` is believed. The header is walked from the right,
+    skipping trusted proxies, and the first other address is the client;
+    entries further left were written by the client and are ignored. Off by
+    default — with no list the header is never read, so it cannot be
+    spoofed. Without it, every client behind a proxy shares the proxy's
+    address, so one person's ten failed logins lock **everyone** out,
+    operators included. The resolved address feeds the throttle and ban,
+    the `Failed login from` log line, and the address an operator sees with
+    `/identify`. The proxy must set the header on the WebSocket location as
+    well as on the page — that is where logins happen.
   * **fail2ban integration**: every failed login is logged with the offending
     address (`Failed login from <ip> (<surface>)`), and
     `contrib/fail2ban/` ships a filter + jail so persistent guessers can
     additionally be banned at the firewall for much longer than the
-    built-in 15 minutes.
+    built-in 15 minutes. Behind a reverse proxy, a firewall ban on the
+    logged address does not stop traffic that arrives via the proxy — and
+    without `-trusted-proxy` the logged address *is* the proxy's, so a
+    firewall ban would cut off every client.
 
 ### Dev / build
 

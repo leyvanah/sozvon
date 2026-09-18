@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -199,12 +198,9 @@ func whipEndpointHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var addr net.Addr
-	tcpaddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+	addr, err := remoteTCPAddr(r)
 	if err != nil {
-		log.Printf("ResolveTCPAddr: %v", err)
-	} else {
-		addr = tcpaddr
+		log.Printf("Remote address: %v", err)
 	}
 
 	c := rtpconn.NewWhipClient(g, id, token, addr)
