@@ -376,3 +376,77 @@ func TestLobbyKnockIntoFullRoom(t *testing.T) {
 			"this test", err)
 	}
 }
+
+// A room that sends everyone away once no operator is left, with two
+// operator accounts.
+const autokickConf = `{
+	"autokick": true,
+	"users": {
+		"boss": {"password": "oppass", "permissions": "op"},
+		"deputy": {"password": "deputypass", "permissions": "op"}
+	}
+}`
+
+// When a member leaves, DelClient checks whether an operator is still
+// there, which reads the remaining members' permissions.  That must happen
+// under g.mu, where their permissions change.  The test waits, under the
+// lock, for the leaving operator to be gone, and only then changes the
+// other operator's permissions the way rtpconn does.  That orders the change
+// after DelClient's critical section but not after anything DelClient does
+// once unlocked, so -race reports an unlocked read on every run.  It passes
+// without -race. (Sozvon)
+func TestPermissionsChangeWhileOperatorLeaves(t *testing.T) {
+	dir := setupGroups(t)
+	writeGroup(t, dir, "autokick", autokickConf)
+
+	boss := &memberClient{fakeClient: &fakeClient{id: "boss-1"}}
+	g, err := AddClient("autokick", boss, opCreds())
+	if err != nil {
+		t.Fatalf("AddClient(boss): %v", err)
+	}
+	boss.group = g
+
+	username := "deputy"
+	deputy := &memberClient{fakeClient: &fakeClient{id: "deputy-1"}}
+	_, err = AddClient("autokick", deputy, ClientCredentials{
+		Username: &username, Password: "deputypass",
+	})
+	if err != nil {
+		t.Fatalf("AddClient(deputy): %v", err)
+	}
+	deputy.group = g
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		DelClient(boss)
+	}()
+
+	// Bounded by the clock, not by waiting on the goroutine, for the
+	// same reason as in TestLobbyKnockWithdrawnWhileOperatorLeaves.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		g.mu.Lock()
+		present := g.clients["boss-1"] != nil
+		g.mu.Unlock()
+		if !present {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("DelClient did not remove the operator")
+		}
+		runtime.Gosched()
+	}
+
+	// What rtpconn does on "unop".
+	g.SetPermissions(func() {
+		deputy.perms = []string{"present", "message"}
+	})
+
+	wg.Wait()
+
+	if !deputy.wasPushed("delete", "boss-1") {
+		t.Errorf("the other operator was not told: %v", deputy.pushed)
+	}
+}
