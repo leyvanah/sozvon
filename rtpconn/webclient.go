@@ -110,8 +110,36 @@ func (c *webClient) Permissions() []string {
 	return c.permissions
 }
 
+// Data has no lock of its own.  Outside the client's goroutine it may
+// only be called under the lock of the client's group, as the group
+// does: the map is replaced, never written in place, and only under that
+// lock (setData).  It is cleared only once the client has left.
+// (Sozvon)
 func (c *webClient) Data() map[string]interface{} {
 	return maps.Clone(c.data)
+}
+
+// setData applies the changes in data to the client's own data, from the
+// client's goroutine.  The group clones a member's data under its lock,
+// so build the new map here and store it through the group rather than
+// writing into the old one.  (Sozvon)
+func (c *webClient) setData(data map[string]interface{}) {
+	nd := maps.Clone(c.data)
+	if nd == nil {
+		nd = make(map[string]interface{})
+	}
+	for k, v := range data {
+		if v == nil {
+			delete(nd, k)
+		} else {
+			nd[k] = v
+		}
+	}
+	if g := c.Group(); g != nil {
+		g.SetData(func() { c.data = nd })
+	} else {
+		c.data = nd
+	}
 }
 
 func (c *webClient) PushClient(group, kind, id string, username string, perms []string, data map[string]interface{}) error {
@@ -2175,16 +2203,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 					"Bad value in setdata",
 				))
 			}
-			if c.data == nil {
-				c.data = make(map[string]interface{})
-			}
-			for k, v := range data {
-				if v == nil {
-					delete(c.data, k)
-				} else {
-					c.data[k] = v
-				}
-			}
+			c.setData(data)
 			id := c.Id()
 			user := c.Username()
 			perms := c.Permissions()

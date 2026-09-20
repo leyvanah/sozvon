@@ -2,6 +2,7 @@ package rtpconn
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -274,5 +275,52 @@ func TestChangePermissionsExplicitListWithRecording(t *testing.T) {
 	if !slices.Equal(bob.Permissions(), want) {
 		t.Errorf("the next member with that entry got %v, expected %v",
 			bob.Permissions(), want)
+	}
+}
+
+// Changing a member's own data must not race with the group cloning that
+// data under its lock, here while another client joins.  This test only
+// fails under -race.  (Sozvon)
+func TestSetDataWhileJoining(t *testing.T) {
+	setupPermissionsGroup(t, "data-race")
+	boss := joinForTest(t, "data-race", "boss-1", "boss", "bosspass")
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			boss.setData(map[string]interface{}{
+				"muted": i%2 == 0,
+			})
+		}
+	}()
+
+	joinForTest(t, "data-race", "deputy-1", "deputy", "deputypass")
+	wg.Wait()
+
+	if _, ok := boss.Data()["muted"]; !ok {
+		t.Errorf("no data after setData: %v", boss.Data())
+	}
+}
+
+// A change to a member's data must build a new map rather than write
+// into the old one: the group hands the old one to maps.Clone under its
+// lock, and a write in place races with that clone.  (Sozvon)
+func TestSetDataReplacesTheMap(t *testing.T) {
+	c := &webClient{id: "c", actions: unbounded.New[any]()}
+
+	c.setData(map[string]interface{}{"muted": true, "raisehand": true})
+	old := c.data
+	before := maps.Clone(old)
+
+	c.setData(map[string]interface{}{"muted": nil, "caption": "hi"})
+
+	want := map[string]interface{}{"raisehand": true, "caption": "hi"}
+	if !reflect.DeepEqual(c.data, want) {
+		t.Errorf("got %v, expected %v", c.data, want)
+	}
+	if !reflect.DeepEqual(old, before) {
+		t.Errorf("the original map changed to %v", old)
 	}
 }
