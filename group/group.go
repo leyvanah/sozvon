@@ -1074,6 +1074,9 @@ func (g *Group) getClientUnlocked(id string) Client {
 	return nil
 }
 
+// Range calls f for every member of the group, with g.mu held for the
+// whole walk.  The lock is not reentrant, so f must not do anything that
+// takes it again -- DelClient, for one, takes it on entry.  (Sozvon)
 func (g *Group) Range(f func(c Client) bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -1085,11 +1088,15 @@ func (g *Group) Range(f func(c Client) bool) {
 	}
 }
 
+// kickall sends every member of the group away.  It takes the member list
+// under g.mu and kicks from that snapshot with the lock released, and it
+// must: a member's Kick may call DelClient, which takes g.mu on entry --
+// the on-disk recorder closes the recording and does exactly that -- and
+// the lock is not reentrant.  (Sozvon)
 func kickall(g *Group, message string) {
-	g.Range(func(c Client) bool {
+	for _, c := range g.GetClients(nil) {
 		c.Kick("", nil, message)
-		return true
-	})
+	}
 }
 
 func Shutdown(message string) {
