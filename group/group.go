@@ -175,6 +175,18 @@ func (g *Group) SetLocked1on1(on bool) {
 	}
 }
 
+// lockedError is what a locked group turns a non-operator away with: the
+// operator's own message when they set one, a plain statement otherwise.
+// Both places that refuse for the lock use it, so the two cannot drift
+// apart. (Sozvon)
+func lockedError(locked *string) error {
+	m := *locked
+	if m == "" {
+		m = "this group is locked"
+	}
+	return UserError(m)
+}
+
 // ErrKnocking is returned by AddClient when a non-op client has been
 // placed in the waiting room (lobby) of a locked group instead of being
 // refused.  It is not an authorisation failure: the client is connected
@@ -837,6 +849,18 @@ func AddClient(group string, c Client, creds ClientCredentials) (*Group, error) 
 					// personal link only says who may knock, and the
 					// operator still admits every client -- so a token
 					// holder there falls through to the knock below.
+					//
+					// The token skips the lobby, not the lock.  A lock
+					// is the operator saying "nobody else comes in
+					// now", and it has to mean that here too: without
+					// this the same invitation link opens a locked
+					// lobby group while being turned away from a
+					// locked group that has no lobby, so the button
+					// means less in the room sold as the private one.
+					// (Sozvon)
+					if g.locked != nil {
+						return nil, lockedError(g.locked)
+					}
 				} else if child && creds.Token == "" {
 					// An operator-room child can only be knocked on by
 					// someone holding a valid personal link (token).
@@ -870,11 +894,7 @@ func AddClient(group string, c Client, creds ClientCredentials) (*Group, error) 
 					return nil, ErrKnocking
 				}
 			} else if g.locked != nil {
-				m := *g.locked
-				if m == "" {
-					m = "this group is locked"
-				}
-				return nil, UserError(m)
+				return nil, lockedError(g.locked)
 			}
 			if g.description.NotBefore != nil ||
 				g.description.Expires != nil {

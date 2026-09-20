@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/leyvanah/sozvon/token"
 )
 
 // Tests for the bookkeeping behind the waiting room. (Sozvon)
@@ -449,4 +451,95 @@ func TestPermissionsChangeWhileOperatorLeaves(t *testing.T) {
 	if !deputy.wasPushed("delete", "boss-1") {
 		t.Errorf("the other operator was not told: %v", deputy.pushed)
 	}
+}
+
+// An invitation link skips the waiting room, which is the point of it.  It
+// must not also skip the lock: "lock" is the operator saying that nobody
+// else comes in now, and a token holder is refused by it in a group without
+// a lobby.  Until this was fixed the lock was never even consulted in a
+// lobby group, so the same link opened the room the product calls the
+// private one while being turned away from the plain one. (Sozvon)
+func TestLockRefusesATokenHolderInALobbyGroup(t *testing.T) {
+	dir := setupGroups(t)
+	writeGroup(t, dir, "private", lobbyConf)
+	tok := issueToken(t, "private")
+
+	op := &fakeClient{id: "op-1"}
+	g := addOperator(t, "private", op)
+
+	// Unlocked, the link is a pass: straight in, no knock.
+	early := &fakeClient{id: "early-1"}
+	if _, err := AddClient("private", early, tokenCreds(tok)); err != nil {
+		t.Fatalf("token holder into an unlocked lobby group: %v", err)
+	}
+	DelClient(early)
+
+	g.SetLocked(true, "не сейчас")
+
+	guest := &fakeClient{id: "guest-1"}
+	_, err := AddClient("private", guest, tokenCreds(tok))
+	if err == nil {
+		t.Fatalf("token holder walked into a locked group")
+	}
+	if err == ErrKnocking {
+		t.Fatalf("token holder was sent to the lobby, not refused: " +
+			"the lock has to turn them away, as it does in a group " +
+			"with no lobby")
+	}
+	if err.Error() != "не сейчас" {
+		t.Errorf("got %q, expected the operator's own lock message",
+			err)
+	}
+
+	// An operator is not held by their own lock.
+	op2 := &fakeClient{id: "op-2"}
+	if _, err := AddClient("private", op2, opCreds()); err != nil {
+		t.Errorf("operator refused by their own lock: %v", err)
+	}
+
+	// Nor is a guest the operator has just admitted.
+	waiting := &fakeClient{id: "waiting-1"}
+	knock(t, "private", waiting, "visitor")
+	if err := g.Admit("waiting-1"); err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	if _, err := AddClient("private", waiting, guestCreds("visitor")); err != nil {
+		t.Errorf("admitted guest refused by the lock: %v", err)
+	}
+
+	// Lifting the lock restores the link.
+	DelClient(guest)
+	g.SetLocked(false, "")
+	late := &fakeClient{id: "late-1"}
+	if _, err := AddClient("private", late, tokenCreds(tok)); err != nil {
+		t.Errorf("token holder after unlocking: %v", err)
+	}
+}
+
+// issueToken mints a stateful invitation token for a group, the way an
+// operator's /invite does, and points the token store at a file of this
+// test's own.
+func issueToken(t *testing.T, group string) string {
+	t.Helper()
+	token.SetStatefulFilename(
+		filepath.Join(t.TempDir(), "tokens.jsonl"),
+	)
+	expires := time.Now().Add(time.Hour)
+	// The token store keys on the string, and does not mint one -- the
+	// server does, before it calls Update.
+	tok, err := token.Update(&token.Stateful{
+		Token:       "invite-" + group,
+		Group:       group,
+		Permissions: []string{"present", "message"},
+		Expires:     &expires,
+	}, "")
+	if err != nil {
+		t.Fatalf("token.Update: %v", err)
+	}
+	return tok.Token
+}
+
+func tokenCreds(tok string) ClientCredentials {
+	username := "invited"
+	return ClientCredentials{Username: &username, Token: tok}
 }
