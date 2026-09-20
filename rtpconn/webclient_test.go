@@ -2,6 +2,7 @@ package rtpconn
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -300,5 +301,26 @@ func TestSetDataWhileJoining(t *testing.T) {
 
 	if _, ok := boss.Data()["muted"]; !ok {
 		t.Errorf("no data after setData: %v", boss.Data())
+	}
+}
+
+// A change to a member's data must build a new map rather than write
+// into the old one: the group hands the old one to maps.Clone under its
+// lock, and a write in place races with that clone.  (Sozvon)
+func TestSetDataReplacesTheMap(t *testing.T) {
+	c := &webClient{id: "c", actions: unbounded.New[any]()}
+
+	c.setData(map[string]interface{}{"muted": true, "raisehand": true})
+	old := c.data
+	before := maps.Clone(old)
+
+	c.setData(map[string]interface{}{"muted": nil, "caption": "hi"})
+
+	want := map[string]interface{}{"raisehand": true, "caption": "hi"}
+	if !reflect.DeepEqual(c.data, want) {
+		t.Errorf("got %v, expected %v", c.data, want)
+	}
+	if !reflect.DeepEqual(old, before) {
+		t.Errorf("the original map changed to %v", old)
 	}
 }

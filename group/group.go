@@ -300,6 +300,18 @@ func (g *Group) SetPermissions(set func()) {
 	set()
 }
 
+// SetData runs set, which must be the assignment that replaces the data
+// of one of g's members, while holding g.mu.  The group clones its
+// members' data under g.mu, as AddClient does, so the field must change
+// under it too.  set must store a new map rather than write into the old
+// one: a write in place races with that clone whatever lock is held
+// here.  (Sozvon)
+func (g *Group) SetData(set func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	set()
+}
+
 func (g *Group) ClientCount() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
