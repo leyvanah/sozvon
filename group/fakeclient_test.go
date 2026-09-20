@@ -26,6 +26,10 @@ type fakeClient struct {
 	// others, which for an operator includes knocks arriving and being
 	// withdrawn.
 	pushed []pushedClient
+
+	// kicked records the messages passed to Kick, so that a sweep that
+	// leaves someone behind does not look like a success.
+	kicked []string
 }
 
 type pushedClient struct {
@@ -88,5 +92,6 @@ func (c *fakeClient) PushClient(group, kind, id, username string, perms []string
 }
 
 func (c *fakeClient) Kick(id string, user *string, message string) error {
+	c.kicked = append(c.kicked, message)
 	return nil
 }
