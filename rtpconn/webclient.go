@@ -114,6 +114,21 @@ func (c *webClient) Data() map[string]interface{} {
 	return maps.Clone(c.data)
 }
 
+// setData applies the changes in data to the client's own data, from the
+// client's goroutine.  (Sozvon)
+func (c *webClient) setData(data map[string]interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	for k, v := range data {
+		if v == nil {
+			delete(c.data, k)
+		} else {
+			c.data[k] = v
+		}
+	}
+}
+
 func (c *webClient) PushClient(group, kind, id string, username string, perms []string, data map[string]interface{}) error {
 	c.action(pushClientAction{
 		group, kind, id, username, perms, data,
@@ -2175,16 +2190,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 					"Bad value in setdata",
 				))
 			}
-			if c.data == nil {
-				c.data = make(map[string]interface{})
-			}
-			for k, v := range data {
-				if v == nil {
-					delete(c.data, k)
-				} else {
-					c.data[k] = v
-				}
-			}
+			c.setData(data)
 			id := c.Id()
 			user := c.Username()
 			perms := c.Permissions()

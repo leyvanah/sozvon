@@ -276,3 +276,29 @@ func TestChangePermissionsExplicitListWithRecording(t *testing.T) {
 			bob.Permissions(), want)
 	}
 }
+
+// Changing a member's own data must not race with the group cloning that
+// data under its lock, here while another client joins.  This test only
+// fails under -race.  (Sozvon)
+func TestSetDataWhileJoining(t *testing.T) {
+	setupPermissionsGroup(t, "data-race")
+	boss := joinForTest(t, "data-race", "boss-1", "boss", "bosspass")
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			boss.setData(map[string]interface{}{
+				"muted": i%2 == 0,
+			})
+		}
+	}()
+
+	joinForTest(t, "data-race", "deputy-1", "deputy", "deputypass")
+	wg.Wait()
+
+	if _, ok := boss.Data()["muted"]; !ok {
+		t.Errorf("no data after setData: %v", boss.Data())
+	}
+}
