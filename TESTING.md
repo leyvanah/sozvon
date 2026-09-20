@@ -1,7 +1,7 @@
 # Testing Sozvon
 
-How this project is tested, what is covered automatically, what has to be
-checked by hand, and where the gaps are.
+How this project is tested: what is covered automatically, and what has to be
+checked by hand.
 
 Sozvon is a fork of [Galène](https://galene.org). Upstream's tests cover the
 SFU core — packet handling, jitter, codecs, tokens. Almost everything this fork
@@ -88,7 +88,8 @@ crypto core, the localisation tables. No framework, no `package.json`, no
 runs both sides of the E2EE handshake in one page and shows the emoji SAS.
 
 **Manual checks**. Everything involving a camera, a real browser layout, or a
-phone. The checklist below.
+phone, against a written protocol kept outside the repository — see the last
+section.
 
 ## What is covered automatically
 
@@ -110,117 +111,20 @@ cannot self-admit — it was refused a step earlier, for an unrelated reason).
 **When adding a test here, break the thing it covers and confirm it goes red.**
 A green test that cannot fail is worse than no test, because it is counted.
 
-## What is not covered, and what that costs
+## The manual half
 
-- **The web client's behaviour.** `static/galene.js` is ~8700 lines and is
-  where most of the fork's work went — the video layout, the people and chat
-  panes, the settings drawer, the pre-join device check. Nothing exercises it.
-  This is the largest gap; browser tests are the next step (see below).
-- **Media.** Nothing sends a frame end to end. Whether video actually arrives,
-  encrypted or not, is only ever established by two real browsers. The
-  recurring E2EE keyframe bug lives here.
-- **The Android app.** `android/` has no `test/` or `androidTest/` directory;
-  CI compiles it and nothing more.
-- **The desktop app.** CI syntax-checks the sources and confirms the deployer
-  can find the installer. The deploy logic itself is untested.
-- **The installer.** `contrib/install.sh` is checked only for parsing under
-  `dash`. Whether it installs is established by running it on a throwaway
-  container or VPS.
-- **Theming.** The private deployment theme is applied at deploy time and is
-  not in this repository, so nothing here can test it.
+Automated tests here do not open a browser, so a good deal of what this fork
+does — the video stage, the panes, the device check, a call between two real
+clients — is checked by hand against a written protocol before a deploy.
 
-## Manual checklist
+That protocol, the inventory of what it exists to catch, and the plan for what
+to automate next are **kept out of this repository**, in a local
+`TEST-PROTOCOLS.local.md` beside the pre-push hook that runs the automated
+half. They are working notes for whoever is holding the machine, they name
+deployment specifics, and an exact list of where a product is thin is not a
+thing to publish while it is thin.
 
-Automated tests do not touch the browser, so this is not optional.
-
-### Before every deploy (about ten minutes, one machine, two browser windows)
-
-Use two windows — one normal, one private — so they are separate clients.
-
-1. **Join.** Open a room, allow camera and microphone at the pre-join check;
-   the preview shows video and the level meter moves. Connect.
-2. **Two participants.** Join from the second window. Each sees the other's
-   video and hears the other. Check both directions — one-way video is the
-   fork's most frequent failure.
-3. **Chat.** Send a message each way. Check a message with an emoji and one
-   with `<b>markup</b>` (it must appear as text).
-4. **Controls.** Mute and unmute; camera off and on; both reflected in the
-   other window.
-5. **Waiting room.** In a lobby group, join as a guest from the second window:
-   the guest waits, the operator sees the knock. Admit — the guest gets in.
-   Repeat and deny — the guest is told, and does not get in.
-6. **Language.** Switch EN ⇄ RU. The whole interface changes, including the
-   waiting room and any open dialog. No raw keys like `toast.noMedia`.
-7. **Theme.** Switch light ⇄ dark. Check the video area, the chat pane and the
-   settings drawer; look for text on same-colour background and for links.
-8. **Layout.** Narrow the window to phone width. Controls stay reachable, the
-   video grid reflows, nothing overflows horizontally.
-9. **Reload.** Refresh mid-call. The client reconnects and media resumes.
-
-### For an E2EE group, additionally
-
-10. Both windows show the encryption indicator and **the same emoji**.
-11. Video flows in both directions — this is where the keyframe bug appears, as
-    one side black while the other is fine.
-12. Chat still works.
-13. A third participant is refused (in a `require-e2ee` group).
-
-### Before a release, additionally
-
-14. **A real phone**, on a real network, joining a real server. The LAN test
-    stand does not exercise the paths a phone does.
-15. **The APK**: install, join, camera and microphone permissions, screen
-    rotation, sending a file.
-16. **The installer** on a throwaway VPS or container: install, join a room,
-    uninstall, `--purge`.
-17. **TLS**: whichever of the three certificate paths the release touched.
-
-Record anything found but not fixed in [KNOWN-BUGS.md](KNOWN-BUGS.md).
-
-## Where to take this next
-
-In order of value per hour spent. The first costs nothing but the time; the
-second is the only one that adds a dependency, and is written up as a decision
-rather than a task for that reason.
-
-1. **Grow the client's testable surface without a browser.** Most of
-   `galene.js` cannot be unit-tested because it reaches for the DOM, but a good
-   deal of what breaks in it is pure: the label a tile derives for a
-   participant, the mute state read back from user data, the grid geometry, the
-   settings round-trip, the panel's open/closed state across the 1024 px
-   breakpoint — a real, shipped bug that a five-line function would have
-   pinned. Each time such logic is *already* being touched, lift it into a
-   small module and cover it under `static/test/` with `node --test`, which is
-   set up and needs no `package.json`. No dependency, no CI time, and the
-   largest gap becomes a shrinking one.
-
-2. **One browser smoke test.** Playwright driving two Chromium instances
-   against a `-dev` server with `--use-fake-device-for-media-stream` — two
-   clients join, see each other's video both ways, exchange chat — would cover
-   more of the fork than everything above put together, and would catch most of
-   what the checklist's steps 1–5 look for, in about thirty seconds. The cost
-   is worth stating plainly: one dev dependency, a lockfile, a browser download
-   cached in CI, a couple of minutes per run.
-
-   It has two forms, and they are not the same decision:
-   - **Local only** — an ignored `test/browser/` invoked with `npx playwright`,
-     run before a deploy in place of the first half of the checklist. Nothing
-     is added to the repository or to CI, and the check exists as soon as it is
-     written.
-   - **In CI** — the same spec wired into the workflow, so it guards pull
-     requests as well as deploys. That is what turns it from a convenience into
-     coverage.
-
-   Starting local and promoting it once it has proved itself over a few real
-   deploys is the cheap order.
-
-3. **A second protocol-test tranche**: token-based invites into an operator
-   room, the 1-on-1 lock, `setgroup` and `deletetoken`, the group status seen by
-   an unauthenticated client.
-
-4. **Installer tests in CI** — run `install.sh` in a container and assert the
-   service comes up and `/healthz` answers. Three of the four open installer
-   bugs in KNOWN-BUGS.md would have been caught by it.
-
-5. **Android instrumentation**, at least for the WebView permission bridge,
-   which is where the file-picker and camera bugs have been.
+If you are running Sozvon yourself, the short version is: before you deploy,
+have two browser windows join a real room and check that audio and video
+arrive **in both directions** — one-way media is this fork's most frequent
+failure, and it looks fine from the sending side.
