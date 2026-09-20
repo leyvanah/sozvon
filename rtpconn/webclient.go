@@ -101,6 +101,11 @@ func (c *webClient) Init(username string, perms []string) {
 	c.permissions = perms
 }
 
+// Permissions has no lock of its own.  Outside the client's goroutine it
+// may only be called under the lock of the client's group, as the group
+// does: the permissions change only under that lock (SetPermissions), and
+// are cleared only once the client has left.  The result must not be
+// modified.  (Sozvon)
 func (c *webClient) Permissions() []string {
 	return c.permissions
 }
@@ -941,22 +946,23 @@ type kickAction struct {
 
 var errEmptyId = group.ProtocolError("empty id")
 
+// remove and addnew return a new slice rather than editing l in place.  A
+// client's permissions may share their array with a named permissions set
+// or with a group description, and slices of them already handed out by
+// Permissions() are read by other goroutines.  (Sozvon)
 func remove(v string, l []string) []string {
-	for i, w := range l {
-		if v == w {
-			l = append(l[:i], l[i+1:]...)
-			return l
-		}
+	i := slices.Index(l, v)
+	if i < 0 {
+		return l
 	}
-	return l
+	return slices.Concat(l[:i], l[i+1:])
 }
 
 func addnew(v string, l []string) []string {
 	if slices.Contains(l, v) {
 		return l
 	}
-	l = append(l, v)
-	return l
+	return append(slices.Clip(l), v)
 }
 
 func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
@@ -1224,26 +1230,36 @@ func handleAction(c *webClient, a any) error {
 			}
 		}
 	case changePermissionsAction:
+		// The group reads its members' permissions under its own
+		// lock, so compute the new ones here and store them through
+		// the group.  Description() takes that lock too, so it must
+		// be called first.  (Sozvon)
+		g := c.Group()
+		perms := c.permissions
 		switch a.kind {
 		case "op":
-			c.permissions = addnew("op", c.permissions)
-			g := c.Group()
+			perms = addnew("op", perms)
 			if g != nil && g.Description().AllowRecording {
-				c.permissions = addnew("record", c.permissions)
+				perms = addnew("record", perms)
 			}
 		case "unop":
-			c.permissions = remove("op", c.permissions)
-			c.permissions = remove("record", c.permissions)
+			perms = remove("op", perms)
+			perms = remove("record", perms)
 		case "present":
-			c.permissions = addnew("present", c.permissions)
+			perms = addnew("present", perms)
 		case "unpresent":
-			c.permissions = remove("present", c.permissions)
+			perms = remove("present", perms)
 		case "shutup":
-			c.permissions = remove("message", c.permissions)
+			perms = remove("message", perms)
 		case "unshutup":
-			c.permissions = addnew("message", c.permissions)
+			perms = addnew("message", perms)
 		default:
 			return group.UserError("unknown permission")
+		}
+		if g != nil {
+			g.SetPermissions(func() { c.permissions = perms })
+		} else {
+			c.permissions = perms
 		}
 		c.action(permissionsChangedAction{})
 	case permissionsChangedAction:

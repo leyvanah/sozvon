@@ -184,9 +184,8 @@ var ErrKnocking = errors.New("knocking")
 // getOpsUnlocked returns the operators among the group's members.  Called
 // locked, and it must be: a leaving client clears its own permissions,
 // holding no lock, as soon as DelClient has removed it, so only under g.mu is
-// it known not to have left yet.  That is all the lock guarantees here.  A
-// member whose permissions are changed (op, present, ...) rewrites them
-// without g.mu, and that is a separate race this does not address. (Sozvon)
+// it known not to have left yet, and a member's permissions only change
+// under g.mu (see SetPermissions). (Sozvon)
 func (g *Group) getOpsUnlocked() []Client {
 	ops := make([]Client, 0)
 	for _, c := range g.clients {
@@ -288,6 +287,17 @@ func (g *Group) Description() *Description {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.description
+}
+
+// SetPermissions runs set, which must do nothing but replace the
+// permissions of one of g's members, while holding g.mu.  The group reads
+// its members' permissions under g.mu, so they must change under it too, as
+// they do when AddClient calls Init.  set must store a new slice: slices
+// already returned by Permissions() are read without the lock. (Sozvon)
+func (g *Group) SetPermissions(set func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	set()
 }
 
 func (g *Group) ClientCount() int {
@@ -1013,7 +1023,12 @@ func DelClient(c Client) {
 			g.Name(), "delete", c.Id(), c.Username(), nil, nil,
 		)
 	}
+
+	// autoLockKick reads the remaining members and their permissions,
+	// and must be called locked.  (Sozvon)
+	g.mu.Lock()
 	autoLockKick(g)
+	g.mu.Unlock()
 }
 
 func (g *Group) GetClients(except Client) []Client {
