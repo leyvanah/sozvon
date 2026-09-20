@@ -2,6 +2,7 @@ const { app, BrowserWindow, WebContentsView, session, ipcMain, Menu, shell, nati
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { createTray } = require('./tray');
 
 const ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.ico');
 const ICON_PNG_PATH = path.join(__dirname, '..', 'assets', 'icon.png');
@@ -19,7 +20,18 @@ const DEFAULT_CONFIG = {
   // the launcher, which is shown before any server page has had a chance to
   // report anything, opens in the right one.
   theme: 'system',
-  // Every server this client has been to: {url, name, lastGroup, rooms[]}.
+  // Closing the window puts the app in the tray instead of ending it, so a
+  // knock still reaches the operator afterwards.  Off, and the app behaves
+  // like any other window -- and hears nothing once it is shut.
+  minimizeToTray: true,
+  // Start with Windows, in the tray.  Off by default: an app that adds
+  // itself to your startup unasked is a liberty, and the tray menu is where
+  // it gets asked.
+  autoStart: false,
+  // Whether the "it is still running down here" balloon has been shown.  It
+  // is an explanation, and an explanation repeated is a nag.
+  trayHintShown: false,
+  // Every server this client has been to: {url, name, hub, lastGroup, rooms[]}.
   // serverUrl/lastGroup/recentGroups are kept in step with the most recent
   // one, so a config written by an older build still opens, and one written
   // here still works if the user goes back to it.
@@ -92,6 +104,23 @@ let mainWindow = null;
 // The layer below the app bar, holding whatever page the app is showing.
 let contentView = null;
 let config = loadConfig();
+let tray = null;
+
+// Set once the user has actually asked to leave, so the close button can mean
+// "put it away" without making the app impossible to end.
+let quitting = false;
+
+/**
+ * Whether anyone would hear a knock right now.
+ *
+ * Duty is not a mode the app enters; it is a fact about the page in the
+ * window -- the operator room is open, so its three-second poll is running
+ * and knocks are arriving.  Derived from what the page reports rather than
+ * remembered here, because a state kept in parallel with the truth is a
+ * state that eventually disagrees with it, and this one would disagree by
+ * claiming to be watching when it is not.
+ */
+let duty = { onDuty: false, hub: null, knocks: 0 };
 
 // The two window backgrounds, which are --bg from the web client's palette.
 // This is the colour Electron paints before a page has rendered anything, so
@@ -190,6 +219,107 @@ nativeTheme.on('updated', () => {
   repaintChrome();
   sendBarState();
 });
+
+// ------------------------------------------------------------------ duty ---
+
+/** Bring the window back from wherever it went: the tray, or behind things. */
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/**
+ * The server whose operator room we know about, most recent first.
+ *
+ * The name is learnt by going there once: the client reports it over the
+ * bridge when it puts up the dashboard.  Nothing here guesses -- a server
+ * with no operator room must not be offered as a place to stand watch.
+ */
+function hubEntry() {
+  return (config.servers || []).find(s => s && s.url && s.hub) || null;
+}
+
+/** Open the operator room, from the tray or from a window that is elsewhere. */
+function openHub() {
+  const entry = hubEntry();
+  if (!entry || !contentView) return;
+  const base = String(entry.url).replace(/\/+$/, '');
+  rememberServer(base, '');
+  saveConfig(config);
+  contentView.webContents.loadURL(
+    `${base}/group/${encodeURIComponent(entry.hub)}/`);
+  showWindow();
+}
+
+/**
+ * Remember which page is the operator room, and that we are on it.
+ *
+ * Called from the bridge when the client raises the dashboard, which is also
+ * the moment its poll starts -- so this is duty beginning, reported by the
+ * only party that can tell.
+ *
+ * @param {string} name - the hub's group name
+ */
+function setHub(name) {
+  const hub = String(name || '').trim();
+  if (!hub) return;
+  let origin;
+  try {
+    origin = new URL(contentView.webContents.getURL()).origin;
+  } catch {
+    return;
+  }
+  const entry = (config.servers || []).find(s => sameServer(s.url, origin));
+  if (entry && entry.hub !== hub) {
+    entry.hub = hub;
+    saveConfig(config);
+  }
+  duty = { ...duty, onDuty: true, hub };
+  refreshTray();
+}
+
+/**
+ * Duty ends with the page that was doing it.  Any navigation of the content
+ * layer drops it; the next dashboard to load reports itself and sets it
+ * again.  The hub's *name* survives, because it is a fact about the server
+ * rather than about this moment.
+ */
+function clearDuty() {
+  if (!duty.onDuty) return;
+  duty = { ...duty, onDuty: false };
+  refreshTray();
+}
+
+function refreshTray() {
+  if (tray) tray.refresh();
+}
+
+/**
+ * Start with Windows, or stop doing so.
+ *
+ * The extra argument is what makes it bearable: started by the system, the
+ * app goes straight to the tray instead of throwing a window at somebody who
+ * was trying to log in.
+ *
+ * @param {boolean} on
+ */
+function setAutoStart(on) {
+  config = { ...config, autoStart: !!on };
+  saveConfig(config);
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: !!on,
+      args: ['--hidden'],
+    });
+  } catch (e) {
+    console.error('setLoginItemSettings failed:', e);
+  }
+}
 
 /** The content layer fills the window below the bar. */
 function layoutContent() {
@@ -301,7 +431,13 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // Chromium slows a hidden window's timers to one tick a minute, which
+      // is the right default and ruinous here: the operator room polls every
+      // three seconds, and the whole point of the tray is that the window is
+      // hidden while it does.  Throttled, a knock would surface up to a
+      // minute late -- long after the person gave up.
+      backgroundThrottling: false,
     }
   });
   mainWindow.contentView.addChildView(contentView);
@@ -315,6 +451,30 @@ function createWindow() {
   for (const event of ['did-navigate', 'did-navigate-in-page', 'did-finish-load'])
     contentView.webContents.on(event, sendBarState);
   mainWindow.webContents.on('did-finish-load', sendBarState);
+
+  // Duty belongs to the page doing it, so it ends when that page goes.  Only
+  // a real navigation counts: an in-page one is the dashboard still being the
+  // dashboard.
+  contentView.webContents.on('did-start-navigation', (_e, _url, _f, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) clearDuty();
+  });
+
+  // The close button puts the app away rather than ending it, so that the
+  // operator room it is holding open keeps being held open.  "Away" has to
+  // be somewhere findable: the tray icon is the app's only remaining face,
+  // and the first time this happens it says so out loud.
+  mainWindow.on('close', (e) => {
+    if (quitting || config.minimizeToTray === false || !tray) return;
+    e.preventDefault();
+    mainWindow.hide();
+    if (!config.trayHintShown) {
+      config = { ...config, trayHintShown: true };
+      saveConfig(config);
+      tray.hint('SOZVON продолжает работать',
+                'Приложение свернулось в трей и покажет, когда кто-то ' +
+                'постучится. Выйти совсем — правая кнопка по значку.');
+    }
+  });
 
   // A server installed with the self-signed TLS mode presents a certificate
   // no authority vouches for.  We accept exactly the certificate whose
@@ -463,18 +623,70 @@ function buildMenu() {
   ]);
 }
 
-app.whenReady().then(() => {
-  // Before the window exists, so its very first paint is the right colour.
-  applyTheme(config.theme);
-  Menu.setApplicationMenu(buildMenu());
-  createWindow();
+// An app that lives in the tray must be one app.  Started a second time --
+// from the Start menu, from a shortcut, by the system at login while it is
+// already running -- the newcomer hands the window over to the copy that is
+// already on duty and leaves, rather than raising a second one whose idea of
+// who is knocking disagrees with the first.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => showWindow());
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  app.whenReady().then(() => {
+    // Before the window exists, so its very first paint is the right colour.
+    applyTheme(config.theme);
+    Menu.setApplicationMenu(buildMenu());
+    createWindow();
+
+    tray = createTray({
+      iconPath: ICON_PATH,
+      getConfig: () => config,
+      setConfig: (patch) => {
+        config = { ...config, ...patch };
+        saveConfig(config);
+      },
+      getDuty: () => duty,
+      showWindow,
+      openHub,
+      setAutoStart,
+      quit: () => {
+        quitting = true;
+        app.quit();
+      },
+    });
+
+    // Keep the system's idea of our startup entry in step with ours: the
+    // shortcut can be removed from Task Manager's Startup tab, and a
+    // checkbox that then still claims to be on is a lie about the one thing
+    // this setting is for.
+    try {
+      const live = app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin;
+      if (live !== !!config.autoStart) {
+        config = { ...config, autoStart: live };
+        saveConfig(config);
+        refreshTray();
+      }
+    } catch { /* not a platform with login items */ }
+
+    // Started by the system at login: go to the tray, and let the operator
+    // get on with logging in.
+    if (process.argv.includes('--hidden') && config.minimizeToTray !== false)
+      mainWindow.hide();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
+}
+
+app.on('before-quit', () => { quitting = true; });
 
 app.on('window-all-closed', () => {
+  // With the tray holding the app open there is no window left to close it:
+  // quitting here would undo the hiding we just did.
+  if (tray && config.minimizeToTray !== false && !quitting) return;
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -559,6 +771,11 @@ ipcMain.handle('servers:rename', (_e, { url, name }) => {
 });
 
 ipcMain.handle('group:back-to-launcher', () => showLauncher());
+
+// The client saying "this page is an operator room".  It is the only way the
+// app can know: a hub is an ordinary group as far as the address goes, and
+// only the server decides which groups are hubs.
+ipcMain.handle('app:set-hub', (_e, name) => setHub(name));
 
 ipcMain.handle('app:reset-login', () => resetLogin());
 
