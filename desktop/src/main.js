@@ -2,6 +2,8 @@ const { app, BrowserWindow, WebContentsView, session, ipcMain, Menu, shell, nati
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { createTray } = require('./tray');
+const { createKnocks } = require('./knocks');
 
 const ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.ico');
 const ICON_PNG_PATH = path.join(__dirname, '..', 'assets', 'icon.png');
@@ -19,7 +21,18 @@ const DEFAULT_CONFIG = {
   // the launcher, which is shown before any server page has had a chance to
   // report anything, opens in the right one.
   theme: 'system',
-  // Every server this client has been to: {url, name, lastGroup, rooms[]}.
+  // Closing the window puts the app in the tray instead of ending it, so a
+  // knock still reaches the operator afterwards.  Off, and the app behaves
+  // like any other window -- and hears nothing once it is shut.
+  minimizeToTray: true,
+  // Start with Windows, in the tray.  Off by default: an app that adds
+  // itself to your startup unasked is a liberty, and the tray menu is where
+  // it gets asked.
+  autoStart: false,
+  // Whether the "it is still running down here" balloon has been shown.  It
+  // is an explanation, and an explanation repeated is a nag.
+  trayHintShown: false,
+  // Every server this client has been to: {url, name, hub, lastGroup, rooms[]}.
   // serverUrl/lastGroup/recentGroups are kept in step with the most recent
   // one, so a config written by an older build still opens, and one written
   // here still works if the user goes back to it.
@@ -92,6 +105,23 @@ let mainWindow = null;
 // The layer below the app bar, holding whatever page the app is showing.
 let contentView = null;
 let config = loadConfig();
+let tray = null;
+
+// Set once the user has actually asked to leave, so the close button can mean
+// "put it away" without making the app impossible to end.
+let quitting = false;
+
+/**
+ * Whether anyone would hear a knock right now.
+ *
+ * Duty is not a mode the app enters; it is a fact about the page in the
+ * window -- the operator room is open, so its three-second poll is running
+ * and knocks are arriving.  Derived from what the page reports rather than
+ * remembered here, because a state kept in parallel with the truth is a
+ * state that eventually disagrees with it, and this one would disagree by
+ * claiming to be watching when it is not.
+ */
+let duty = { onDuty: false, hub: null, knocks: 0 };
 
 // The two window backgrounds, which are --bg from the web client's palette.
 // This is the colour Electron paints before a page has rendered anything, so
@@ -190,6 +220,186 @@ nativeTheme.on('updated', () => {
   repaintChrome();
   sendBarState();
 });
+
+// ------------------------------------------------------------------ duty ---
+
+/** Bring the window back from wherever it went: the tray, or behind things. */
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/**
+ * The server whose operator room we know about, most recent first.
+ *
+ * The name is learnt by going there once: the client reports it over the
+ * bridge when it puts up the dashboard.  Nothing here guesses -- a server
+ * with no operator room must not be offered as a place to stand watch.
+ */
+function hubEntry() {
+  return (config.servers || []).find(s => s && s.url && s.hub) || null;
+}
+
+/** Open the operator room, from the tray or from a window that is elsewhere. */
+function openHub() {
+  const entry = hubEntry();
+  if (!entry || !contentView) return;
+  const base = String(entry.url).replace(/\/+$/, '');
+  rememberServer(base, '');
+  saveConfig(config);
+  contentView.webContents.loadURL(
+    `${base}/group/${encodeURIComponent(entry.hub)}/`);
+  showWindow();
+}
+
+/**
+ * Remember which page is the operator room, and that we are on it.
+ *
+ * Called from the bridge when the client raises the dashboard, which is also
+ * the moment its poll starts -- so this is duty beginning, reported by the
+ * only party that can tell.
+ *
+ * @param {string} name - the hub's group name
+ */
+function setHub(name) {
+  const hub = String(name || '').trim();
+  if (!hub) return;
+  let origin;
+  try {
+    origin = new URL(contentView.webContents.getURL()).origin;
+  } catch {
+    return;
+  }
+  const entry = (config.servers || []).find(s => sameServer(s.url, origin));
+  if (entry && entry.hub !== hub) {
+    entry.hub = hub;
+    saveConfig(config);
+  }
+  duty = { ...duty, onDuty: true, hub };
+  refreshTray();
+}
+
+/**
+ * Duty ends with the page that was doing it.  Any navigation of the content
+ * layer drops it; the next dashboard to load reports itself and sets it
+ * again.  The hub's *name* survives, because it is a fact about the server
+ * rather than about this moment.
+ */
+function clearDuty() {
+  if (!duty.onDuty) return;
+  duty = { ...duty, onDuty: false };
+  refreshTray();
+}
+
+function refreshTray() {
+  if (tray) tray.refresh();
+}
+
+// --------------------------------------------------------------- knocks ---
+
+/**
+ * Everyone currently waiting to be let in, as the page told us about them.
+ *
+ * Kept here rather than in the notification windows because a notification is
+ * a view of a knock, not the knock itself: it is taken down when the operator
+ * looks at the app and put back when they look away, and neither of those is
+ * the person at the door giving up.
+ *
+ * @type {Map<string, {knock: Object, dismissed: boolean}>}
+ */
+const outstanding = new Map();
+let knocks = null;
+
+/** Is the app the window the user is actually looking at? */
+function appHasTheirAttention() {
+  return !!(mainWindow && !mainWindow.isDestroyed() &&
+            mainWindow.isVisible() && mainWindow.isFocused());
+}
+
+/**
+ * Show or take down the notifications, according to whether the app is the
+ * window in front.
+ *
+ * A notification above other windows is for when Sozvon is not the window in
+ * front.  When it is, the client's own toast is already on screen, an inch
+ * from the cursor, and a second copy of it floating over the app would be
+ * noise -- so they go away on focus and come back on blur, for as long as
+ * the person is still waiting.
+ *
+ * One that was closed by hand stays closed: it was not answered, but it was
+ * seen, and showing it again every time the operator glances at another
+ * window is nagging rather than notifying.
+ */
+function syncKnockWindows() {
+  if (!knocks) return;
+  if (appHasTheirAttention()) {
+    knocks.dismissAll();
+    return;
+  }
+  for (const entry of outstanding.values()) {
+    if (!entry.dismissed) knocks.show(entry.knock);
+  }
+}
+
+/** A knock the client is offering us. */
+function knockArrived(knock) {
+  if (!knock || !knock.key) return;
+  const before = outstanding.get(knock.key);
+  outstanding.set(knock.key, {
+    knock,
+    // A refreshed knock -- another name joining the same queue -- is new
+    // information, so a notification closed before this is owed again.
+    dismissed: before ? before.dismissed && before.knock.text === knock.text
+                      : false,
+  });
+  duty = { ...duty, knocks: outstanding.size };
+  syncKnockWindows();
+  refreshTray();
+}
+
+/** Admitted, denied, or the person gave up: it is over wherever it happened. */
+function knockGone(key) {
+  if (!key) return;
+  outstanding.delete(key);
+  if (knocks) knocks.dismiss(key);
+  duty = { ...duty, knocks: outstanding.size };
+  refreshTray();
+}
+
+/** Nobody is knocking at a page we have navigated away from. */
+function knocksClear() {
+  outstanding.clear();
+  if (knocks) knocks.dismissAll();
+  duty = { ...duty, knocks: 0 };
+  refreshTray();
+}
+
+/**
+ * Start with Windows, or stop doing so.
+ *
+ * The extra argument is what makes it bearable: started by the system, the
+ * app goes straight to the tray instead of throwing a window at somebody who
+ * was trying to log in.
+ *
+ * @param {boolean} on
+ */
+function setAutoStart(on) {
+  config = { ...config, autoStart: !!on };
+  saveConfig(config);
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: !!on,
+      args: ['--hidden'],
+    });
+  } catch (e) {
+    console.error('setLoginItemSettings failed:', e);
+  }
+}
 
 /** The content layer fills the window below the bar. */
 function layoutContent() {
@@ -301,7 +511,13 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // Chromium slows a hidden window's timers to one tick a minute, which
+      // is the right default and ruinous here: the operator room polls every
+      // three seconds, and the whole point of the tray is that the window is
+      // hidden while it does.  Throttled, a knock would surface up to a
+      // minute late -- long after the person gave up.
+      backgroundThrottling: false,
     }
   });
   mainWindow.contentView.addChildView(contentView);
@@ -315,6 +531,42 @@ function createWindow() {
   for (const event of ['did-navigate', 'did-navigate-in-page', 'did-finish-load'])
     contentView.webContents.on(event, sendBarState);
   mainWindow.webContents.on('did-finish-load', sendBarState);
+
+  // Duty belongs to the page doing it, so it ends when that page goes.  Only
+  // a real navigation counts: an in-page one is the dashboard still being the
+  // dashboard.
+  contentView.webContents.on('did-start-navigation', (e) => {
+    if (e.isMainFrame && !e.isSameDocument) {
+      clearDuty();
+      // The page that knew about these knocks is gone, and with it any
+      // chance of acting on them: a live Admit button for a room we have
+      // left is worse than no button.
+      knocksClear();
+    }
+  });
+
+  // The notifications exist for the time the app is not the window in front,
+  // so they follow that exactly -- including the window being put away in
+  // the tray, which fires neither focus nor blur.
+  for (const event of ['focus', 'blur', 'show', 'hide', 'minimize', 'restore'])
+    mainWindow.on(event, syncKnockWindows);
+
+  // The close button puts the app away rather than ending it, so that the
+  // operator room it is holding open keeps being held open.  "Away" has to
+  // be somewhere findable: the tray icon is the app's only remaining face,
+  // and the first time this happens it says so out loud.
+  mainWindow.on('close', (e) => {
+    if (quitting || config.minimizeToTray === false || !tray) return;
+    e.preventDefault();
+    mainWindow.hide();
+    if (!config.trayHintShown) {
+      config = { ...config, trayHintShown: true };
+      saveConfig(config);
+      tray.hint('SOZVON продолжает работать',
+                'Приложение свернулось в трей и покажет, когда кто-то ' +
+                'постучится. Выйти совсем — правая кнопка по значку.');
+    }
+  });
 
   // A server installed with the self-signed TLS mode presents a certificate
   // no authority vouches for.  We accept exactly the certificate whose
@@ -463,18 +715,104 @@ function buildMenu() {
   ]);
 }
 
-app.whenReady().then(() => {
-  // Before the window exists, so its very first paint is the right colour.
-  applyTheme(config.theme);
-  Menu.setApplicationMenu(buildMenu());
-  createWindow();
+// An app that lives in the tray must be one app.  Started a second time --
+// from the Start menu, from a shortcut, by the system at login while it is
+// already running -- the newcomer hands the window over to the copy that is
+// already on duty and leaves, rather than raising a second one whose idea of
+// who is knocking disagrees with the first.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => showWindow());
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  app.whenReady().then(() => {
+    // Before the window exists, so its very first paint is the right colour.
+    applyTheme(config.theme);
+    Menu.setApplicationMenu(buildMenu());
+    createWindow();
+
+    knocks = createKnocks({
+      preload: path.join(__dirname, 'knock-preload.js'),
+      page: path.join(__dirname, 'renderer', 'knock.html'),
+      anchor: () => mainWindow,
+      onAction: (key, action) => {
+        if (contentView && !contentView.webContents.isDestroyed())
+          contentView.webContents.send('app:knock-action', { key, action });
+        // Admitting is joining: the operator has just decided to be in this
+        // call, so put them in front of it.  Denying is not -- they stay
+        // where they were.
+        if (action === 'admit') showWindow();
+      },
+      onDismiss: (key) => {
+        const entry = outstanding.get(key);
+        if (entry) entry.dismissed = true;
+      },
+    });
+
+    tray = createTray({
+      iconPath: ICON_PATH,
+      getConfig: () => config,
+      setConfig: (patch) => {
+        config = { ...config, ...patch };
+        saveConfig(config);
+      },
+      getDuty: () => duty,
+      showWindow,
+      openHub,
+      setAutoStart,
+      quit: () => {
+        quitting = true;
+        app.quit();
+      },
+    });
+
+    // Keep the system's idea of our startup entry in step with ours: the
+    // shortcut can be removed from Task Manager's Startup tab, and a
+    // checkbox that then still claims to be on is a lie about the one thing
+    // this setting is for.
+    try {
+      const live = app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin;
+      if (live !== !!config.autoStart) {
+        config = { ...config, autoStart: live };
+        saveConfig(config);
+        refreshTray();
+      }
+    } catch { /* not a platform with login items */ }
+
+    // Debug aid: SOZVON_KNOCK_DEMO=1 puts a knock on screen a few seconds in,
+    // so the notification's placement, wrapping and buttons can be worked on
+    // without a server, an operator account and somebody to knock.  Its
+    // buttons go nowhere -- there is no page to act on.
+    if (process.env.SOZVON_KNOCK_DEMO) {
+      setTimeout(() => {
+        knockArrived({
+          key: 'demo',
+          text: 'Иван Петров стучится — приём',
+          actions: [{ id: 'admit', label: 'Впустить и присоединиться',
+                      primary: true },
+                    { id: 'deny', label: 'Отклонить' }],
+        });
+      }, 3000);
+    }
+
+    // Started by the system at login: go to the tray, and let the operator
+    // get on with logging in.
+    if (process.argv.includes('--hidden') && config.minimizeToTray !== false)
+      mainWindow.hide();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
+}
+
+app.on('before-quit', () => { quitting = true; });
 
 app.on('window-all-closed', () => {
+  // With the tray holding the app open there is no window left to close it:
+  // quitting here would undo the hiding we just did.
+  if (tray && config.minimizeToTray !== false && !quitting) return;
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -559,6 +897,17 @@ ipcMain.handle('servers:rename', (_e, { url, name }) => {
 });
 
 ipcMain.handle('group:back-to-launcher', () => showLauncher());
+
+// The client saying "this page is an operator room".  It is the only way the
+// app can know: a hub is an ordinary group as far as the address goes, and
+// only the server decides which groups are hubs.
+ipcMain.handle('app:set-hub', (_e, name) => setHub(name));
+
+// Somebody is waiting in a lobby.  What the knock says and what may be done
+// about it were decided by the client, which is the side that knows; all we
+// are given is a sentence and the buttons to put under it.
+ipcMain.handle('app:knock', (_e, knock) => knockArrived(knock));
+ipcMain.handle('app:knock-gone', (_e, key) => knockGone(key));
 
 ipcMain.handle('app:reset-login', () => resetLogin());
 

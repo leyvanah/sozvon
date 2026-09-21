@@ -1135,6 +1135,123 @@ function reflectInCall(active) {
 }
 
 /**
+ * The host application, when this page is running inside one -- the Android
+ * app or the desktop app, both of which expose window.SozvonApp.
+ *
+ * @returns {any}
+ */
+function hostApp() {
+    return /** @type{any} */ (window).SozvonApp || null;
+}
+
+/**
+ * True when the host keeps this page working while it is off screen.
+ *
+ * The desktop app holds the operator room open behind a minimised window, or
+ * in a window of its own that is never shown, precisely so that a knock
+ * arrives when nobody is looking at the page -- which is the only time a
+ * notification is worth anything.  A browser tab, and the Android app, have
+ * no such arrangement: there "hidden" means the user left, and work done
+ * then is work done for nobody.  (Sozvon)
+ */
+function hostWorksHidden() {
+    let app = hostApp();
+    return !!(app && app.worksHidden);
+}
+
+/**
+ * Knocks handed to the host application, keyed the same way the host knows
+ * them.  The value is what to do when the user picks one of the buttons we
+ * offered with it.
+ *
+ * @type {Object<string, (action: string) => void>}
+ */
+let hostKnocks = {};
+let hostKnocksWired = false;
+
+/**
+ * Offer a lobby knock to the host application, so it can raise it above
+ * whatever the operator is actually looking at. (Sozvon)
+ *
+ * The division of labour: this page says what the knock *is* -- the sentence,
+ * already translated, and the buttons that make sense for it -- and the host
+ * decides only how to put that on screen.  That is the one thing a page
+ * cannot do for itself once it is minimised, and the only thing the host
+ * knows better than we do.  Everything else stays here, where the protocol,
+ * the language and the knocker's id already live: the host never learns that
+ * a knock in a room can be denied while one seen from the dashboard can only
+ * be joined, because it never has to.
+ *
+ * Best-effort throughout: a bridge that is absent, old or throwing must leave
+ * the in-page handling of the same knock untouched.
+ *
+ * @param {string} key - our own stable name for this knock
+ * @param {string} text - the sentence to show, translated
+ * @param {Array<{id: string, label: string, primary?: boolean}>} actions
+ * @param {(action: string) => void} handle - run when a button is pressed
+ */
+function hostKnock(key, text, actions, handle) {
+    let app = hostApp();
+    if(!app || typeof app.knock !== 'function')
+        return;
+    if(!hostKnocksWired && typeof app.onKnockAction === 'function') {
+        hostKnocksWired = true;
+        app.onKnockAction(function(k, action) {
+            let h = hostKnocks[k];
+            delete hostKnocks[k];
+            if(h)
+                h(action);
+        });
+    }
+    hostKnocks[key] = handle;
+    try {
+        app.knock({key: key, text: text, actions: actions});
+    } catch(e) {
+        delete hostKnocks[key];
+    }
+}
+
+/**
+ * Withdraw a knock from the host: it was admitted, denied, or the person
+ * gave up waiting.  Called from wherever the knock ends, so that a
+ * notification never outlives what it is about -- including when it was
+ * resolved somewhere else entirely, such as on a phone.
+ *
+ * @param {string} key
+ */
+function hostKnockGone(key) {
+    delete hostKnocks[key];
+    let app = hostApp();
+    if(!app || typeof app.knockGone !== 'function')
+        return;
+    try {
+        app.knockGone(key);
+    } catch(e) {
+        // ignore: the bridge is optional
+    }
+}
+
+/**
+ * Tell the host that this page is an operator hub.
+ *
+ * It is how the desktop app learns where duty lives on this server: which
+ * address to offer from the tray, and which one to hold open in the
+ * background once the operator has navigated into a call. (Sozvon)
+ *
+ * @param {string} name
+ */
+function hostHub(name) {
+    let app = hostApp();
+    if(!app || typeof app.setHub !== 'function')
+        return;
+    try {
+        app.setHub(name);
+    } catch(e) {
+        // ignore: the bridge is optional
+    }
+}
+
+/**
  * Shows and hides various UI elements depending on the protocol state.
  */
 function setButtonsVisibility() {
@@ -5453,6 +5570,11 @@ function clearKnocks() {
         if(toast)
             toast.hideToast();
     }
+    // The host's notifications are about this room too, and a notification
+    // that outlives the room it belongs to offers to admit somebody into a
+    // call we have already left. (Sozvon)
+    for(let key in hostKnocks)
+        hostKnockGone(key);
     refreshPanelAlert();
 }
 
@@ -5475,6 +5597,7 @@ function gotKnock(id, username, present) {
             delete knockToasts[id];
             toast.hideToast();
         }
+        hostKnockGone('room:' + id);
         // Admitted, denied or gone: if the dot was about them, it stops now,
         // whether or not the panel was ever opened.  (Sozvon)
         refreshPanelAlert();
@@ -5492,6 +5615,19 @@ function gotKnock(id, username, present) {
 
     // new knock arrived — play the notification sound (best-effort)
     playKnockSound();
+
+    // Same knock, offered to the host app: an operator who is in this call
+    // with the window behind something else gets it on top of whatever that
+    // is, with the same two buttons. (Sozvon)
+    hostKnock('room:' + id,
+              Sozvon.i18n.t('toast.askingToJoin',
+                            {who: username || Sozvon.i18n.t('toast.someone')}),
+              [{id: 'admit', label: Sozvon.i18n.t('knock.admit'), primary: true},
+               {id: 'deny', label: Sozvon.i18n.t('knock.deny')}],
+              function(action) {
+                  if(action === 'admit' || action === 'deny')
+                      serverConnection.userAction(action, id);
+              });
 
     let knock = document.createElement('div');
     knock.id = 'knock-' + id;
@@ -5791,6 +5927,11 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
             // Operator hub: show the management dashboard instead of the call
             // UI and request no media.  Returning here skips the media/subscribe
             // block below (the operator only takes calls inside child rooms).
+            //
+            // Tell the host app first: this is how the desktop app finds out
+            // where duty lives on this server, and it should know that before
+            // the first knock rather than after it. (Sozvon)
+            hostHub(group);
             enterOperatorRoom();
             return;
         }
@@ -6314,8 +6455,14 @@ function enterOperatorRoom() {
     mintOperatorSession();
     renderOperatorRoom();
     pollOperatorRoom();
+    // Inside the desktop app the dashboard is what stands watch: the window
+    // is minimised to the tray, or the page is held open in a window that is
+    // never shown, and a poll that stops there stops the only thing that
+    // would have told the operator somebody is waiting.  Everywhere else
+    // "hidden" means the user is gone, and polling on is just battery.
+    // (Sozvon)
     operatorRoom.timer = window.setInterval(() => {
-        if(document.visibilityState === 'hidden')
+        if(document.visibilityState === 'hidden' && !hostWorksHidden())
             return;
         pollOperatorRoom();
     }, 3000);
@@ -6670,6 +6817,10 @@ function dismissOperatorKnockToast(childGroup) {
         delete operatorRoom.knockToasts[childGroup];
         toast.hideToast();
     }
+    // Unconditionally, not only when there was a toast to hide: this is the
+    // one place a dashboard knock ends, and the host's notification has to
+    // end with it. (Sozvon)
+    hostKnockGone('hub:' + childGroup);
 }
 
 /**
@@ -6691,6 +6842,20 @@ function operatorKnockToast(childGroup, names) {
     label.textContent = Sozvon.i18n.t('operator.knockToast',
         {who: who, room: childSlug(childGroup)});
     body.appendChild(label);
+
+    // The same offer, raised above the other windows by the host app when
+    // there is one.  Only "admit & join" here: seen from the hub we hold the
+    // knocker's name and nothing else, and denying takes the client id the
+    // child room has and we do not. (Sozvon)
+    hostKnock('hub:' + childGroup,
+              Sozvon.i18n.t('operator.knockToast',
+                            {who: who, room: childSlug(childGroup)}),
+              [{id: 'admit',
+                label: Sozvon.i18n.t('operator.admitJoin'), primary: true}],
+              function(action) {
+                  if(action === 'admit')
+                      operatorAdmitAndJoin(childGroup);
+              });
 
     let actions = document.createElement('span');
     actions.classList.add('knock-toast-actions');

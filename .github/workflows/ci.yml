@@ -114,7 +114,9 @@ jobs:
         working-directory: desktop
         run: |
           for f in src/main.js src/preload.js src/deploy/deployer.js \
+                   src/tray.js src/knocks.js src/knock-preload.js \
                    src/renderer/launcher.js src/renderer/deploy.js \
+                   src/renderer/knock.js \
                    scripts/test-deploy.js scripts/sync-installer.js; do
               node --check "$f"
           done
