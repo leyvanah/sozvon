@@ -172,6 +172,14 @@ function ServerConnection() {
      */
     this.onerror = null;
     /**
+     * onbeforeclose is called when the connection is lost, before its
+     * streams are closed, so that the application can note what it was
+     * sending and send it again over the next connection. (Sozvon)
+     *
+     * @type{(this: ServerConnection) => void}
+     */
+    this.onbeforeclose = null;
+    /**
      * onclose is called when the connection is closed
      *
      * @type{(this: ServerConnection, code: number, reason: string) => void}
@@ -328,37 +336,23 @@ ServerConnection.prototype.connect = function(url) {
 
     sc.socket = new WebSocket(url);
 
-    this.pingHandler = setInterval(() => {
-        if(!sc.lastServerMessage) {
-            sc.error(new Error('Timeout'));
-            return;
-        }
-        let d = new Date().valueOf() - sc.lastServerMessage;
-        if(d > 65000) {
-            sc.error(new Error('Timeout'));
-            return;
-        }
-        if(sc.version && d >= 15000)
-            sc.send({type: 'ping'});
-    }, 10000);
+    /**
+     * Whether this socket has been torn down.  We may give up on a socket
+     * before the browser reports it closed (see the ping handler), and the
+     * teardown must still happen exactly once. (Sozvon)
+     */
+    let closed = false;
 
-    this.socket.onerror = function(e) {
-        if(sc.onerror)
-            sc.onerror.call(sc, new Error('Socket error: ' + e));
-    };
-    this.socket.onopen = function(e) {
-        try {
-            sc.send({
-                type: 'handshake',
-                version: ['2'],
-                id: sc.id,
-            });
-        } catch(e) {
-            sc.error(e);
+    /**
+     * @param {number} code
+     * @param {string} reason
+     */
+    function gone(code, reason) {
+        if(closed)
             return;
-        }
-    };
-    this.socket.onclose = function(e) {
+        closed = true;
+        if(sc.onbeforeclose)
+            sc.onbeforeclose.call(sc);
         sc.permissions = [];
         for(let id in sc.up) {
             let c = sc.up[id];
@@ -382,9 +376,58 @@ ServerConnection.prototype.connect = function(url) {
             sc.pingHandler = null;
         }
         if(sc.onclose)
-            sc.onclose.call(sc, e.code, e.reason);
+            sc.onclose.call(sc, code, reason);
+    }
+
+    this.pingHandler = setInterval(() => {
+        if(!sc.lastServerMessage) {
+            sc.error(new Error('Timeout'));
+            return;
+        }
+        let d = new Date().valueOf() - sc.lastServerMessage;
+        // Sozvon: 50 s rather than 65, so that we give up at about the time
+        // the server does -- it drops a client after 45 s of silence, checked
+        // every 10 s.  Past that point our media is already gone on the
+        // server side, and every second spent waiting is dead air.
+        if(d > 50000) {
+            sc.error(new Error('Timeout'));
+            // Sozvon: a silent socket is usually a dead path rather than a
+            // closed one, and the browser does not report it closed until its
+            // closing handshake gives up, up to a minute later -- a minute of
+            // frozen call.  Tear down now; the late close event is ignored.
+            gone(1006, 'Timeout');
+            return;
+        }
+        if(sc.version && d >= 15000)
+            sc.send({type: 'ping'});
+    }, 10000);
+
+    this.socket.onerror = function(e) {
+        if(closed)
+            return;
+        if(sc.onerror)
+            sc.onerror.call(sc, new Error('Socket error: ' + e));
+    };
+    this.socket.onopen = function(e) {
+        try {
+            sc.send({
+                type: 'handshake',
+                version: ['2'],
+                id: sc.id,
+            });
+        } catch(e) {
+            sc.error(e);
+            return;
+        }
+    };
+    this.socket.onclose = function(e) {
+        gone(e.code, e.reason);
     };
     this.socket.onmessage = function(e) {
+        // Sozvon: a socket we gave up on may still deliver whatever was stuck
+        // in flight once the path recovers; it belongs to a torn-down session.
+        if(closed)
+            return;
         let m;
         try {
             m = JSON.parse(e.data);
