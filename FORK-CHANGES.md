@@ -870,6 +870,31 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     installed by the deploy wizard is added to the list instead of replacing
     the one already there, and a configuration written by an earlier build is
     migrated into the list on first load.
+  * **Electron 44** (Chromium 152). Electron 32 was Chromium 128, which has no
+    `RTCRtpScriptTransform`; the client correctly concluded it could not
+    encrypt, and every room with `require-e2ee` refused the desktop app while
+    the same call from Chrome went through.
+  * **On duty in the tray.** The close button hides the window instead of
+    quitting (switchable), the app can start with Windows straight into the
+    tray (off by default), and a single-instance lock hands a second launch to
+    the copy already running. The tray menu says whether anyone would hear a
+    knock right now, and offers the operator room. Duty is derived from the
+    page, not remembered: the client reports the operator dashboard over the
+    bridge (`setHub`) and any navigation ends it. `backgroundThrottling` is off
+    for the content layer, or a hidden window's timers drop to one tick a
+    minute and the dashboard's three-second poll with them.
+  * **Knocks above other windows.** The web client hands each lobby knock to
+    the host (`SozvonApp.knock` / `knockGone` / `onKnockAction`) as a
+    translated sentence plus the buttons that make sense for it — "admit &
+    join" from the dashboard, admit/deny inside a room — and the app shows it
+    in a small always-on-top window of its own (level `screen-saver`, so above
+    full-screen video), shown inactive so it never takes the keyboard. It
+    exists only while the app is not the window in front, ends when the knock
+    ends wherever that happened, and stays closed once closed by hand. The
+    client keeps polling while hidden only when the host says `worksHidden`;
+    in a browser tab hidden still means the user left. Not yet: knocks at
+    other rooms while the operator is inside a call — that needs a second,
+    background connection to the hub.
 
 ### Operations / self-hosting
 
