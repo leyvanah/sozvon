@@ -1,141 +1,154 @@
+**English** · [Русский](README.ru.md)
+
 # Sozvon Desktop
 
-Десктопное приложение для Sozvon — самохостящегося WebRTC-сервиса
-видеоконференций (форк [Galène](https://galene.org)). Живёт в том же
-репозитории, что и сервер, рядом с [android/](../android/README.md).
+The desktop app for Sozvon, a self-hosted WebRTC video conferencing service
+(a fork of [Galène](https://galene.org)). It lives in the same repository as
+the server, next to [android/](../android/README.md).
 
-Сборка настроена под Windows (NSIS-установщик); Electron кроссплатформенный,
-но цели для macOS и Linux ещё не добавлены.
+The build targets Windows (an NSIS installer). Electron is cross-platform, but
+macOS and Linux targets have not been added yet.
 
-Electron-приложение: окно с веб-клиентом Sozvon, лаунчер для выбора сервера и
-комнаты — и мастер, который развернёт Sozvon на вашем VPS по SSH, если сервера
-ещё нет.
+An Electron app: a window onto the Sozvon web client, a launcher for picking a
+server and a room, and a wizard that deploys Sozvon to your VPS over SSH if you
+do not have a server yet.
 
-## Развёртывание сервера из приложения
+## Deploying a server from the app
 
-На стартовом экране есть ссылка «Развернуть свой на VPS». Мастер спрашивает
-адрес сервера, доступ по SSH (пароль или ключ) и режим TLS, после чего ставит
-Sozvon на чистый Debian/Ubuntu.
+The start screen has a "Deploy your own on a VPS" link. The wizard asks for the
+server's address, SSH access (password or key) and a TLS mode, then installs
+Sozvon on a clean Debian/Ubuntu.
 
-Как это устроено — важно для понимания границ ответственности:
+How it works, which matters for knowing where responsibility lies:
 
-- Приложение **не** реализует установку само. Оно передаёт на сервер
-  `resources/install.sh` — тот же скрипт, что человек запускает руками из
-  репозитория Sozvon, — и запускает его. Логика установки живёт в одном месте
-  и тестируется отдельно от приложения.
-- Установка идёт **отсоединённым процессом** на сервере. Приложение опрашивает
-  `/var/lib/sozvon-install/state.json`, а не держит открытой SSH-сессию, поэтому
-  разрыв связи (закрыли ноутбук, сменилась сеть) установку не прерывает —
-  приложение переподключится и продолжит следить.
-- **Ключ хоста проверяется явно.** При первом подключении показывается
-  отпечаток; изменившийся ключ показывается отдельным предупреждением со
-  старым значением. Молча принимать ключ нельзя: тот, кто вклинится в
-  соединение, получит root на вашем сервере.
-- **Пароль SSH нигде не сохраняется.** Он нужен только на время установки;
-  дальше приложение общается с сервером по HTTPS. Пароль оператора передаётся
-  установщику через переменную окружения, а не через командную строку, —
-  `/proc/<pid>/cmdline` читается любым пользователем системы.
+- The app does **not** implement the installation itself. It uploads
+  `resources/install.sh` to the server — the same script a person runs by hand
+  from the Sozvon repository — and runs it. The installation logic lives in one
+  place and is tested separately from the app.
+- The installation runs as a **detached process** on the server. The app polls
+  `/var/lib/sozvon-install/state.json` instead of holding an SSH session open,
+  so a dropped connection (the laptop lid closed, the network changed) does not
+  interrupt the install — the app reconnects and carries on watching.
+- **The host key is checked explicitly.** On first connection the fingerprint
+  is shown; a changed key is shown as a separate warning, with the old value.
+  Silently accepting a key is not an option: whoever sits in the middle of the
+  connection would get root on your server.
+- **The SSH password is never stored.** It is needed only for the duration of
+  the install; after that the app talks to the server over HTTPS. The operator
+  password reaches the installer through an environment variable, not the
+  command line — `/proc/<pid>/cmdline` is readable by every user on the system.
 
-Режимы TLS (все три доступны на выбор):
+TLS modes (all three are available):
 
-| Режим | Что делает | Когда нужен |
+| Mode | What it does | When you need it |
 |---|---|---|
-| sslip.io + Let's Encrypt | Имя выводится из IP сервера, сертификат настоящий | Нет домена, но нужно, чтобы работало в браузере |
-| Свой домен | A-запись домена указывает на сервер | Домен есть; вариант без сторонних сервисов |
-| Самоподписанный | Сертификат генерируется на месте | Нет ни домена, ни доступа к Let's Encrypt. Браузеры откажут — работать будет только приложение |
+| sslip.io + Let's Encrypt | The name is derived from the server's IP; the certificate is real | No domain, but it has to work in a browser |
+| Own domain | The domain's A record points at the server | You have a domain; the option with no third-party services |
+| Self-signed | The certificate is generated on the spot | Neither a domain nor access to Let's Encrypt. Browsers will refuse — only the app will work |
 
-Установщик **не дублируется**: единственный источник — `contrib/install.sh` в
-корне репозитория. `npm start` и `npm run dist` перед запуском вызывают
-`scripts/sync-installer.js`, который кладёт копию в `resources/` (там её
-забирает electron-builder); сама копия в git не хранится. При запуске из
-исходников копии может не быть — тогда приложение читает `contrib/install.sh`
-напрямую.
+The installer is **not duplicated**: the single source is `contrib/install.sh`
+at the repository root. `npm start` and `npm run dist` first run
+`scripts/sync-installer.js`, which copies it into `resources/` (where
+electron-builder picks it up); the copy is not kept in git. When running from
+source the copy may be missing — the app then reads `contrib/install.sh`
+directly.
 
-## Дежурство и стук поверх окон
+## On duty in the tray, knocks above other windows
 
-Приложение рассчитано на то, что оператор занят чем-то другим, пока ждёт
-клиентов:
+The app assumes the operator is busy with something else while waiting for
+clients. (The app's own interface — launcher, tray — is in Russian for now;
+the labels below are translated. The web client inside it speaks both.)
 
-- **Крестик прячет окно в трей**, а не закрывает приложение. Меню значка в
-  трее отвечает на главный вопрос — услышу ли я стук прямо сейчас («На
-  дежурстве» / «Не на дежурстве» / «Стучатся: N») — и содержит две настройки:
-  «Сворачивать в трей» и «Запускать вместе с Windows» (запуск сразу в трей).
-  Совсем выйти — «Выйти из Sozvon» там же.
-- **Дежурство — это открытая операторская.** Пока в приложении открыт дашборд
-  операторской (пусть даже окно свёрнуто в трей), он раз в 3 секунды
-  опрашивает дочерние комнаты. Приложение узнаёт операторскую от самого
-  клиента и запоминает её для сервера, так что «Заступить на дежурство» в трее
-  работает и после того, как окно ушло в другое место.
-- **Стук показывается окном поверх всех остальных** — в правом нижнем углу,
-  над полноэкранным видео, не забирая клавиатуру. Кнопки те же, что в самом
-  клиенте: из операторской — «Впустить и присоединиться» (окно приложения
-  разворачивается сразу в комнату), внутри комнаты — «Впустить» /
-  «Отклонить». Уведомление видно, только пока приложение не на переднем плане,
-  исчезает, когда стук разрешился где угодно (хоть с телефона), и не
-  возвращается, если его закрыли крестиком.
+- **The close button hides the window in the tray** instead of quitting. The
+  tray icon's menu answers the one question that matters — would I hear a
+  knock right now ("On duty" / "Not on duty" / "Knocking: N") — and holds two
+  settings: "Minimise to tray" and "Start with Windows" (starting straight into
+  the tray). "Quit Sozvon", to really leave, is there too.
+- **Being on duty means having the operator room open.** While the operator
+  dashboard is open in the app (even with the window hidden in the tray), it
+  polls the child rooms every 3 seconds. The app learns which group is the
+  operator room from the client itself and remembers it per server, so
+  "Go on duty" in the tray works even after the window has gone elsewhere.
+- **A knock is shown in a window above all others** — in the bottom-right
+  corner, above full-screen video, without taking the keyboard. The buttons are
+  the client's own: from the operator room, "Admit & join" (the app window comes
+  forward straight into the room); inside a room, "Admit" / "Deny". The
+  notification is visible only while the app is not the window in front,
+  disappears once the knock is resolved anywhere (a phone included), and does
+  not come back once closed with its × button.
 
-Пока не умеет: показывать стук в *другие* комнаты, когда оператор уже
-внутри звонка, — для этого нужно отдельное фоновое соединение с операторской.
+Not yet: showing knocks at *other* rooms while the operator is already in a
+call — that needs a separate background connection to the operator room.
 
-Что говорит стук и какие у него кнопки, решает веб-клиент (`hostKnock` в
-`static/galene.js`): он присылает готовую переведённую фразу и список кнопок,
-приложение лишь рисует их и сообщает, какая нажата.
+What a knock says and which buttons it has is decided by the web client
+(`hostKnock` in `static/galene.js`): it sends a ready, translated sentence and
+a list of buttons; the app only draws them and reports which one was pressed.
 
-Для работы над окном уведомления без сервера: `SOZVON_KNOCK_DEMO=1 npm start`
-покажет пример стука через три секунды.
+To work on the notification window without a server:
+`SOZVON_KNOCK_DEMO=1 npm start` shows a sample knock three seconds in.
 
-## Разработка
+## Development
 
-Требуется Node.js 20+.
+Requires Node.js 20+.
 
 ```sh
 npm install
 npm start
 ```
 
-## Сборка инсталлятора
+## Building the installer
 
 ```sh
 npm run dist
 ```
 
-Результат — в `dist/`.
+The result is in `dist/`.
 
-## Конфигурация
+On Windows without the right to create symbolic links, electron-builder fails
+unpacking its `winCodeSign` tools (the archive carries macOS symlinks). Extract
+the archive from `%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\` into a
+folder named `winCodeSign-2.6.0` next to it once, ignoring the two symlink
+errors, and the build goes through.
 
-Хранится в `%APPDATA%/sozvon-desktop/config.json` и редактируется через стартовый экран. Поля:
+## Configuration
 
-- `servers` — сохранённые серверы, по одному объекту на сервер:
-  `{"url": "…", "name": "Клиника", "lastGroup": "…", "rooms": ["…"]}`. Список
-  ведёт стартовый экран: сервер попадает сюда при подключении и при
-  развёртывании через мастер, самый свежий — первым (не более 20). Развёрнутый
-  сервер **добавляется**, а не затирает предыдущий.
-- `serverUrl` — базовый URL сервера Sozvon, например `https://sozvon.example.com:8443`.
-  Дублирует первый элемент `servers`; сохраняется ради конфигов, написанных
-  прежними сборками.
-- `lastGroup` — имя последней открытой комнаты.
-- `allowInsecureCerts` — разрешить самоподписанные TLS-сертификаты (нужен перезапуск).
-- `recentGroups` — список недавних комнат первого сервера из `servers` (сами
-  списки комнат живут внутри записей `servers`, по одному на сервер).
-- `knownHosts` — принятые SSH-ключи серверов, `"хост:порт": "SHA256:…"`.
-  Удалите запись, чтобы приложение снова спросило подтверждение.
-- `pinnedCerts` — закреплённые TLS-сертификаты, `"хост": "<sha256 hex>"`.
-  Заполняется автоматически при развёртывании с самоподписанным
-  сертификатом. Для такого хоста приложение принимает **только** этот
-  сертификат, изменившийся — отвергает.
-- `allowInsecureCerts` — аварийный обход: принимать любой сертификат для
-  хостов, у которых закреплённого **нет**. Небезопасно, оставлено для ручной
-  отладки.
+Stored in `%APPDATA%/sozvon-desktop/config.json` and edited from the start
+screen and the tray menu. Fields:
 
-## Проверка развёртывания без сборки приложения
+- `servers` — saved servers, one object per server:
+  `{"url": "…", "name": "Clinic", "hub": "…", "lastGroup": "…", "rooms": ["…"]}`.
+  The start screen keeps the list: a server lands here when you connect to it
+  and when the wizard deploys it, most recent first (at most 20). A deployed
+  server is **added**, not written over the previous one. `hub` is the
+  server's operator room, as reported by the client.
+- `serverUrl` — the base URL of a Sozvon server, e.g.
+  `https://sozvon.example.com:8443`. Duplicates the first entry of `servers`;
+  kept for configs written by earlier builds.
+- `lastGroup` — the name of the last room opened.
+- `recentGroups` — recent rooms of the first server in `servers` (the room
+  lists themselves live inside the `servers` entries, one per server).
+- `theme` — `system`, `light` or `dark`, as chosen in the web client.
+- `minimizeToTray` — the close button hides the window in the tray (default
+  on).
+- `autoStart` — start with Windows, straight into the tray (default off).
+- `knownHosts` — accepted SSH host keys, `"host:port": "SHA256:…"`. Delete an
+  entry to make the app ask again.
+- `pinnedCerts` — pinned TLS certificates, `"host": "<sha256 hex>"`. Filled in
+  automatically when deploying with a self-signed certificate. For such a host
+  the app accepts **only** that certificate and rejects a changed one.
+- `allowInsecureCerts` — an emergency bypass: accept any certificate for hosts
+  that have **no** pin. Unsafe; kept for manual debugging. Changing it restarts
+  the app.
 
-Логика развёртывания вынесена в `src/deploy/deployer.js` и не зависит от
-Electron, поэтому её можно прогнать обычным Node против одноразового сервера:
+## Testing a deployment without building the app
+
+The deployment logic is in `src/deploy/deployer.js` and does not depend on
+Electron, so it can be run with plain Node against a throwaway server:
 
 ```sh
 node scripts/test-deploy.js --host 203.0.113.10 --password ... --tls self-signed
 ```
 
-## Лицензия
+## Licence
 
 MIT.
