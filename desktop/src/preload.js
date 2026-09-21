@@ -62,6 +62,17 @@ contextBridge.exposeInMainWorld('SozvonApp', {
   // operator dashboard.  Lets the tray offer it later, from a window that
   // has since gone somewhere else entirely.
   setHub: (name) => ipcRenderer.invoke('app:set-hub', name),
+  // A lobby knock, offered to the app so it can raise it above whatever the
+  // operator is actually looking at.  The payload is {key, text, actions} --
+  // a sentence the client has already translated and the buttons that make
+  // sense for this knock; the app draws them and says which was pressed,
+  // without being told what any of it means.
+  knock: (knock) => ipcRenderer.invoke('app:knock', knock),
+  knockGone: (key) => ipcRenderer.invoke('app:knock-gone', key),
+  onKnockAction: (fn) => {
+    ipcRenderer.removeAllListeners('app:knock-action');
+    ipcRenderer.on('app:knock-action', (_e, m) => fn(m.key, m.action));
+  },
   // Light or dark, so the window and the launcher match the page rather than
   // framing a light client in a dark shell.  What arrives is the preference
   // -- 'system', 'light' or 'dark' -- not the theme it resolved to, which is

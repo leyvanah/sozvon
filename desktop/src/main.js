@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { createTray } = require('./tray');
+const { createKnocks } = require('./knocks');
 
 const ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.ico');
 const ICON_PNG_PATH = path.join(__dirname, '..', 'assets', 'icon.png');
@@ -299,6 +300,85 @@ function refreshTray() {
   if (tray) tray.refresh();
 }
 
+// --------------------------------------------------------------- knocks ---
+
+/**
+ * Everyone currently waiting to be let in, as the page told us about them.
+ *
+ * Kept here rather than in the notification windows because a notification is
+ * a view of a knock, not the knock itself: it is taken down when the operator
+ * looks at the app and put back when they look away, and neither of those is
+ * the person at the door giving up.
+ *
+ * @type {Map<string, {knock: Object, dismissed: boolean}>}
+ */
+const outstanding = new Map();
+let knocks = null;
+
+/** Is the app the window the user is actually looking at? */
+function appHasTheirAttention() {
+  return !!(mainWindow && !mainWindow.isDestroyed() &&
+            mainWindow.isVisible() && mainWindow.isFocused());
+}
+
+/**
+ * Show or take down the notifications, according to whether the app is the
+ * window in front.
+ *
+ * A notification above other windows is for when Sozvon is not the window in
+ * front.  When it is, the client's own toast is already on screen, an inch
+ * from the cursor, and a second copy of it floating over the app would be
+ * noise -- so they go away on focus and come back on blur, for as long as
+ * the person is still waiting.
+ *
+ * One that was closed by hand stays closed: it was not answered, but it was
+ * seen, and showing it again every time the operator glances at another
+ * window is nagging rather than notifying.
+ */
+function syncKnockWindows() {
+  if (!knocks) return;
+  if (appHasTheirAttention()) {
+    knocks.dismissAll();
+    return;
+  }
+  for (const entry of outstanding.values()) {
+    if (!entry.dismissed) knocks.show(entry.knock);
+  }
+}
+
+/** A knock the client is offering us. */
+function knockArrived(knock) {
+  if (!knock || !knock.key) return;
+  const before = outstanding.get(knock.key);
+  outstanding.set(knock.key, {
+    knock,
+    // A refreshed knock -- another name joining the same queue -- is new
+    // information, so a notification closed before this is owed again.
+    dismissed: before ? before.dismissed && before.knock.text === knock.text
+                      : false,
+  });
+  duty = { ...duty, knocks: outstanding.size };
+  syncKnockWindows();
+  refreshTray();
+}
+
+/** Admitted, denied, or the person gave up: it is over wherever it happened. */
+function knockGone(key) {
+  if (!key) return;
+  outstanding.delete(key);
+  if (knocks) knocks.dismiss(key);
+  duty = { ...duty, knocks: outstanding.size };
+  refreshTray();
+}
+
+/** Nobody is knocking at a page we have navigated away from. */
+function knocksClear() {
+  outstanding.clear();
+  if (knocks) knocks.dismissAll();
+  duty = { ...duty, knocks: 0 };
+  refreshTray();
+}
+
 /**
  * Start with Windows, or stop doing so.
  *
@@ -456,8 +536,20 @@ function createWindow() {
   // a real navigation counts: an in-page one is the dashboard still being the
   // dashboard.
   contentView.webContents.on('did-start-navigation', (_e, _url, _f, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) clearDuty();
+    if (isMainFrame && !isInPlace) {
+      clearDuty();
+      // The page that knew about these knocks is gone, and with it any
+      // chance of acting on them: a live Admit button for a room we have
+      // left is worse than no button.
+      knocksClear();
+    }
   });
+
+  // The notifications exist for the time the app is not the window in front,
+  // so they follow that exactly -- including the window being put away in
+  // the tray, which fires neither focus nor blur.
+  for (const event of ['focus', 'blur', 'show', 'hide', 'minimize', 'restore'])
+    mainWindow.on(event, syncKnockWindows);
 
   // The close button puts the app away rather than ending it, so that the
   // operator room it is holding open keeps being held open.  "Away" has to
@@ -640,6 +732,24 @@ if (!gotTheLock) {
     Menu.setApplicationMenu(buildMenu());
     createWindow();
 
+    knocks = createKnocks({
+      preload: path.join(__dirname, 'knock-preload.js'),
+      page: path.join(__dirname, 'renderer', 'knock.html'),
+      anchor: () => mainWindow,
+      onAction: (key, action) => {
+        if (contentView && !contentView.webContents.isDestroyed())
+          contentView.webContents.send('app:knock-action', { key, action });
+        // Admitting is joining: the operator has just decided to be in this
+        // call, so put them in front of it.  Denying is not -- they stay
+        // where they were.
+        if (action === 'admit') showWindow();
+      },
+      onDismiss: (key) => {
+        const entry = outstanding.get(key);
+        if (entry) entry.dismissed = true;
+      },
+    });
+
     tray = createTray({
       iconPath: ICON_PATH,
       getConfig: () => config,
@@ -669,6 +779,22 @@ if (!gotTheLock) {
         refreshTray();
       }
     } catch { /* not a platform with login items */ }
+
+    // Debug aid: SOZVON_KNOCK_DEMO=1 puts a knock on screen a few seconds in,
+    // so the notification's placement, wrapping and buttons can be worked on
+    // without a server, an operator account and somebody to knock.  Its
+    // buttons go nowhere -- there is no page to act on.
+    if (process.env.SOZVON_KNOCK_DEMO) {
+      setTimeout(() => {
+        knockArrived({
+          key: 'demo',
+          text: 'Иван Петров стучится — приём',
+          actions: [{ id: 'admit', label: 'Впустить и присоединиться',
+                      primary: true },
+                    { id: 'deny', label: 'Отклонить' }],
+        });
+      }, 3000);
+    }
 
     // Started by the system at login: go to the tray, and let the operator
     // get on with logging in.
@@ -776,6 +902,12 @@ ipcMain.handle('group:back-to-launcher', () => showLauncher());
 // app can know: a hub is an ordinary group as far as the address goes, and
 // only the server decides which groups are hubs.
 ipcMain.handle('app:set-hub', (_e, name) => setHub(name));
+
+// Somebody is waiting in a lobby.  What the knock says and what may be done
+// about it were decided by the client, which is the side that knows; all we
+// are given is a sentence and the buttons to put under it.
+ipcMain.handle('app:knock', (_e, knock) => knockArrived(knock));
+ipcMain.handle('app:knock-gone', (_e, key) => knockGone(key));
 
 ipcMain.handle('app:reset-login', () => resetLogin());
 
