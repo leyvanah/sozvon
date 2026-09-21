@@ -280,8 +280,11 @@ function createWindow() {
     wc.on('preload-error', (_e, file, err) =>
       console.error('preload failed:', file, err));
   }
-  mainWindow.webContents.on('console-message', (_e, level, message) => {
-    if (level >= 2) console.error('bar:', message);
+  // The event carries its details on itself since Electron 35; the old
+  // positional (level, message) arguments are deprecated.
+  mainWindow.webContents.on('console-message', (e) => {
+    if (e.level === 'warning' || e.level === 'error')
+      console.error('bar:', e.message);
   });
 
   // Everything the app shows goes in a layer of its own, below the bar.
