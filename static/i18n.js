@@ -206,6 +206,7 @@
             'toast.cantConnect': "Couldn't connect to {url}",
             'toast.reconnected': 'Reconnected.',
             'toast.reconnectFailed': "Couldn't reconnect — please log in again.",
+            'toast.shareStopped': 'Screen sharing stopped when the connection dropped. Share again to continue.',
             // Call quality (connection-quality.js)
             'quality.weak': 'Weak connection',
             'quality.bad': 'Poor connection',
@@ -427,6 +428,7 @@
             'toast.cantConnect': 'Не удалось подключиться к {url}',
             'toast.reconnected': 'Связь восстановлена.',
             'toast.reconnectFailed': 'Не удалось переподключиться — войдите снова.',
+            'toast.shareStopped': 'Демонстрация экрана прервалась вместе со связью. Включите её снова.',
             'quality.weak': 'Слабая связь',
             'quality.bad': 'Плохая связь',
             'quality.lost': 'Связь потеряна, переподключаемся…',
