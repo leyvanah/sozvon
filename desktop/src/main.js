@@ -535,8 +535,8 @@ function createWindow() {
   // Duty belongs to the page doing it, so it ends when that page goes.  Only
   // a real navigation counts: an in-page one is the dashboard still being the
   // dashboard.
-  contentView.webContents.on('did-start-navigation', (_e, _url, _f, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) {
+  contentView.webContents.on('did-start-navigation', (e) => {
+    if (e.isMainFrame && !e.isSameDocument) {
       clearDuty();
       // The page that knew about these knocks is gone, and with it any
       // chance of acting on them: a live Admit button for a room we have
