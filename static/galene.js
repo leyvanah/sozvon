@@ -78,6 +78,15 @@ let reconnectAttempt = 0;
 let reconnectTimer = null;
 /** The join parameters of the dropped connection, replayed to rejoin. */
 let reconnectLastJoin = null;
+/**
+ * What we were sending when the connection dropped, so that the rejoin can
+ * send it again without the user having to find the buttons.  The camera
+ * entry says which of its tracks were live; a screen share cannot be restarted
+ * without a click, so it is only remembered in order to say so.
+ *
+ * @type {{camera: {audio: boolean, video: boolean}|null, share: boolean}|null}
+ */
+let reconnectMedia = null;
 const RECONNECT_MAX_ATTEMPTS = 15;
 const RECONNECT_MAX_DELAY = 30000;
 
@@ -777,6 +786,37 @@ function gotClose(code, reason) {
     // Deliberate disconnect, or we never managed to join: show the login UI.
     stopReconnect();
     setConnected(false);
+}
+
+/**
+ * Called as a connection is lost, before its streams are closed: remember
+ * what we were sending, for gotJoined to send again once we are back in.
+ * (Sozvon)
+ *
+ * @this {ServerConnection}
+ */
+function noteSentMedia() {
+    if(!wantConnected) {
+        // A deliberate hang-up: a later rejoin starts from the device check.
+        reconnectMedia = null;
+        return;
+    }
+    // A reconnect attempt that never got into the group has nothing to say;
+    // keep what the call that dropped was sending.
+    if(!this.group)
+        return;
+    let media = {camera: null, share: false};
+    for(let id in this.up) {
+        let c = this.up[id];
+        if(c.label === 'camera' && c.stream)
+            media.camera = {
+                audio: c.stream.getAudioTracks().length > 0,
+                video: c.stream.getVideoTracks().length > 0,
+            };
+        else if(c.label === 'screenshare')
+            media.share = true;
+    }
+    reconnectMedia = media;
 }
 
 /**
@@ -5726,9 +5766,25 @@ async function closeSafariStream() {
 async function gotJoined(kind, group, perms, status, data, error, message) {
     let present = presentRequested;
     presentRequested = null;
+    // Sozvon: set when this join resumes a dropped call, to what that call was
+    // sending.
+    let restore = null;
 
     switch(kind) {
     case 'fail':
+        if(reconnecting && message &&
+           (message.indexOf('two participants') >= 0 ||
+            message.indexOf('Room is busy') >= 0 ||
+            message.indexOf('too many users') >= 0)) {
+            // Sozvon: we may be back before the server has noticed that our
+            // previous connection is dead, and in a room with a cap it still
+            // counts that session against it.  It is dropped within a minute,
+            // so this is a reason to try again, not to give up: closing with
+            // wantConnected still set lets gotClose schedule the next attempt.
+            console.warn('Rejoin refused, will retry:', message);
+            this.close();
+            return;
+        }
         // Sozvon: the server refused the (re)join — stop any reconnect cycle.
         wantConnected = false;
         stopReconnect();
@@ -5862,6 +5918,9 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         if(reconnecting)
             displayMessage(Sozvon.i18n.t('toast.reconnected'));
         stopReconnect();
+        if(wasReconnecting && kind === 'join')
+            restore = reconnectMedia;
+        reconnectMedia = null;
         if(pendingRemember) {
             let isOp = serverConnection.permissions.indexOf('op') >= 0;
             // Never in a per-client child room: the token would live in that
@@ -5978,7 +6037,13 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
        ('getUserMedia' in navigator.mediaDevices) &&
        serverConnection.permissions.indexOf('present') >= 0 &&
        !findUpMedia('camera')) {
-        if(present) {
+        if(restore && restore.camera) {
+            // Sozvon: back from a dropped connection -- send the camera and
+            // microphone again as they were, rather than leave the user in a
+            // call where nobody can see or hear them until they notice.  The
+            // mute state is a setting, so a muted microphone comes back muted.
+            await addLocalMedia(undefined, restore.camera);
+        } else if(present) {
             // settings.audio/video were already set from the pre-join
             // device check; just fill in defaults for anything unset.
             reflectSettings();
@@ -5994,6 +6059,11 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
             displayMessage(Sozvon.i18n.t('toast.enableHint'));
         }
     }
+
+    // Sozvon: the browser only shares a screen after a click, so a share cut
+    // by the drop cannot come back on its own -- at least say so.
+    if(restore && restore.share)
+        displayWarning(Sozvon.i18n.t('toast.shareStopped'));
 }
 
 /**
@@ -9306,11 +9376,14 @@ async function serverConnect() {
     serverConnection.onerror = function(e) {
         console.error(e);
         // While reconnecting, the banner conveys the state; don't spam toasts
-        // for each failed attempt. (Sozvon)
-        if(!reconnecting)
+        // for each failed attempt.  Nor for the error that starts one: a call
+        // that is about to reconnect says so with the banner, and a bare
+        // "Timeout" on top of it reads as the call having failed. (Sozvon)
+        if(!reconnecting && !(wantConnected && reconnectLastJoin))
             displayError(e);
     };
     serverConnection.onpeerconnection = onPeerConnection;
+    serverConnection.onbeforeclose = noteSentMedia;
     serverConnection.onclose = gotClose;
     serverConnection.ondownstream = gotDownStream;
     serverConnection.onuser = gotUser;
