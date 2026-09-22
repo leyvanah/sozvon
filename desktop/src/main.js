@@ -865,9 +865,31 @@ function handleOurs(channel, fn) {
 }
 
 handleOurs('config:get', () => config);
+
+// What a page may set, and what it is read as.
+//
+// Most of the configuration is written by this process alone: the certificate
+// pins, the SSH host key fingerprints, the server list, the address last
+// opened.  Those are what the app trusts, and a patch that could name them
+// would be a way to rewrite that trust from a page.  So the patch is not
+// merged as it arrives -- the keys a page is allowed to set are listed here,
+// by hand, and everything else is dropped and said out loud, because a key
+// that is meant to be here and is missing should be obvious rather than
+// silent.
+const SETTABLE_CONFIG = {
+  allowInsecureCerts: Boolean,
+};
+
 handleOurs('config:set', (_e, patch) => {
   const before = config.allowInsecureCerts;
-  config = { ...config, ...patch };
+  const clean = {};
+  for (const key of Object.keys(patch || {})) {
+    if (Object.prototype.hasOwnProperty.call(SETTABLE_CONFIG, key))
+      clean[key] = SETTABLE_CONFIG[key](patch[key]);
+    else
+      console.error(`config:set: ignoring ${key}, which no page may set`);
+  }
+  config = { ...config, ...clean };
   saveConfig(config);
 
   // Chromium remembers how it verified a host, so our certificate check only
@@ -876,7 +898,7 @@ handleOurs('config:set', (_e, patch) => {
   // used to admit this by saying a restart was needed, which is a chore to
   // hand to somebody when the app can do it itself.  Deferred a moment so
   // this call's reply and the write above both land first.
-  if (patch && 'allowInsecureCerts' in patch &&
+  if ('allowInsecureCerts' in clean &&
       before !== config.allowInsecureCerts) {
     setTimeout(() => {
       app.relaunch();
