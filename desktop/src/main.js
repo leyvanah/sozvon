@@ -296,6 +296,45 @@ function isKnownServer(url) {
   return false;
 }
 
+// What a page in this view may be granted without asking, once it is known
+// to be one of the user's own servers.  A call needs the camera, the
+// microphone and the screen; the rest are what the client uses around them.
+const ALLOWED_PERMISSIONS = [
+  'media', 'display-capture', 'notifications', 'fullscreen',
+  'clipboard-read', 'clipboard-sanitized-write',
+];
+
+/**
+ * Whether a page may be granted a permission without being asked about.
+ *
+ * The name of the capability alone says nothing about who is asking: a page
+ * reached by a redirect, or one belonging to a server the user has since
+ * removed, would otherwise be handed the same camera and the same clipboard
+ * as the server the user chose.
+ *
+ * @param {string} permission
+ * @param {string} url - the address asking
+ * @returns {boolean}
+ */
+function permissionFor(permission, url) {
+  return ALLOWED_PERMISSIONS.includes(permission) && isKnownServer(url);
+}
+
+/**
+ * Whether an address may be opened in the app's own window.
+ *
+ * This window has no address bar, so a page that can send it anywhere can
+ * show the person any site at all and they have no way to tell.  Our own
+ * pages and the user's own servers stay; everything else belongs in the
+ * browser, where it can be seen.
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+function mayStayInWindow(url) {
+  return url.startsWith('file://') || isKnownServer(url);
+}
+
 /** Open the operator room, from the tray or from a window that is elsewhere. */
 function openHub() {
   const entry = hubEntry();
@@ -644,19 +683,6 @@ function createWindow() {
     cb(-3);
   });
 
-  // A call needs the camera, the microphone and the screen, so these are
-  // granted without a prompt -- but only to a server the user chose.  The
-  // list of capabilities alone says nothing about who is asking: a page that
-  // arrived by a redirect, or one that came with a server the user has since
-  // removed, would have been handed the same camera and the same clipboard.
-  const ALLOWED_PERMISSIONS = [
-    'media', 'display-capture', 'notifications', 'fullscreen',
-    'clipboard-read', 'clipboard-sanitized-write',
-  ];
-
-  const permissionFor = (permission, url) =>
-    ALLOWED_PERMISSIONS.includes(permission) && isKnownServer(url);
-
   contentView.webContents.session.setPermissionRequestHandler(
     (wc, permission, cb, details) => {
       const url = (details && details.requestingUrl) || wc.getURL();
@@ -691,7 +717,7 @@ function createWindow() {
   // and that now opens in the browser instead, where the redirect back does
   // not reach the app.  No server of ours uses one.
   const keepInside = (e, url, stranded) => {
-    if (url.startsWith('file://') || isKnownServer(url)) return;
+    if (mayStayInWindow(url)) return;
     e.preventDefault();
     console.error(`kept out of the app window: ${originOrUrl(url)}`);
     shell.openExternal(url);
