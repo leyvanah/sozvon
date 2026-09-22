@@ -120,6 +120,27 @@ jobs:
                    scripts/test-deploy.js scripts/sync-installer.js; do
               node --check "$f"
           done
+      # Which page the app answers, and how far it lets one go.  Electron is
+      # not installed here (only the runtime dependency is), so these run
+      # main.js and preload.js with it stubbed -- the decisions under test are
+      # plain functions over a URL and a configuration.
+      #
+      # Counted before they are run: `node --test` on a mask that matches
+      # nothing reports "pass 0" and exits 0, which is how the web client's
+      # tests sat unrun and green for six weeks.
+      - name: Test
+        working-directory: desktop
+        run: |
+          n=0
+          for f in test/*.test.js; do
+              [ -f "$f" ] && n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+              echo "no tests in desktop/test/ -- this step would have passed vacuously" >&2
+              exit 1
+          fi
+          echo "desktop tests ($n files)"
+          node --test 'test/*.test.js'
       # The deployer must load, and must find the installer it uploads.
       - name: Check the installer is reachable
         working-directory: desktop
