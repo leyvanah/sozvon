@@ -483,6 +483,20 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     room across server restarts without relying on `autolock`. (If no operator
     is online yet, the guest is asked to come back.)
   * Invite tokens bypass the lobby (the token itself is the pass).
+  * **A full room refuses the knock at the door.** The seat limits —
+    `max-clients`, the operator's runtime 1-on-1 lock, and the two-participant
+    cap of `require-e2ee` — are checked before a knock is taken, not only on
+    the join after admission. Upstream Galène has no lobby, so it never had to
+    order the two; here the knock used to be accepted whatever the room's state,
+    the operator admitted it, and the guest was then turned away with an English
+    "too many users". The refusal now carries a machine code (`group-full`,
+    `group-one-on-one`, `group-e2ee-full`) that the client turns into one of
+    three localised sentences — the third is not "the room is full", since only
+    two are inside. Nothing about who or how many are inside reaches the
+    doorstep. Operators present in the room get a **silent** notice that
+    someone was turned away (no sound: there is nothing to act on), so they
+    know it is time to free a seat or raise the limit. The same codes cover an
+    admitted guest who finds the room filled up while they waited.
 
 ### Operator room
 

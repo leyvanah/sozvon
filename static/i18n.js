@@ -35,6 +35,9 @@
             'login.camNotFound': 'No camera was found. Connect one and try again.',
             'login.camUnavailable': 'That camera is unavailable — pick another one below.',
             'login.connect': 'Connect',
+            'login.roomFull': 'There are no free seats in this room. Please try again later.',
+            'login.roomOneOnOne': 'A one-on-one conversation is in progress — the room is closed to others.',
+            'login.roomE2eeFull': 'An encrypted conversation can have only two participants, and both seats are taken.',
             'login.apk': 'Download the Android app (APK)',
             'login.openInApp': 'Open in the app',
             // Not found (404.html)
@@ -197,6 +200,7 @@
             'toast.askingToJoin': '{who} is asking to join',
             'toast.someone': 'Someone',
             'toast.hostDeclined': 'The host declined your request to join',
+            'toast.knockRefused': '{who} could not join: no free seats in the room',
             'toast.groupLocked': 'This group is locked',
             'toast.muted': 'You have been muted',
             'toast.mutedBy': 'You have been muted by {who}',
@@ -235,7 +239,6 @@
             'toast.permissionDenied': 'Camera or microphone access was denied.',
             'toast.micEnded': 'The microphone stopped — access was revoked or the device was disconnected. Turn it on again to reconnect.',
             'toast.enableHint': 'Use the camera or microphone buttons to start.',
-            'toast.roomBusy': 'Room is busy, try again later',
             // End-to-end encryption
             'e2ee.secure': 'End-to-end encrypted — compare these emoji with the other person',
             'e2ee.handshaking': 'Establishing end-to-end encryption…',
@@ -269,6 +272,9 @@
             'login.camNotFound': 'Камера не найдена. Подключите её и попробуйте снова.',
             'login.camUnavailable': 'Эта камера недоступна — выберите другую ниже.',
             'login.connect': 'Войти',
+            'login.roomFull': 'В комнате нет свободных мест. Попробуйте зайти позже.',
+            'login.roomOneOnOne': 'Сейчас идёт разговор один на один — вход закрыт.',
+            'login.roomE2eeFull': 'В зашифрованном разговоре могут участвовать только двое, и оба места заняты.',
             'login.apk': 'Скачать приложение для Android (APK)',
             'login.openInApp': 'Открыть в приложении',
             // Not found (404.html)
@@ -419,6 +425,7 @@
             'toast.askingToJoin': '{who} просит впустить',
             'toast.someone': 'Кто-то',
             'toast.hostDeclined': 'Хост отклонил ваш запрос на вход',
+            'toast.knockRefused': '{who}: вход отклонён — в комнате нет свободных мест',
             'toast.groupLocked': 'Комната заперта',
             'toast.muted': 'Вас заглушили',
             'toast.mutedBy': 'Вас заглушил {who}',
@@ -456,7 +463,6 @@
             'toast.permissionDenied': 'Доступ к камере или микрофону запрещён.',
             'toast.micEnded': 'Микрофон отключился — доступ отозван или устройство отсоединено. Включите его снова, чтобы восстановить звук.',
             'toast.enableHint': 'Включите камеру или микрофон кнопками на панели.',
-            'toast.roomBusy': 'Комната занята, попробуйте позже',
             // Сквозное шифрование
             'e2ee.secure': 'Сквозное шифрование — сверьте эти эмодзи с собеседником',
             'e2ee.handshaking': 'Устанавливаю сквозное шифрование…',

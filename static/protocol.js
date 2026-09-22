@@ -208,6 +208,14 @@ function ServerConnection() {
      */
     this.onknock = null;
     /**
+     * onknockrefused is called (on operators) when a user who knocked at
+     * the waiting room was turned away at once because the group has no
+     * seat left, so there is no knock to admit.  (Sozvon)
+     *
+     * @type{(this: ServerConnection, id: string, username: string) => void}
+     */
+    this.onknockrefused = null;
+    /**
      * onjoined is called whenever we join or leave a group or whenever the
      * permissions we have in a group change.
      *
@@ -550,6 +558,10 @@ ServerConnection.prototype.connect = function(url) {
             case 'knockcancel':
                 if(sc.onknock)
                     sc.onknock.call(sc, m.id, m.username, false);
+                return;
+            case 'knockrefused':
+                if(sc.onknockrefused)
+                    sc.onknockrefused.call(sc, m.id, m.username);
                 return;
             default:
                 console.warn(`Unknown user action ${m.kind}`);

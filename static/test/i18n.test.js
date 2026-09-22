@@ -209,3 +209,36 @@ test('placeholders survive translation', () => {
         'placeholders differ between languages:\n  ' + problems.join('\n  '),
     );
 });
+
+// A join refused for want of a seat carries a code, and galene.js turns the
+// code into a sentence through fullRoomMessages.  Those keys are computed, so
+// the literal-key scan above does not see them, and the codes are defined in
+// Go, where no JavaScript check would notice one being added or renamed.  A
+// code the table lacks falls back to the server's English message: exactly
+// the refusal this table was made to replace.  (Sozvon)
+test('every full-room code the server sends has a translated message', () => {
+    const go = fs.readFileSync(
+        path.join(staticDir, '..', 'group', 'group.go'), 'utf8');
+    const codes = [...go.matchAll(/&FullError\{\s*Code:\s*"([^"]+)"/g)]
+        .map(m => m[1]);
+    assert.ok(codes.length >= 3,
+        `found ${codes.length} FullError codes in group/group.go; ` +
+        'expected at least three — this test locates them by ' +
+        '`&FullError{ Code: "..."` and needs updating');
+
+    const js = fs.readFileSync(path.join(staticDir, 'galene.js'), 'utf8');
+    const m = js.match(/const fullRoomMessages = (\{[^}]*\});/);
+    assert.ok(m, 'galene.js no longer declares `const fullRoomMessages = {`');
+    const table = vm.runInNewContext('(' + m[1] + ')');
+
+    const translations = readTranslations();
+    for(const code of codes) {
+        const key = table[code];
+        assert.ok(key, `server code ${code} has no entry in fullRoomMessages`);
+        for(const lang of ['en', 'ru'])
+            assert.ok(translations[lang][key],
+                `${key} (for ${code}) is missing from the ${lang} table`);
+    }
+    assert.deepStrictEqual(Object.keys(table).sort(), codes.sort(),
+        'fullRoomMessages has an entry for a code the server never sends');
+});
