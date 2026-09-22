@@ -5691,6 +5691,21 @@ function gotKnock(id, username, present) {
     knockToasts[id] = displayKnockToast(id, username);
 }
 
+/**
+ * gotKnockRefused is called (on operators) when a guest knocked at a room
+ * with no seat left and was turned away at the door.  It is for information
+ * only -- there is nothing to admit -- so unlike a knock it makes no sound
+ * and offers no buttons; but without it the host would never learn that
+ * people are being sent away and that it is time to free a seat. (Sozvon)
+ *
+ * @param {string} id
+ * @param {string} username
+ */
+function gotKnockRefused(id, username) {
+    displayMessage(Sozvon.i18n.t('toast.knockRefused',
+        {who: username || Sozvon.i18n.t('toast.someone')}));
+}
+
 function displayUsername() {
     document.getElementById('userspan').textContent = serverConnection.username;
     let op = serverConnection.permissions.indexOf('op') >= 0;
@@ -5754,6 +5769,21 @@ async function closeSafariStream() {
 }
 
 /**
+ * What to tell a user the server turned away because the room has no seat
+ * left, keyed by the code of the 'fail' message.  Three limits, three texts:
+ * "the room is full" is not even true of the last one, which holds two.
+ * Nothing about who or how many are inside -- that is not for the doorstep.
+ * (Sozvon)
+ *
+ * @type {Record<string, string>}
+ */
+const fullRoomMessages = {
+    'group-full': 'login.roomFull',
+    'group-one-on-one': 'login.roomOneOnOne',
+    'group-e2ee-full': 'login.roomE2eeFull',
+};
+
+/**
  * @this {ServerConnection}
  * @param {string} kind
  * @param {string} group
@@ -5771,11 +5801,10 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
     let restore = null;
 
     switch(kind) {
-    case 'fail':
-        if(reconnecting && message &&
-           (message.indexOf('two participants') >= 0 ||
-            message.indexOf('Room is busy') >= 0 ||
-            message.indexOf('too many users') >= 0)) {
+    case 'fail': {
+        // Sozvon: the room has no seat for us; the server says which limit.
+        let full = fullRoomMessages[error];
+        if(reconnecting && full) {
             // Sozvon: we may be back before the server has noticed that our
             // previous connection is dead, and in a room with a cap it still
             // counts that session against it.  It is dropped within a minute,
@@ -5789,6 +5818,10 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         wantConnected = false;
         stopReconnect();
         pendingRemember = null;
+        // An admitted guest re-joins from the waiting screen, and can be
+        // refused there too (the room filled up meanwhile); do not leave it
+        // saying "you have been let in". (Sozvon)
+        setVisibility('lobby-waiting', false);
         if(probingState === 'probing' && error === 'need-username') {
             probingState = 'need-username';
             setVisibility('passwordform', false);
@@ -5812,16 +5845,9 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
             this.close();
             setButtonsVisibility();
             return;
-        } else if(groupStatus.requireE2ee && message &&
-                  message.indexOf('two participants') >= 0) {
-            // Server turned us away: an encryption-required group is full (2).
+        } else if(full) {
             token = null;
-            displayError(Sozvon.i18n.t('e2ee.blocked'));
-        } else if(message && message.indexOf('Room is busy') >= 0) {
-            // 1-on-1 lock engaged: the third participant is turned away.
-            // (Sozvon)
-            token = null;
-            displayError(Sozvon.i18n.t('toast.roomBusy'));
+            displayError(Sozvon.i18n.t(full));
         } else {
             token = null;
             displayError(Sozvon.i18n.t('msg.serverSaid', {message: message}));
@@ -5830,6 +5856,7 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         this.close();
         setButtonsVisibility();
         return;
+    }
     case 'redirect':
         wantConnected = false;   // Sozvon: leaving for another URL, do not reconnect
         stopReconnect();
@@ -9388,6 +9415,7 @@ async function serverConnect() {
     serverConnection.ondownstream = gotDownStream;
     serverConnection.onuser = gotUser;
     serverConnection.onknock = gotKnock;
+    serverConnection.onknockrefused = gotKnockRefused;
     serverConnection.onjoined = gotJoined;
     serverConnection.onchat = addToChatbox;
     serverConnection.onusermessage = gotUserMessage;

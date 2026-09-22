@@ -160,6 +160,14 @@ values `present`, `op` and `record`.  The `status` field is a dictionary
 that contains status information about the group, and updates the data
 obtained from the `.status` URL described above.
 
+*(Sozvon extension.)* When a join fails because the group has no seat left
+for the client, the `error` field of the `fail` message says which limit
+refused it, so that the client can explain it in the user's language:
+`group-full` (the group's `max-clients`), `group-one-on-one` (an operator
+has restricted the group to a one-on-one call) or `group-e2ee-full` (the group
+requires end-to-end encryption, which is limited to two participants).  The
+`value` field keeps the English message these refusals always carried.
+
 ## Lobby (waiting room)
 
 *(Sozvon extension.)* If the group has `"lobby": true` and the client did not
@@ -196,6 +204,12 @@ While a client is knocking, every operator connected to the group receives
 `knockcancel` (the request was admitted, denied, or the client disconnected
 while waiting), using the same shape as the ordinary `add`/`change`/`delete`
 kinds of the `user` message described below.
+
+The seat limits are checked before a knock is taken: a client knocking at
+a group with no seat left gets a `joined` message of kind `fail` with one of
+the codes above instead of waiting in the lobby.  The operators connected to
+the group are then sent a `user` message of kind `knockrefused`, of the same
+shape, for information only — there is no request to admit or deny.
 
 ## Maintaining group membership
 

@@ -63,6 +63,36 @@ func (err UserError) Error() string {
 	return string(err)
 }
 
+// FullError is what a join is refused with when the group has no seat left
+// for the client.  Code is sent to the client alongside the message, so it
+// can explain the refusal in the user's language: the three reasons need
+// different words, and "the room is full" is not even true of the third,
+// where there are only two people inside.  The messages are the ones these
+// refusals always carried, so a client that does not know the codes reads
+// what it did before. (Sozvon)
+type FullError struct {
+	Code    string
+	Message string
+}
+
+func (err *FullError) Error() string {
+	return err.Message
+}
+
+var ErrGroupFull = &FullError{
+	Code: "group-full", Message: "too many users",
+}
+
+var ErrGroupOneOnOne = &FullError{
+	Code: "group-one-on-one", Message: "Room is busy, try again later",
+}
+
+var ErrGroupE2EEFull = &FullError{
+	Code: "group-e2ee-full",
+	Message: "this group requires end-to-end encryption " +
+		"and is limited to two participants",
+}
+
 type KickError struct {
 	Id       string
 	Username *string
@@ -209,7 +239,9 @@ func (g *Group) getOpsUnlocked() []Client {
 }
 
 // notifyKnock informs operators about a change to a knock.  kind is "knock"
-// (waiting) or "knockcancel" (gone).  ops comes from getOpsUnlocked; filtering
+// (waiting), "knockcancel" (gone) or "knockrefused" (turned away at the door
+// because the room is full, so there never was a knock to wait on).  ops
+// comes from getOpsUnlocked; filtering
 // a member list here instead, after the lock is released, races with
 // operators leaving.
 func notifyKnock(g *Group, ops []Client, kind, id, username string) {
@@ -809,6 +841,44 @@ func deleteUnlocked(g *Group) bool {
 	return true
 }
 
+// seatErrorUnlocked returns the error a client with permissions perms is
+// turned away with because the group has no seat left for them, or nil.
+// AddClient asks it twice: before taking a knock, so that a guest is not
+// kept waiting for an admission that cannot succeed, and again on the join
+// itself, since the room may have filled up in the meantime.  Called
+// locked. (Sozvon)
+func (g *Group) seatErrorUnlocked(perms []string) error {
+	op := slices.Contains(perms, "op")
+
+	if !op && g.description.MaxClients > 0 &&
+		len(g.clients) >= g.description.MaxClients {
+		return ErrGroupFull
+	}
+
+	if !op && g.locked1on1 && len(g.clients) >= 2 {
+		// Runtime 1-on-1 lock set by an operator in the web
+		// client's settings drawer.  Turn away the third
+		// participant so the room stays a 1-on-1 call.
+		return ErrGroupOneOnOne
+	}
+
+	if g.description.E2EE && g.description.RequireE2EE &&
+		!g.description.OperatorRoom && len(g.clients) >= 2 {
+		// This group requires end-to-end encryption, which the web
+		// client can only provide between exactly two participants.
+		// Turn away anyone who would be the third (ops included, since
+		// a third op would break the pairwise encryption just the same)
+		// so the call cannot silently downgrade to cleartext.
+		// Operator rooms (hubs) are exempt: they serve a dashboard, not
+		// a call, so the two-participant limit doesn't apply there.  Child
+		// rooms of a hub inherit require-e2ee but have OperatorRoom=false,
+		// so the limit still protects 1-on-1 sessions.
+		return ErrGroupE2EEFull
+	}
+
+	return nil
+}
+
 func AddClient(group string, c Client, creds ClientCredentials) (*Group, error) {
 	g, err := Add(group, nil)
 	if err != nil {
@@ -886,6 +956,18 @@ func AddClient(group string, c Client, creds ClientCredentials) (*Group, error) 
 							)
 						}
 					}
+					// A full room is refused at the door rather than
+					// after admission: an operator who admits has no
+					// way to tell that the room cannot take the guest,
+					// and the guest would wait only to be turned away.
+					// The operators still hear of it -- quietly, since
+					// nothing is asked of them -- or they would never
+					// learn that it is time to free a seat or raise the
+					// limit. (Sozvon)
+					if err := g.seatErrorUnlocked(perms); err != nil {
+						notifyKnock(g, g.getOpsUnlocked(), "knockrefused", cid, username)
+						return nil, err
+					}
 					g.knocking[cid] = &knockEntry{
 						client:   c,
 						username: username,
@@ -931,38 +1013,8 @@ func AddClient(group string, c Client, creds ClientCredentials) (*Group, error) 
 			}
 		}
 
-		if !slices.Contains(perms, "op") &&
-			g.description.MaxClients > 0 {
-			if len(g.clients) >= g.description.MaxClients {
-				return nil, UserError("too many users")
-			}
-		}
-
-		if !slices.Contains(perms, "op") && g.locked1on1 &&
-			len(g.clients) >= 2 {
-			// Runtime 1-on-1 lock set by an operator in the web
-			// client's settings drawer.  Turn away the third
-			// participant so the room stays a 1-on-1 call.
-			return nil, UserError("Room is busy, try again later")
-		}
-
-		if g.description.E2EE && g.description.RequireE2EE && !g.description.OperatorRoom {
-			// This group requires end-to-end encryption, which the web
-			// client can only provide between exactly two participants.
-			// Turn away anyone who would be the third (ops included, since
-			// a third op would break the pairwise encryption just the same)
-			// so the call cannot silently downgrade to cleartext.
-			// Operator rooms (hubs) are exempt: they serve a dashboard, not
-			// a call, so the two-participant limit doesn't apply there.  Child
-			// rooms of a hub inherit require-e2ee but have OperatorRoom=false,
-			// so the limit still protects 1-on-1 sessions.
-			if len(g.clients) >= 2 {
-				return nil, UserError(
-					"this group requires end-to-end " +
-						"encryption and is limited to " +
-						"two participants",
-				)
-			}
+		if err := g.seatErrorUnlocked(perms); err != nil {
+			return nil, err
 		}
 	}
 	id := c.Id()
