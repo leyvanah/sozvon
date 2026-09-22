@@ -2833,6 +2833,22 @@ async function addLocalMedia(localId, force) {
 }
 
 /**
+ * Whether local media may be published right now.
+ *
+ * The E2EE controller settles on 'blocked' whenever the group requires
+ * end-to-end encryption and this call cannot have it -- a peer that cannot
+ * encrypt, more than two participants, a browser that cannot attach an
+ * encryptor, or nobody here yet in a browser that never could.  Publishing
+ * then would put media on the wire in clear, so it does not happen. (Sozvon)
+ *
+ * @returns {boolean}
+ */
+function mayPublishLocalMedia() {
+    let e2ee = serverConnection && serverConnection.e2ee;
+    return !(e2ee && e2ee.state === 'blocked');
+}
+
+/**
  * Does the work of addLocalMedia.  Do not call directly: go through
  * addLocalMedia, which serialises these. (Sozvon)
  *
@@ -2840,8 +2856,7 @@ async function addLocalMedia(localId, force) {
  * @param {{audio?: boolean, video?: boolean}} [force]
  */
 async function addLocalMediaNow(localId, force) {
-    if(serverConnection && serverConnection.e2ee &&
-       serverConnection.e2ee.state === 'blocked') {
+    if(!mayPublishLocalMedia()) {
         // The group requires end-to-end encryption but this call cannot be
         // encrypted; refuse to publish rather than send media in clear.
         displayError(Sozvon.i18n.t('e2ee.blocked'));
@@ -3344,6 +3359,12 @@ function scheduleReconsiderDownRate() {
 /**
  * setMedia adds a new media element corresponding to stream c.
  *
+ * Does nothing for a stream that is already closed: setUpStream can close the
+ * one it is setting up (an E2EE policy change does exactly that), and its
+ * callers go on to call this, which would put back the element that
+ * Stream.close() has just removed -- a tile for a stream that is gone and that
+ * nothing will remove again. (Sozvon)
+ *
  * @param {Stream} c
  * @param {boolean} [mirror]
  *     - whether to mirror the video
@@ -3352,6 +3373,8 @@ function scheduleReconsiderDownRate() {
  *       controls will be created.
  */
 async function setMedia(c, mirror, video) {
+    if(!c.sc)
+        return;
     let div = document.getElementById('peer-' + c.localId);
     if(!div) {
         div = document.createElement('div');
