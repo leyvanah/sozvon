@@ -299,6 +299,63 @@ test('attaching the encryptor to a working sender succeeds', () => {
     assert.strictEqual(e.state, 'established');
 });
 
+// The failure has to be remembered.  The tracks published while the encryptor
+// was failing are still going out without one, so a handshake that completes
+// afterwards must not put the padlock back over them.
+test('an encryptor that failed once is not forgotten when a peer arrives', () => {
+    const ctx = loadController();
+    const e = new ctx.SozvonE2EE({id: 'aaa', userMessage() {}});
+    e.require = false;
+
+    // alone in the room, publishing: the encryptor cannot be attached
+    assert.strictEqual(e.attachSender(refusingSender(), 'video'), false);
+    assert.strictEqual(e.state, 'unencrypted');
+
+    e.addUser('zzz');
+    assert.strictEqual(
+        e.state, 'unencrypted',
+        'a handshake was started although media is already going out ' +
+        'without an encryptor',
+    );
+    assert.strictEqual(e.sas, null);
+});
+
+test('an encryptor that failed once keeps a group that requires it blocked', () => {
+    const ctx = loadController();
+    const e = new ctx.SozvonE2EE({id: 'aaa', userMessage() {}});
+    e.require = true;
+
+    assert.strictEqual(e.attachSender(refusingSender(), 'video'), false);
+    assert.strictEqual(e.state, 'blocked');
+
+    e.addUser('zzz');
+    assert.strictEqual(
+        e.state, 'blocked',
+        'a peer arriving reopened publication for a browser whose ' +
+        'encryptor does not attach',
+    );
+});
+
+// The peer is told over the signalling channel, which throws on a socket that
+// is not open.  The state change is what stops the media, so it has to happen
+// whether or not that message got out.
+test('a failure that cannot be announced still changes the state', () => {
+    const ctx = loadController();
+    const e = new ctx.SozvonE2EE({
+        id: 'aaa',
+        userMessage() {
+            throw new Error('Connection is not open');
+        },
+    });
+    e.require = true;
+    e.users.add('zzz');
+    e.peer = 'zzz';
+    e.state = 'established';
+
+    assert.strictEqual(e.attachSender(refusingSender(), 'audio'), false);
+    assert.strictEqual(e.state, 'blocked');
+});
+
 // An empty room is not an idle one: the client publishes into the SFU whether
 // or not anybody else has arrived, so a browser that cannot encrypt must be
 // refused before it turns a camera on rather than once a peer shows up.
@@ -338,6 +395,100 @@ test('a group that does not require encryption is not blocked by this', () => {
 
     e.setRequire(false);
     assert.strictEqual(e.state, 'idle');
+});
+
+// ---- the media policy in galene.js ----------------------------------------
+
+/**
+ * Lift a top-level function out of a client script, for the same reason
+ * handleInput() is lifted below: the file around it wants a browser.
+ *
+ * @param {string} file
+ * @param {string} name
+ * @returns {string}
+ */
+function liftFunction(file, name) {
+    const src = fs.readFileSync(path.join(staticDir, file), 'utf8');
+    let start = src.indexOf('function ' + name + '(');
+    assert.notStrictEqual(
+        start, -1,
+        `${file} no longer declares ${name}() — this test locates it by ` +
+        'that text and needs updating',
+    );
+    if(src.slice(start - 6, start) === 'async ')
+        start -= 6;
+    const end = src.indexOf('\n}\n', start);
+    assert.ok(end > start, `${name}() in ${file} does not end at column 0`);
+    return src.slice(start, end + 3);
+}
+
+/** @param {string|null} state - the controller state, or null for no connection */
+function mayPublish(state) {
+    const ctx = vm.createContext({
+        serverConnection: state === null ? null : {e2ee: {state: state}},
+    });
+    vm.runInContext(liftFunction('galene.js', 'mayPublishLocalMedia'), ctx);
+    return ctx.mayPublishLocalMedia();
+}
+
+// This mapping is the whole media guarantee: the controller decides, and this
+// is where the decision stops a camera.  A test that only asserted controller
+// state would not notice the condition being inverted here.
+test('local media is not published while the controller refuses', () => {
+    assert.strictEqual(
+        mayPublish('blocked'), false,
+        'media would be published although the call cannot be encrypted',
+    );
+    for(const state of ['idle', 'handshaking', 'established',
+                        'unencrypted', 'failed'])
+        assert.strictEqual(mayPublish(state), true, state);
+    // before there is a connection at all there is nothing to refuse
+    assert.strictEqual(mayPublish(null), true);
+});
+
+/** @param {string} state */
+function runMediaPolicy(state) {
+    const closed = [];
+    const visibility = {};
+    const ctx = vm.createContext({
+        serverConnection: {e2ee: {state: state}},
+        setVisibility: (id, visible) => visibility[id] = visible,
+        closeUpMedia: label => closed.push(label),
+        setButtonsVisibility: () => {},
+    });
+    vm.runInContext(liftFunction('galene.js', 'enforceE2EEMediaPolicy'), ctx);
+    ctx.enforceE2EEMediaPolicy();
+    return {closed: closed, visibility: visibility};
+}
+
+test('a blocked call has its local media closed and says so on screen', () => {
+    const r = runMediaPolicy('blocked');
+    assert.deepStrictEqual(
+        r.closed, ['camera', 'screenshare'],
+        'local media kept publishing after the call was blocked',
+    );
+    assert.strictEqual(r.visibility['e2ee-block-overlay'], true);
+});
+
+test('a call that is merely unencrypted keeps publishing', () => {
+    const r = runMediaPolicy('unencrypted');
+    assert.deepStrictEqual(r.closed, []);
+    assert.strictEqual(r.visibility['e2ee-block-overlay'], false);
+});
+
+// The policy above closes a stream from inside setUpStream, whose callers go
+// on to build a tile for it.  setMedia has to notice; there is no DOM here, so
+// the test is that it does not reach for one.
+test('no tile is built for a stream that has already been closed', async () => {
+    const ctx = vm.createContext({
+        document: {
+            getElementById() {
+                throw new Error('setMedia went to the DOM for a closed stream');
+            },
+        },
+    });
+    vm.runInContext(liftFunction('galene.js', 'setMedia'), ctx);
+    await ctx.setMedia({sc: null, localId: 'closed-while-setting-up'});
 });
 
 // ---- the chat fallback in galene.js ---------------------------------------
