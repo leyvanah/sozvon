@@ -61,6 +61,14 @@
         this.peerSupports = null;    // null unknown | true | false (peer can encrypt)
         this.chatKey = null;         // AES-GCM key for two-party chat
 
+        // Whether attaching an encryptor has ever failed.  `supported` is
+        // what the browser claimed at startup; this is what happened when we
+        // tried.  It belongs to the browser rather than to the session, so
+        // resetPeer() does not clear it: the tracks published while it was
+        // failing are still going out without an encryptor, and a later
+        // handshake must not put the padlock back over them.
+        this.transformFailed = false;
+
         // Session counter, bumped by resetPeer().  finalize() is a chain of
         // awaits and the peer can leave under any of them; the number a run
         // started with says whether the session it is completing is still the
@@ -103,6 +111,19 @@
         this.recompute();
     };
 
+    /**
+     * Whether this browser can put media through an encryptor right now.
+     * @returns {boolean}
+     */
+    E2EE.prototype.canEncrypt = function() {
+        return this.supported && !this.transformFailed;
+    };
+
+    /** Why canEncrypt() is false, for the state detail. */
+    E2EE.prototype.noEncryptReason = function() {
+        return this.supported ? 'transform' : 'unsupported';
+    };
+
     E2EE.prototype.setState = function(state, detail) {
         this.state = state;
         this.detail = detail || null;
@@ -129,12 +150,12 @@
     E2EE.prototype.recompute = function() {
         if(this.users.size === 0) {
             this.resetPeer();
-            if(this.require && !this.supported) {
+            if(this.require && !this.canEncrypt()) {
                 // Nobody else is here yet -- which for an SFU does not mean
                 // no media is leaving.  This browser cannot encrypt, so it
                 // would publish in clear as soon as the camera is turned on;
                 // refuse now rather than once a peer happens to arrive.
-                this.downgrade('unsupported');
+                this.downgrade(this.noEncryptReason());
                 return;
             }
             this.setState('idle');
@@ -149,12 +170,15 @@
         }
         // Exactly one peer.
         let peer = [...this.users][0];
-        if(!this.supported) {
-            // This browser cannot encrypt at all.  Tell the peer so it does
-            // not sit waiting for a handshake, and reflect the situation.
+        if(!this.canEncrypt()) {
+            // This browser cannot encrypt -- either it never could, or an
+            // encryptor has already failed to attach.  Tell the peer so it
+            // does not sit waiting for a handshake, and reflect the
+            // situation rather than starting a session whose padlock would
+            // cover media that is not going through the worker.
             this.peer = peer;
             this.announceNoCrypto();
-            this.downgrade('unsupported');
+            this.downgrade(this.noEncryptReason());
             return;
         }
         this.startWith(peer);
@@ -320,8 +344,13 @@
         let gen = this.generation;
         let keyPair = this.keyPair, myPub = this.myPub;
         let peerPub = this.peerPub, peer = this.peer, role = this.role;
-        if(!keyPair || !myPub || !peerPub || !peer)
+        if(!keyPair || !myPub || !peerPub || !peer) {
+            // Nothing to finish: the session was reset before this ran.  Say
+            // so, or a controller stuck in 'handshaking' has nothing to
+            // explain it.
+            console.warn('E2EE finalize: no session to complete');
             return;
+        }
 
         let secret = await C.agree(
             keyPair.privateKey, await C.importPublic(peerPub),
@@ -386,10 +415,19 @@
         } catch(e) {
             // Without the transform this track leaves the browser in clear,
             // whatever the state says.  Treat it as "this browser cannot
-            // encrypt": tell the peer, and let downgrade() choose between
-            // refusing the call (require) and carrying on unencrypted.
+            // encrypt": remember it, tell the peer, and let downgrade()
+            // choose between refusing the call (require) and carrying on
+            // unencrypted.
             console.error('E2EE attachSender:', e);
-            this.announceNoCrypto();
+            this.transformFailed = true;
+            try {
+                this.announceNoCrypto();
+            } catch(err) {
+                // A closed socket throws here.  The peer then learns nothing,
+                // but the state below is what stops the media, and it must be
+                // set whether or not the message got out.
+                console.warn('E2EE attachSender: could not tell the peer:', err);
+            }
             this.downgrade('transform');
             return false;
         }
