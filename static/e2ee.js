@@ -61,6 +61,13 @@
         this.peerSupports = null;    // null unknown | true | false (peer can encrypt)
         this.chatKey = null;         // AES-GCM key for two-party chat
 
+        // Session counter, bumped by resetPeer().  finalize() is a chain of
+        // awaits and the peer can leave under any of them; the number a run
+        // started with says whether the session it is completing is still the
+        // current one.  Without it an obsolete run reports an established
+        // session that no longer exists.
+        this.generation = 0;
+
         // idle|handshaking|established|failed|unencrypted|blocked
         this.state = 'idle';
         this.detail = null;
@@ -82,6 +89,18 @@
             };
         }
         return this.worker;
+    };
+
+    /**
+     * Set the group's "require encryption" option and re-evaluate at once.
+     * The state is what keeps local media from being published in clear, so
+     * it must be right from the moment the option is known -- not from the
+     * moment somebody else joins.
+     * @param {boolean} require
+     */
+    E2EE.prototype.setRequire = function(require) {
+        this.require = !!require;
+        this.recompute();
     };
 
     E2EE.prototype.setState = function(state, detail) {
@@ -110,6 +129,14 @@
     E2EE.prototype.recompute = function() {
         if(this.users.size === 0) {
             this.resetPeer();
+            if(this.require && !this.supported) {
+                // Nobody else is here yet -- which for an SFU does not mean
+                // no media is leaving.  This browser cannot encrypt, so it
+                // would publish in clear as soon as the camera is turned on;
+                // refuse now rather than once a peer happens to arrive.
+                this.downgrade('unsupported');
+                return;
+            }
             this.setState('idle');
             return;
         }
@@ -158,6 +185,9 @@
     };
 
     E2EE.prototype.resetPeer = function() {
+        // Everything derived from the old session is about to be dropped;
+        // anything still deriving it must not put it back (see finalize).
+        this.generation++;
         this.peer = null;
         this.role = null;
         this.startingFor = null;
@@ -281,19 +311,36 @@
     };
 
     E2EE.prototype.finalize = async function() {
-        this.secret = await C.agree(
-            this.keyPair.privateKey, await C.importPublic(this.peerPub),
+        // The session this run belongs to, and the material it works from.
+        // Each await below is a point at which the peer can leave: resetPeer()
+        // then clears all of this and bumps the generation, so a run that has
+        // been overtaken stops here and writes nothing back.  A stale run that
+        // ran to the end would hand the worker keys for a session that is over
+        // and report an encrypted call with nobody on the other side.
+        let gen = this.generation;
+        let keyPair = this.keyPair, myPub = this.myPub;
+        let peerPub = this.peerPub, peer = this.peer, role = this.role;
+        if(!keyPair || !myPub || !peerPub || !peer)
+            return;
+
+        let secret = await C.agree(
+            keyPair.privateKey, await C.importPublic(peerPub),
         );
-        let iPub = this.role === 'initiator' ? this.myPub : this.peerPub;
-        let rPub = this.role === 'initiator' ? this.peerPub : this.myPub;
+        if(gen !== this.generation)
+            return;
+        this.secret = secret;
+        let iPub = role === 'initiator' ? myPub : peerPub;
+        let rPub = role === 'initiator' ? peerPub : myPub;
 
         // One key per (sender, media kind); each gets its own IV space.
-        let owners = [this.sc.id, this.peer];
+        let owners = [this.sc.id, peer];
         let kinds = ['audio', 'video'];
         for(let owner of owners) {
             for(let kind of kinds) {
                 let streamId = owner + '|' + kind;
-                let key = await C.deriveMediaKey(this.secret, iPub, rPub, streamId);
+                let key = await C.deriveMediaKey(secret, iPub, rPub, streamId);
+                if(gen !== this.generation)
+                    return;
                 this.ensureWorker().postMessage(
                     {type: 'key', streamId: streamId, keyId: 0, key: key},
                 );
@@ -301,13 +348,19 @@
         }
 
         // Key for two-party text chat, bound to the same transcript.
-        this.chatKey = await C.deriveChatKey(this.secret, iPub, rPub);
+        let chatKey = await C.deriveChatKey(secret, iPub, rPub);
+        if(gen !== this.generation)
+            return;
+        this.chatKey = chatKey;
 
         // Switch the worker to encrypt/decrypt (it may have been forwarding
         // cleartext while this call was momentarily a >2-party or downgraded).
         this.setWorkerMode(false);
 
-        this.sas = await C.deriveSAS(this.secret, iPub, rPub);
+        let sas = await C.deriveSAS(secret, iPub, rPub);
+        if(gen !== this.generation)
+            return;
+        this.sas = sas;
         this.peerSupports = true;
         this.setState('established');
         if(this.onsas)
@@ -316,9 +369,14 @@
 
     // ---- transform wiring (called from galene.js / protocol.js) -------------
 
+    /**
+     * Route a sender's frames through the encryptor.
+     * @returns {boolean} whether the track may now be published: false means
+     *     the encryptor is not in place, so nothing must go out on it.
+     */
     E2EE.prototype.attachSender = function(sender, kind) {
         if(!this.supported || !sender)
-            return;
+            return false;
         try {
             sender.transform = new RTCRtpScriptTransform(this.ensureWorker(), {
                 operation: 'encrypt',
@@ -326,8 +384,16 @@
                 kind: kind,
             });
         } catch(e) {
+            // Without the transform this track leaves the browser in clear,
+            // whatever the state says.  Treat it as "this browser cannot
+            // encrypt": tell the peer, and let downgrade() choose between
+            // refusing the call (require) and carrying on unencrypted.
             console.error('E2EE attachSender:', e);
+            this.announceNoCrypto();
+            this.downgrade('transform');
+            return false;
         }
+        return true;
     };
 
     E2EE.prototype.attachReceiver = function(receiver, sourceId, kind) {

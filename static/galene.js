@@ -2621,6 +2621,10 @@ async function setUpStream(c, stream) {
      * @param {MediaStreamTrack} t
      */
     function addUpTrack(t) {
+        if(!c.sc)
+            // The stream was closed while we were setting it up -- an E2EE
+            // policy change tears local media down from inside this loop.
+            return;
         let settings = getSettings();
         if(c.label === 'camera') {
             if(t.kind === 'audio') {
@@ -2689,6 +2693,11 @@ async function setUpStream(c, stream) {
 
         if(e2eeEnabled()) {
             preferVP8(tr, t.kind);
+            // A failure to attach the encryptor moves the controller to a
+            // state that says this call is not encrypted; where encryption is
+            // required, that state closes this stream at once -- before it is
+            // ever negotiated -- which is what the guard at the top of this
+            // function is for.
             serverConnection.e2ee.attachSender(tr.sender, t.kind);
         }
     }
@@ -5977,7 +5986,7 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         for(let key in status)
             groupStatus[key] = status[key];
         if(serverConnection.e2ee)
-            serverConnection.e2ee.require = !!groupStatus.requireE2ee;
+            serverConnection.e2ee.setRequire(groupStatus.requireE2ee);
         usingRememberToken = false;
         // Sozvon: we are connected and in the group.  Remember the intent to stay
         // connected and the join parameters so an unexpected drop reconnects,
