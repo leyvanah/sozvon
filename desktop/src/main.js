@@ -816,8 +816,56 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-ipcMain.handle('config:get', () => config);
-ipcMain.handle('config:set', (_e, patch) => {
+// --------------------------------------------------------- IPC spheres ---
+//
+// The view below the bar carries our own pages, loaded from disk, and a
+// server's page, loaded over the network.  preload.js hands the app's
+// controls only to the first kind; this is the other half of the same fence,
+// and it is not redundant: a preload decides what a page is given, and this
+// decides what the main process is willing to answer.  Either one alone is a
+// single point of failure, and one of them is a file that is easy to extend
+// without noticing what it is for.
+
+/**
+ * Whether a call came from one of the app's own pages.
+ *
+ * @param {Electron.IpcMainEvent|Electron.IpcMainInvokeEvent} event
+ * @returns {boolean}
+ */
+function fromOurOwnPage(event) {
+  let frame;
+  try {
+    // Accessing the frame of a navigation that has already gone throws.
+    frame = event.senderFrame;
+  } catch {
+    return false;
+  }
+  if (!frame) return false;
+  try {
+    return new URL(frame.url).protocol === 'file:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Register a handler for a channel only the app's own pages may use.
+ *
+ * @param {string} channel
+ * @param {(event: Electron.IpcMainInvokeEvent, ...args: any[]) => any} fn
+ */
+function handleOurs(channel, fn) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!fromOurOwnPage(event)) {
+      console.error(`refused ${channel}: not from one of our own pages`);
+      throw new Error(`${channel} is not available to this page`);
+    }
+    return fn(event, ...args);
+  });
+}
+
+handleOurs('config:get', () => config);
+handleOurs('config:set', (_e, patch) => {
   const before = config.allowInsecureCerts;
   config = { ...config, ...patch };
   saveConfig(config);
@@ -842,7 +890,7 @@ ipcMain.handle('config:set', (_e, patch) => {
 // operator hub that page is the operator's dashboard, which is where the person
 // who owns the server belongs -- not in a call.  There is no room to remember
 // in that case, so the recent list is left alone.
-ipcMain.handle('group:open', (_e, { serverUrl, group }) => {
+handleOurs('group:open', (_e, { serverUrl, group }) => {
   if (!mainWindow) return;
   const base = serverUrl.replace(/\/+$/, '');
   const url = group
@@ -860,7 +908,7 @@ ipcMain.handle('group:open', (_e, { serverUrl, group }) => {
 // The operator room is the server's front page: on a server whose group is an
 // operator hub, that is the dashboard.  Same address the launcher opens when
 // the room field is left empty.
-ipcMain.handle('bar:open-hub', () => {
+handleOurs('bar:open-hub', () => {
   if (!contentView) return;
   let origin;
   try {
@@ -873,11 +921,11 @@ ipcMain.handle('bar:open-hub', () => {
   contentView.webContents.loadURL(`${origin}/`);
 });
 
-ipcMain.handle('bar:reload', () => contentView && contentView.webContents.reload());
+handleOurs('bar:reload', () => contentView && contentView.webContents.reload());
 
-ipcMain.handle('bar:state', () => barState());
+handleOurs('bar:state', () => barState());
 
-ipcMain.handle('servers:remove', (_e, url) => {
+handleOurs('servers:remove', (_e, url) => {
   config.servers = (config.servers || []).filter(s => !sameServer(s.url, url));
   if (sameServer(config.serverUrl, url)) {
     const next = config.servers[0];
@@ -889,7 +937,7 @@ ipcMain.handle('servers:remove', (_e, url) => {
   return config;
 });
 
-ipcMain.handle('servers:rename', (_e, { url, name }) => {
+handleOurs('servers:rename', (_e, { url, name }) => {
   const s = (config.servers || []).find(s => sameServer(s.url, url));
   if (s) s.name = String(name || '').trim().slice(0, 60);
   saveConfig(config);
@@ -945,7 +993,7 @@ ipcMain.on('app:theme-sync', (e) => {
 
 // ---------------------------------------------------------------- deploy ---
 
-ipcMain.handle('deploy:open', () => {
+handleOurs('deploy:open', () => {
   if (!contentView) return;
   contentView.webContents.loadFile(path.join(__dirname, 'renderer', 'deploy.html'));
 });
@@ -961,12 +1009,15 @@ function askHostKey(info) {
   return new Promise((resolve) => {
     if (!mainWindow) { resolve(false); return; }
     const known = (config.knownHosts || {})[`${info.host}:${info.port}`];
-    const timer = setTimeout(() => {
-      ipcMain.removeAllListeners('deploy:hostkey-answer');
-      resolve(false);
-    }, 5 * 60 * 1000);
-
-    ipcMain.once('deploy:hostkey-answer', (_e, accepted) => {
+    // Answering this is accepting a host key, so it is for the deploy page
+    // and nobody else.  A call from anywhere else is ignored rather than
+    // taken as "no": the prompt stays up, and the person still decides.
+    const onAnswer = (e, accepted) => {
+      if (!fromOurOwnPage(e)) {
+        console.error('refused deploy:hostkey-answer: not from one of our own pages');
+        return;
+      }
+      ipcMain.removeListener('deploy:hostkey-answer', onAnswer);
       clearTimeout(timer);
       if (accepted) {
         config.knownHosts = { ...(config.knownHosts || {}) };
@@ -974,7 +1025,14 @@ function askHostKey(info) {
         saveConfig(config);
       }
       resolve(!!accepted);
-    });
+    };
+
+    const timer = setTimeout(() => {
+      ipcMain.removeListener('deploy:hostkey-answer', onAnswer);
+      resolve(false);
+    }, 5 * 60 * 1000);
+
+    ipcMain.on('deploy:hostkey-answer', onAnswer);
 
     // A key that changed is not the same question as a key never seen: one
     // is routine, the other means the server was replaced -- or someone is
@@ -987,7 +1045,7 @@ function askHostKey(info) {
   });
 }
 
-ipcMain.handle('deploy:start', async (_e, opts) => {
+handleOurs('deploy:start', async (_e, opts) => {
   const { Deployer, originOf } = require('./deploy/deployer');
   const send = (channel, payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
