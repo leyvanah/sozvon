@@ -172,6 +172,66 @@ test('a completion that is still current establishes the session', async () => {
     );
 });
 
+/**
+ * Run a whole handshake between two controllers, relaying their user messages
+ * to each other the way the server does.
+ *
+ * @param {any} ctx
+ * @param {boolean} [tamper] - substitute the responder's public key in flight,
+ *     as a server sitting in the middle of the exchange would
+ * @returns {Promise<{a: any, b: any}>}
+ */
+async function handshake(ctx, tamper) {
+    const C = ctx.SozvonE2EECrypto;
+    const queue = [];
+    const connection = id => ({
+        id: id,
+        userMessage: (kind, dest, payload) => {
+            if(tamper && id === 'zzz' && payload.t === 'dh') {
+                const pub = C.unb64(payload.pub);
+                pub[1] ^= 1;
+                payload = {t: 'dh', pub: C.b64(pub)};
+            }
+            queue.push({from: id, dest: dest, payload: payload});
+        },
+    });
+    const a = new ctx.SozvonE2EE(connection('aaa'));
+    const b = new ctx.SozvonE2EE(connection('zzz'));
+    a.users.add('zzz');
+    b.users.add('aaa');
+    await a.startWith('zzz');
+    await b.startWith('aaa');
+
+    const peers = {aaa: a, zzz: b};
+    for(let i = 0; queue.length && i < 100; i++) {
+        const m = queue.shift();
+        await peers[m.dest].onMessage(m.from, m.payload);
+    }
+    return {a: a, b: b};
+}
+
+// The generation check above sits in the middle of the handshake, so the
+// handshake itself is worth running here rather than only in a browser: both
+// sides must still reach the same emoji, and a substituted key must still be
+// caught by the commitment.
+test('two controllers relayed through a server agree on one session', async () => {
+    const ctx = loadController();
+    const {a, b} = await handshake(ctx);
+    assert.strictEqual(a.state, 'established');
+    assert.strictEqual(b.state, 'established');
+    assert.strictEqual(a.sas.join(''), b.sas.join(''));
+    assert.strictEqual(
+        a.worker.messages.filter(m => m.type === 'key').length, 4,
+    );
+});
+
+test('a substituted public key is still refused', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx, true);
+    assert.strictEqual(a.state, 'failed');
+    assert.strictEqual(a.sas, null);
+});
+
 /** A sender whose transform cannot be set, as an unsupporting browser has. */
 function refusingSender() {
     const sender = {};
