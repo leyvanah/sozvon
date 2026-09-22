@@ -246,6 +246,7 @@
             'e2ee.multipeer': 'End-to-end encryption supports only two participants',
             'e2ee.notEncrypted': 'This call is not encrypted',
             'e2ee.blocked': 'Unencrypted connections are blocked',
+            'e2ee.chatBlocked': 'Not sent: this group requires end-to-end encryption, and this message could not be encrypted',
             'e2ee.blockedOverlay': 'Unencrypted connections are blocked. This call cannot be end-to-end encrypted (a participant cannot encrypt, or there are more than two), so the connection is blocked.',
             // Browser support
             'browser.unsupported': 'Your browser does not support video calls. Please open this link in Chrome, Firefox, Safari or Edge.',
@@ -470,6 +471,7 @@
             'e2ee.multipeer': 'Сквозное шифрование работает только для двух участников',
             'e2ee.notEncrypted': 'Звонок не зашифрован',
             'e2ee.blocked': 'Включена блокировка незашифрованных соединений',
+            'e2ee.chatBlocked': 'Не отправлено: в этой комнате обязательно сквозное шифрование, а зашифровать сообщение не удалось',
             'e2ee.blockedOverlay': 'Включена блокировка незашифрованных соединений. Этот звонок нельзя зашифровать (собеседник не поддерживает шифрование или участников больше двух), поэтому подключение заблокировано.',
             // Поддержка браузера
             'browser.unsupported': 'Этот браузер не поддерживает видеозвонки. Откройте эту ссылку в Chrome, Firefox, Safari или Edge.',

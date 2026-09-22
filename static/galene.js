@@ -8157,6 +8157,27 @@ function handleInput() {
     }
 
     let kind = me ? 'me' : '';
+
+    /**
+     * Send the message as an ordinary chat message, which the server reads
+     * and stores.  In a group that requires end-to-end encryption that is not
+     * an acceptable fallback: nothing leaves the browser and the user is told
+     * so, rather than the message reaching the server in clear while the
+     * interface still offers an encrypted call. (Sozvon)
+     */
+    function sendCleartext() {
+        let e2ee = serverConnection.e2ee;
+        if(e2eeActive() && e2ee && e2ee.require) {
+            displayError(Sozvon.i18n.t('e2ee.chatBlocked'));
+            // The box was emptied when this message was taken from it; hand
+            // the text back unless the user has started typing something else.
+            if(input.value === '')
+                input.value = data;
+            return;
+        }
+        serverConnection.chat(kind, '', message);
+    }
+
     try {
         let e2ee = serverConnection.e2ee;
         if(e2eeActive() && e2ee && e2ee.canChat()) {
@@ -8169,13 +8190,13 @@ function handleInput() {
                                  serverConnection.username, new Date(),
                                  false, false, kind, message);
                 else
-                    serverConnection.chat(kind, '', message);
+                    sendCleartext();
             }).catch(function(err) {
                 console.error(err);
-                serverConnection.chat(kind, '', message);
+                sendCleartext();
             });
         } else {
-            serverConnection.chat(kind, '', message);
+            sendCleartext();
         }
     } catch(e) {
         console.error(e);
