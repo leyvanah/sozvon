@@ -245,6 +245,57 @@ function hubEntry() {
   return (config.servers || []).find(s => s && s.url && s.hub) || null;
 }
 
+/** An address as a person would recognise it, for a line in the log. */
+function originOrUrl(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return String(url);
+  }
+}
+
+/**
+ * The origins the user has actually chosen: every server in the list, and
+ * the one opened last.  group:open adds a server before it loads it, so an
+ * address typed into the launcher is here by the time its page appears.
+ *
+ * @returns {Set<string>}
+ */
+function knownOrigins() {
+  const out = new Set();
+  const add = (url) => {
+    try {
+      if (url) out.add(new URL(url).origin);
+    } catch { /* an entry that is not an address buys nothing */ }
+  };
+  for (const s of config.servers || []) add(s && s.url);
+  add(config.serverUrl);
+  return out;
+}
+
+/**
+ * Whether an address is one of the user's own servers.
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isKnownServer(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  const known = knownOrigins();
+  if (known.has(u.origin)) return true;
+  // A server remembered as http:// that answers over https:// is the same
+  // server, upgraded.  Accept that direction and only that one: an install
+  // ends up on TLS, and a person who typed the address without one should
+  // not lose the camera over it.
+  if (u.protocol === 'https:') return known.has(`http://${u.host}`);
+  return false;
+}
+
 /** Open the operator room, from the tray or from a window that is elsewhere. */
 function openHub() {
   const entry = hubEntry();
@@ -593,15 +644,72 @@ function createWindow() {
     cb(-3);
   });
 
-  contentView.webContents.session.setPermissionRequestHandler((wc, permission, cb) => {
-    const allowed = ['media', 'display-capture', 'notifications', 'fullscreen', 'clipboard-read', 'clipboard-sanitized-write'];
-    cb(allowed.includes(permission));
-  });
+  // A call needs the camera, the microphone and the screen, so these are
+  // granted without a prompt -- but only to a server the user chose.  The
+  // list of capabilities alone says nothing about who is asking: a page that
+  // arrived by a redirect, or one that came with a server the user has since
+  // removed, would have been handed the same camera and the same clipboard.
+  const ALLOWED_PERMISSIONS = [
+    'media', 'display-capture', 'notifications', 'fullscreen',
+    'clipboard-read', 'clipboard-sanitized-write',
+  ];
+
+  const permissionFor = (permission, url) =>
+    ALLOWED_PERMISSIONS.includes(permission) && isKnownServer(url);
+
+  contentView.webContents.session.setPermissionRequestHandler(
+    (wc, permission, cb, details) => {
+      const url = (details && details.requestingUrl) || wc.getURL();
+      const ok = permissionFor(permission, url);
+      if (!ok)
+        console.error(`refused ${permission} for ${originOrUrl(url)}`);
+      cb(ok);
+    });
+
+  // The synchronous side of the same question: navigator.permissions.query,
+  // and the checks Chromium makes on its own before it ever raises a request.
+  // Left at its default it answers for the request handler above and quietly
+  // disagrees with it.
+  contentView.webContents.session.setPermissionCheckHandler(
+    (wc, permission, requestingOrigin) =>
+      permissionFor(permission, requestingOrigin || (wc && wc.getURL()) || ''));
 
   contentView.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  // A new window already goes to the real browser; a navigation of this view
+  // did not, and this window has no address bar to say where it ended up.  A
+  // page could therefore send the view anywhere and the person would have no
+  // way to tell -- which is worth more to whoever wants a password than any
+  // of it is worth to us.  Our own pages and the user's own servers stay
+  // here; everything else opens where it can be seen.
+  //
+  // The cost is a server whose group hands the client an external login
+  // portal (groupStatus.authPortal): the client navigates this view to it,
+  // and that now opens in the browser instead, where the redirect back does
+  // not reach the app.  No server of ours uses one.
+  const keepInside = (e, url, stranded) => {
+    if (url.startsWith('file://') || isKnownServer(url)) return;
+    e.preventDefault();
+    console.error(`kept out of the app window: ${originOrUrl(url)}`);
+    shell.openExternal(url);
+    // A refused redirect leaves nothing in the view -- the load it was part
+    // of is over.  Come back to the launcher and say where the address went,
+    // rather than leaving a blank window.  Deferred: navigating from inside
+    // a navigation event is asking for trouble.
+    if (stranded)
+      setTimeout(() => showLauncher(
+        `Адрес открыт в браузере: ${originOrUrl(url)}`), 0);
+  };
+
+  contentView.webContents.on('will-navigate', (e, url) => keepInside(e, url, false));
+
+  // A server that answers with a redirect would otherwise walk straight past
+  // the check above -- and a server's page is the one thing here we are least
+  // able to vouch for.
+  contentView.webContents.on('will-redirect', (e, url) => keepInside(e, url, true));
 
   // A server page that fails to load leaves Chromium's own error page in the
   // window, which has no way out either.  Come back to the launcher and say
