@@ -1499,9 +1499,13 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 		if err != nil {
 			var e, s string
 			var autherr *group.NotAuthorisedError
+			var fullerr *group.FullError
 			if errors.Is(err, group.ErrUsernameRequired) {
 				s = err.Error()
 				e = "need-username"
+			} else if errors.As(err, &fullerr) {
+				s = fullerr.Message
+				e = fullerr.Code
 			} else if errors.Is(err, group.ErrDuplicateUsername) {
 				s = err.Error()
 				e = "duplicate-username"

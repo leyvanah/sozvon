@@ -315,29 +315,121 @@ func TestMaxClientsRefusesNonOperators(t *testing.T) {
 	}
 }
 
-// TestLobbyKnockIntoFullRoom pins down what a knock at a room that is already
-// full currently does, which is nothing useful: the lobby branch of AddClient
-// returns ErrKnocking before any capacity check runs — max-clients, the
-// runtime 1-on-1 lock and the two-participant limit of require-e2ee all sit
-// below it — so the knock is accepted whatever the room's state.  The operator
-// then sees a request, admits it, and the guest is turned away on the re-join
-// with "too many users".
+// admitGuest knocks, is admitted and re-joins, as a browser does; it fails the
+// test if the guest does not end up inside.
+func admitGuest(t *testing.T, g *Group, c *fakeClient, username string) {
+	t.Helper()
+	knock(t, g.Name(), c, username)
+	if err := g.Admit(c.id); err != nil {
+		t.Fatalf("Admit(%v): %v", c.id, err)
+	}
+	if _, err := AddClient(g.Name(), c, guestCreds(username)); err != nil {
+		t.Fatalf("admitted guest %v: %v", c.id, err)
+	}
+}
+
+// A knock at a room with no seat left is refused at the door, with the
+// reason, instead of being accepted and then failing on the re-join after
+// the operator admits it.  The operator is still told, as "knockrefused"
+// rather than "knock": there is nothing to admit, but a host whose guests
+// are being turned away needs to know it is time to free a seat.
 //
-// The refusal is safe: nobody gets in who should not.  What is wrong is that
-// the operator is offered a decision that cannot be carried out, and the guest
-// is given an error only after being told to come in.  Which way to settle it
-// is a product question — refuse the knock, show the operator that the room is
-// full, or give the guest a reason it can act on — so this test records
-// today's behaviour rather than asserting a contract.  When the behaviour is
-// decided, this test changes with it: that it fails is the point.
-//
-// Only the max-clients path is exercised here; the 1-on-1 lock and
-// require-e2ee reach the same dead end by the same ordering, untested. (Sozvon)
+// All three limits are exercised, because each is checked in its own way:
+// max-clients and the 1-on-1 lock exempt operators, require-e2ee does not,
+// and the 1-on-1 lock is runtime state rather than configuration. (Sozvon)
 func TestLobbyKnockIntoFullRoom(t *testing.T) {
+	tests := []struct {
+		name string
+		conf string
+		// fill brings the room to its limit, the operator already in.
+		fill func(t *testing.T, g *Group)
+		want *FullError
+	}{
+		{
+			name: "max-clients",
+			conf: `{
+				"lobby": true,
+				"max-clients": 1,
+				"users": {"boss": {"password": "oppass", "permissions": "op"}},
+				"wildcard-user": {
+					"password": {"type": "wildcard"},
+					"permissions": "present"
+				}
+			}`,
+			fill: func(t *testing.T, g *Group) {},
+			want: ErrGroupFull,
+		},
+		{
+			name: "1-on-1 lock",
+			conf: lobbyConf,
+			fill: func(t *testing.T, g *Group) {
+				admitGuest(t, g, &fakeClient{id: "guest-0"}, "first")
+				g.SetLocked1on1(true)
+			},
+			want: ErrGroupOneOnOne,
+		},
+		{
+			name: "require-e2ee",
+			conf: `{
+				"lobby": true,
+				"e2ee": true,
+				"require-e2ee": true,
+				"users": {"boss": {"password": "oppass", "permissions": "op"}},
+				"wildcard-user": {
+					"password": {"type": "wildcard"},
+					"permissions": "present"
+				}
+			}`,
+			fill: func(t *testing.T, g *Group) {
+				admitGuest(t, g, &fakeClient{id: "guest-0"}, "first")
+			},
+			want: ErrGroupE2EEFull,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := setupGroups(t)
+			writeGroup(t, dir, "busy", tt.conf)
+
+			op := &fakeClient{id: "op-1"}
+			g := addOperator(t, "busy", op)
+			tt.fill(t, g)
+
+			guest := &fakeClient{id: "guest-1"}
+			_, err := AddClient("busy", guest, guestCreds("visitor"))
+			if err != tt.want {
+				t.Fatalf("knocking at a full room: got %v, "+
+					"expected %v", err, tt.want)
+			}
+
+			g.mu.Lock()
+			waiting := g.knocking["guest-1"] != nil
+			g.mu.Unlock()
+			if waiting {
+				t.Errorf("the refused guest was left waiting in the lobby")
+			}
+			if op.wasPushed("knock", "guest-1") {
+				t.Errorf("the operator was offered a knock " +
+					"that cannot be admitted")
+			}
+			if !op.wasPushed("knockrefused", "guest-1") {
+				t.Errorf("the operator was not told a guest "+
+					"was turned away: %v", op.pushed)
+			}
+		})
+	}
+}
+
+// A knock taken while there was a seat can still find the room full by the
+// time the operator admits it.  The re-join is then refused with the same
+// coded error as a knock at the door, so the guest reads why rather than a
+// bare "too many users" after being told to come in. (Sozvon)
+func TestLobbyAdmittedIntoRoomThatFilled(t *testing.T) {
 	dir := setupGroups(t)
 	writeGroup(t, dir, "busy", `{
 		"lobby": true,
-		"max-clients": 1,
+		"max-clients": 2,
 		"users": {"boss": {"password": "oppass", "permissions": "op"}},
 		"wildcard-user": {
 			"password": {"type": "wildcard"},
@@ -345,37 +437,25 @@ func TestLobbyKnockIntoFullRoom(t *testing.T) {
 		}
 	}`)
 
-	// The operator takes the only seat.
 	op := &fakeClient{id: "op-1"}
 	g := addOperator(t, "busy", op)
 
-	guest := &fakeClient{id: "guest-1"}
-	if _, err := AddClient("busy", guest, guestCreds("visitor")); err != ErrKnocking {
-		t.Fatalf("knocking at a full room: got %v; if this now refuses "+
-			"the knock outright, that is the fix — update this test",
-			err)
-	}
-	if !op.wasPushed("knock", "guest-1") {
-		t.Fatalf("operator was not told about the knock: %v", op.pushed)
-	}
+	// One seat is left, so both knocks are taken.
+	first := &fakeClient{id: "guest-1"}
+	second := &fakeClient{id: "guest-2"}
+	knock(t, "busy", first, "first")
+	knock(t, "busy", second, "second")
 
-	// The operator has no way of telling that the room cannot take the
-	// guest, and admits.
-	if err := g.Admit("guest-1"); err != nil {
-		t.Fatalf("Admit: %v", err)
+	for _, id := range []string{"guest-1", "guest-2"} {
+		if err := g.Admit(id); err != nil {
+			t.Fatalf("Admit(%v): %v", id, err)
+		}
 	}
-	if kind := guest.lastJoined(); kind != "rejoin" {
-		t.Fatalf("admitted guest: got %v, expected rejoin", kind)
+	if _, err := AddClient("busy", first, guestCreds("first")); err != nil {
+		t.Fatalf("first admitted guest: %v", err)
 	}
-
-	_, err := AddClient("busy", guest, guestCreds("visitor"))
-	if err == nil {
-		t.Fatalf("admitted guest entered a full room")
-	}
-	if err.Error() != "too many users" {
-		t.Errorf("admitted guest was refused with %q; if the message is "+
-			"now one the guest can act on, that is the fix — update "+
-			"this test", err)
+	if _, err := AddClient("busy", second, guestCreds("second")); err != ErrGroupFull {
+		t.Fatalf("the room had filled: got %v, expected %v", err, ErrGroupFull)
 	}
 }
 
