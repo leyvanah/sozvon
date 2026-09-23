@@ -3851,8 +3851,17 @@ function registerControlHandlers(localId, media, container) {
 function delMedia(localId) {
     let mediadiv = document.getElementById('peers');
     let peer = document.getElementById('peer-' + localId);
-    if(!peer)
-        throw new Error('Removing unknown media');
+    if(!peer) {
+        // A stream can be closed before it ever had a tile: an E2EE policy
+        // change closes local media from inside setUpStream, and setMedia
+        // declines to build a tile for a stream that is already closed.  So
+        // there is nothing to remove and nothing has gone wrong -- but the
+        // buttons still have to stop saying we are publishing, and an
+        // exception on a path the app takes by design is noise that later
+        // hides the real ones. (Sozvon)
+        setButtonsVisibility();
+        return;
+    }
 
     let media = /** @type{HTMLVideoElement} */
         (document.getElementById('media-' + localId));

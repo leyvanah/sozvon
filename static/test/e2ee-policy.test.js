@@ -694,6 +694,26 @@ test('the echo of an encrypted message you sent carries you', async () => {
     );
 });
 
+// The policy closes local media the moment it refuses the call, which can be
+// before the stream ever had a tile.  Removing a tile that was never built is
+// not an error here, and an exception on a path the app takes by design is
+// noise that later hides the real ones.
+test('closing a stream that never had a tile is not an error', () => {
+    let refreshed = false;
+    const ctx = vm.createContext({
+        console: quiet,
+        document: {
+            getElementById: (id) => id === 'peers' ? {removeChild() {}} : null,
+        },
+        setButtonsVisibility: () => refreshed = true,
+        resizePeers: () => {},
+        hideVideo: () => {},
+    });
+    vm.runInContext(liftFunction('galene.js', 'delMedia'), ctx);
+    ctx.delMedia('a-stream-closed-before-it-was-shown');
+    assert.ok(refreshed, 'the buttons were not told that publishing had stopped');
+});
+
 // ---- the chat fallback in galene.js ---------------------------------------
 
 /**
