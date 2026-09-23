@@ -4781,6 +4781,8 @@ body.thumb-over-idle #peers .peer-self {
     height: 28px;
     padding: 6px 10px 6px 8px;
     border-radius: 14px;
+    max-width: calc(100% - 16px);
+    box-sizing: border-box;
     background: var(--on-video-scrim);
     color: var(--on-video);
     pointer-events: auto;
@@ -4795,17 +4797,35 @@ body:not(.nav-hidden) .peer-remote .conn-quality {
     top: 60px;
 }
 .conn-quality-text {
+    min-width: 0;
     margin-left: 6px;
     align-self: center;
     font-size: 13px;
     line-height: 1;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-/* On the small floating self tile the words would cover the picture; the
-   bars and the toast carry it there. */
-.peer-self .conn-quality-text { display: none; }
-#peers:not(.speaker):not(.speaker-many) .peer-self .conn-quality-text {
-    display: inline;
+.conn-quality-bar { flex: none; }
+/* The small floating self tile keeps the caption -- nothing else says it
+   now that there are no toasts -- in a smaller pill, at the bottom: the top
+   right holds the hide-self eye, which a 120px tile leaves no room beside,
+   and the name and controls that sit at the bottom elsewhere are hidden
+   here. */
+#peers.speaker .peer-self .conn-quality,
+#peers.speaker-many .peer-self .conn-quality {
+    top: auto;
+    bottom: 6px;
+    left: 6px;
+    height: 22px;
+    max-width: calc(100% - 12px);
+    padding: 4px 8px 4px 6px;
+    border-radius: 11px;
+}
+#peers.speaker .peer-self .conn-quality-text,
+#peers.speaker-many .peer-self .conn-quality-text {
+    margin-left: 4px;
+    font-size: 11px;
 }
 .conn-quality[data-level="weak"],
 .conn-quality[data-level="bad"],
