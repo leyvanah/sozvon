@@ -9783,12 +9783,20 @@ function handleInput() {
             // user-message channel and echo it locally, so the server never
             // sees the cleartext nor keeps it in chat history.
             e2ee.sendChat(kind, message).then(function(sent) {
-                if(sent)
+                if(sent) {
                     addToChatbox(null, serverConnection.id, '',
                                  serverConnection.username, new Date(),
                                  false, false, kind, message);
-                else
+                } else if(sent === null) {
+                    // Written in an encrypted call that ended before it
+                    // went out: not sent at all, rather than sent to the
+                    // server in its place.
+                    displayError(Sozvon.i18n.t('e2ee.chatLost'));
+                    if(input.value === '')
+                        input.value = data;
+                } else {
                     sendCleartext();
+                }
             }).catch(function(err) {
                 console.error(err);
                 sendCleartext();

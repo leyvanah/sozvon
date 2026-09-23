@@ -1038,9 +1038,10 @@ test('closing a stream that never had a tile is not an error', () => {
  * not a copy of it, so it goes stale the moment the source does.
  *
  * @param {object} o
- * @param {'unusable'|'refuses'|'fails'|'sends'} o.mode - how the encrypted
+ * @param {'unusable'|'refuses'|'fails'|'lost'|'sends'} o.mode - how the encrypted
  *     path ends: the channel is not usable at all, sendChat() reports it did
- *     not send, sendChat() rejects, or it goes out encrypted
+ *     not send, sendChat() rejects, the call it was written in ended before
+ *     it went out, or it goes out encrypted
  * @param {boolean} o.require - the group's "require encryption" option
  * @param {string} o.text - what the user typed
  * @returns {Promise<{sent: any[][], errors: any[], input: {value: string}}>}
@@ -1080,6 +1081,8 @@ async function runHandleInput(o) {
                 sendChat: async () => {
                     if(o.mode === 'fails')
                         throw new Error('injected encryption failure');
+                    if(o.mode === 'lost')
+                        return null;
                     return o.mode === 'sends';
                 },
             },
@@ -1429,4 +1432,53 @@ test('messages sent at once keep their order', async () => {
     );
     assert.deepStrictEqual(texts.map(t => t.text), ['one', 'two', 'three']);
     assert.strictEqual(texts[1].kind, 'me');
+});
+
+// ---- a message written in an encrypted call that ends under it ------------
+//
+// The user typed into an encrypted call.  If the call ends while the message
+// is being sealed -- the peer leaves, or it stops being encrypted -- the
+// message must not go out as ordinary chat instead: that puts it on the
+// server, in the room's history, which is what the user was writing to avoid.
+
+test('a message sealed for a call that has ended is not reported as merely unsent', async () => {
+    const ctx = loadController();
+    const {a, outbox} = await chatting(ctx);
+    const paused = pauseIn(ctx.SozvonE2EECrypto, 'encryptChat');
+    const pending = a.sendChat('', 'written in the encrypted call');
+    await paused.reached;
+    a.delUser('zzz');
+    paused.release();
+    assert.strictEqual(
+        await pending, null,
+        'the caller was told to send it some other way',
+    );
+    assert.deepStrictEqual(outbox.aaa, []);
+});
+
+// The same when the message was queued behind another one and the call
+// stopped being encrypted before its turn came.
+test('a queued message whose call stopped being encrypted is not reported as merely unsent', async () => {
+    const ctx = loadController();
+    const {a} = await chatting(ctx);
+    const paused = pauseIn(ctx.SozvonE2EECrypto, 'encryptChat');
+    const first = a.sendChat('', 'one');
+    const second = a.sendChat('', 'two');
+    await paused.reached;
+    await a.onMessage('zzz', {t: 'nocrypto'});
+    paused.release();
+    assert.strictEqual(await first, null);
+    assert.strictEqual(await second, null);
+});
+
+test('a message whose encrypted call ended is not sent in clear', async () => {
+    const r = await runHandleInput({
+        mode: 'lost', require: false, text: 'text for the other person',
+    });
+    assert.deepStrictEqual(
+        r.sent, [],
+        'a message written in an encrypted call went to the server in clear',
+    );
+    assert.deepStrictEqual(r.errors, ['e2ee.chatLost']);
+    assert.strictEqual(r.input.value, 'text for the other person');
 });

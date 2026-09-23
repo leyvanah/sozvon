@@ -310,6 +310,7 @@
             'e2ee.consentHint': 'If you did not expect this, leave the call: somebody may be trying to listen in.',
             'e2ee.continueInClear': 'Continue without encryption',
             'e2ee.statusDropped': 'The server now says this room is not end-to-end encrypted. It was, so the call stays encrypted, and your camera and microphone were not turned back on.',
+            'e2ee.chatLost': 'Not sent: the encrypted call ended before this message went out',
             'e2ee.chatMissed': 'Some encrypted messages from the other person did not arrive',
             'e2ee.clearNotAgreed': 'Not sent: this call is no longer end-to-end encrypted, and you have not agreed to go on without encryption',
             // Browser support
@@ -599,6 +600,7 @@
             'e2ee.consentHint': 'Если вы этого не ждали, выйдите из звонка: возможно, его пытаются подслушать.',
             'e2ee.continueInClear': 'Продолжить без шифрования',
             'e2ee.statusDropped': 'Сервер теперь сообщает, что в этой комнате нет сквозного шифрования. Раньше оно было, поэтому звонок остаётся зашифрованным, а камера и микрофон не включены заново.',
+            'e2ee.chatLost': 'Не отправлено: зашифрованный звонок закончился раньше, чем сообщение ушло',
             'e2ee.chatMissed': 'Часть зашифрованных сообщений собеседника не дошла',
             'e2ee.clearNotAgreed': 'Не отправлено: звонок больше не зашифрован сквозным шифрованием, а продолжать без шифрования вы не соглашались',
             // Поддержка браузера

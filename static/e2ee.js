@@ -605,28 +605,39 @@
     /**
      * Encrypt and send a chat message to the single peer over the (un-stored)
      * user-message channel.  Returns true if it was sent encrypted, false if
-     * the caller should fall back to a normal cleartext chat message.
+     * the caller should fall back to a normal cleartext chat message, null if
+     * the encrypted call it was written in ended before it went out (then it
+     * must not go out at all).
      * @param {string} kind - '' or 'me'
      * @param {string} text
-     * @returns {Promise<boolean>}
+     * @returns {Promise<boolean|null>}
      */
     E2EE.prototype.sendChat = function(kind, text) {
-        let run = this.chatSendQueue.then(() => this.sendChatNow(kind, text));
+        if(!this.canChat())
+            return Promise.resolve(false);
+        // The session the user wrote this in.  If it is over by the time the
+        // message would go out, the answer is null, not false: false invites
+        // the caller to send it as ordinary chat, which would put words
+        // written for an encrypted call on the server.
+        let gen = this.generation;
+        let run = this.chatSendQueue.then(
+            () => this.sendChatNow(kind, text, gen),
+        );
         this.chatSendQueue = run.catch(() => {});
         return run;
     };
 
-    E2EE.prototype.sendChatNow = async function(kind, text) {
-        if(!this.canChat())
-            return false;
-        let gen = this.generation, peer = this.peer, key = this.chatSendKey;
+    E2EE.prototype.sendChatNow = async function(kind, text, gen) {
+        if(gen !== this.generation || !this.canChat())
+            return null; // the call stopped being encrypted before its turn
+        let peer = this.peer, key = this.chatSendKey;
         kind = kind || '';
         let seq = this.chatSendSeq;
         let enc = await C.encryptChat(
             key, text, C.chatAAD(this.sc.id, peer, seq, kind),
         );
-        if(gen !== this.generation)
-            return false; // the session ended while this was being sealed
+        if(gen !== this.generation || !this.canChat())
+            return null; // ... or while it was being sealed
         this.chatSendSeq = seq + 1;
         this.sc.userMessage('e2eechat', peer,
                             {kind: kind, seq: seq, iv: enc.iv, ct: enc.ct},
