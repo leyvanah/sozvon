@@ -6370,7 +6370,11 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
                 if(!res)
                     return;
                 let u = serverConnection.users[id];
-                addToChatbox(id, null, '', (u && u.username) || username,
+                // The sender goes in the peerId slot, where every other
+                // message puts it.  There is no message id: this one was
+                // never in the server's chat history, so there is nothing
+                // for an operator to delete by id.
+                addToChatbox(null, id, '', (u && u.username) || username,
                              time || new Date(), false, false,
                              res.kind, res.text);
             }).catch(function(err) {
@@ -8257,7 +8261,7 @@ function handleInput() {
             // sees the cleartext nor keeps it in chat history.
             e2ee.sendChat(kind, message).then(function(sent) {
                 if(sent)
-                    addToChatbox(serverConnection.id, null, '',
+                    addToChatbox(null, serverConnection.id, '',
                                  serverConnection.username, new Date(),
                                  false, false, kind, message);
                 else
