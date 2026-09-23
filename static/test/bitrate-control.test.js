@@ -280,3 +280,47 @@ test('a receiver that leaves takes its caps with it', () => {
     assert.strictEqual(caps.get('s1', 1), 800000);
     assert.strictEqual(caps.get('s2', 1), null);
 });
+
+test('a start cap is asked for at once, then opened while healthy', () => {
+    let ctl = new b.Controller(b.START_CAP);
+    let rx = receiver();
+    let first = ctl.update(rx.next({bps: 300000}));
+    assert.strictEqual(first.cap, b.START_CAP);
+    assert.ok(first.changed && first.send, 'sent before the sender climbs');
+
+    // The sender obeys and the link keeps up.
+    let caps = [];
+    for(let i = 0; i < 300 && ctl.cap !== null; i++)
+        caps.push(ctl.update(rx.next({bps: ctl.cap})).cap);
+    assert.strictEqual(ctl.cap, null, 'full quality once it has proved itself');
+    let firstRise = caps.findIndex(c => c !== b.START_CAP);
+    assert.ok((firstRise + 1) * STEP >= b.MIN_INCREASE_GAP,
+              'not opened in the first seconds');
+    assert.ok(caps.length * STEP <= 120000,
+              `lifted after ${caps.length * STEP / 1000} s`);
+});
+
+test('a start cap the path cannot carry still shrinks', () => {
+    let ctl = new b.Controller(b.START_CAP);
+    let rx = receiver();
+    feed(ctl, rx, WARM + b.BAD_TO_DECREASE,
+         {audioDelay: 0.5, bps: b.START_CAP});
+    assert.ok(ctl.cap !== null && ctl.cap < b.START_CAP);
+});
+
+test('video that stops and resumes starts again from the start cap', () => {
+    let ctl = new b.Controller(b.START_CAP);
+    let rx = receiver();
+    feed(ctl, rx, 3);
+    let off = ctl.update(rx.next({video: false}));
+    assert.strictEqual(off.cap, null);
+    let on = ctl.update(rx.next());
+    assert.strictEqual(on.cap, b.START_CAP);
+    assert.ok(on.send);
+});
+
+test('a start cap from the wire is sanitised like any other', () => {
+    assert.strictEqual(new b.Controller(NaN).startCap, null);
+    assert.strictEqual(new b.Controller(1).startCap, b.MIN_CAP);
+    assert.strictEqual(new b.Controller().startCap, null);
+});

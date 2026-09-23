@@ -1855,23 +1855,22 @@ function gotDownStats(stats) {
 // --- Call quality (Sozvon) -------------------------------------------------
 //
 // Every stream is polled with getStats() and graded by connection-quality.js;
-// the settled level is drawn on the tile and announced in plain words.  This
+// the settled level is drawn on the tile: bars and a short caption, with the
+// longer explanation as the tooltip.  It used to be announced in toasts as
+// well, one per change and one more on recovery, which on a shaky link meant
+// a stack of banners over the call; the pill says the same without covering
+// anything, and its role=status still reads the caption out.  This
 // runs on its own timer rather than through Stream.onstats, which only fires
 // while activity detection is on and whose reduced stats drop the counters
 // needed here.
 
 const qualityInterval = 2000;
-// A degradation toast is not repeated for the same person within this long,
-// unless the link gets worse than what was last announced.
-const qualityToastCooldown = 30000;
 
 /**
- * What has been said about each connection: "self" for our own up streams,
- * a user id for everyone else, "everyone" for the all-links-degraded case.
- *
- * @type {Map<string, {level: string, toasted: string|null, at: number}>}
+ * Every remote link is degraded at once while our own up links look fine.
+ * The common factor is then us, and our own tile says so.
  */
-let qualityAnnounced = new Map();
+let qualityEveryone = false;
 
 /** @returns {any} */
 function qualityApi() {
@@ -1928,7 +1927,7 @@ async function pollQuality() {
         if(report)
             feedBitrate(c, report);
     }));
-    announceQuality();
+    reflectEveryoneQuality();
 }
 
 setInterval(pollQuality, qualityInterval);
@@ -1974,7 +1973,7 @@ function feedBitrate(c, report) {
         return;
     }
     if(!c.userdata.bitrate)
-        c.userdata.bitrate = new B.Controller();
+        c.userdata.bitrate = new B.Controller(B.START_CAP);
     let r = c.userdata.bitrate.update(B.snapshot(report.values(), Date.now()));
     if(r.changed)
         console.info('bitrate: asking', c.username || c.source,
@@ -2071,13 +2070,17 @@ async function applySendCap(c) {
     if(!c.pc)
         return;
     let s = doSimulcast();
-    let t = autoThroughput(c, getMaxVideoThroughput(), s);
+    let setting = getMaxVideoThroughput();
+    let t = autoThroughput(c, setting, s);
+    // A stream nobody has set yet is sending what setUpStream gave it, the
+    // plain setting.  A cap that arrives before this stream's first poll
+    // -- the start cap always may -- must still differ from that, or it is
+    // never applied.
+    if(!('sentThroughput' in c.userdata))
+        c.userdata.sentThroughput = setting;
     if(c.userdata.sentThroughput === t)
         return;
-    let first = !('sentThroughput' in c.userdata);
     c.userdata.sentThroughput = t;
-    if(first)
-        return;
     console.info('bitrate: sending', c.id, 'at', t === null ? 'full rate' : t);
     await setSendParameters(c, t, s);
 }
@@ -2092,6 +2095,9 @@ function setQualityIndicator(c) {
     if(!div)
         return;
     let level = streamQuality(c);
+    let everyone = c.up && qualityEveryone && level === 'good';
+    if(everyone)
+        level = 'weak';
     let ind = div.querySelector('.conn-quality');
     if(!ind) {
         ind = document.createElement('div');
@@ -2107,13 +2113,15 @@ function setQualityIndicator(c) {
         ind.appendChild(text);
         div.appendChild(ind);
     }
-    if(ind instanceof HTMLElement && ind.dataset.level !== level) {
+    if(!(ind instanceof HTMLElement))
+        return;
+    let hint = qualityHint(c, level, everyone);
+    if(ind.dataset.level !== level || ind.title !== hint) {
         ind.dataset.level = level;
-        let text = qualityLabel(level);
-        ind.title = text;
+        ind.title = hint;
         let span = ind.querySelector('.conn-quality-text');
         if(span)
-            span.textContent = text;
+            span.textContent = qualityLabel(level);
     }
 }
 
@@ -2131,79 +2139,38 @@ function qualityLabel(level) {
 }
 
 /**
- * The toast for a change of level, or null if the change is not worth one.
+ * The tooltip of the pill: what the level means and what to do about it.
  *
- * @param {boolean} self
+ * @param {Stream} c
  * @param {string} level
- * @param {string} who
- * @returns {string|null}
+ * @param {boolean} everyone - shown on our tile for the everyone case
+ * @returns {string}
  */
-function qualityMessage(self, level, who) {
+function qualityHint(c, level, everyone) {
     let t = Sozvon.i18n.t;
-    if(self) {
+    if(everyone)
+        return t('quality.everyone');
+    if(c.up) {
         switch(level) {
         case 'weak': return t('quality.selfWeak');
         case 'bad': return t('quality.selfBad');
         case 'lost': return t('quality.selfLost');
-        case 'good': return t('quality.selfRestored');
         }
     } else {
+        let who = c.username || t('quality.anonymous');
         switch(level) {
         case 'weak': return t('quality.peerWeak', {who});
         case 'bad': return t('quality.peerBad', {who});
         case 'lost': return t('quality.peerLost', {who});
-        case 'good': return t('quality.peerRestored', {who});
         }
     }
-    return null;
+    return '';
 }
 
 /**
- * Compare each connection's level with what was last said about it and
- * toast the difference.
- *
- * @param {string} key
- * @param {string} level
- * @param {() => string|null} message
- * @param {boolean} [quiet] - record the level without toasting a
- *     degradation (a broader toast already covers it).
+ * Notice when every remote link degrades at once and mark our own tiles.
  */
-function announce(key, level, message, quiet) {
-    let Q = qualityApi();
-    let now = Date.now();
-    let a = qualityAnnounced.get(key);
-    if(!a) {
-        a = {level: 'good', toasted: null, at: 0};
-        qualityAnnounced.set(key, a);
-    }
-    if(a.level === level)
-        return;
-    a.level = level;
-
-    if(level === 'good') {
-        // Only say it is fixed if we said it was broken.
-        if(a.toasted) {
-            let m = message();
-            if(m)
-                displayMessage(m);
-            a.toasted = null;
-        }
-        return;
-    }
-    if(quiet)
-        return;
-    let worse = !a.toasted || Q.rank(level) > Q.rank(a.toasted);
-    if(!worse && now - a.at < qualityToastCooldown)
-        return;
-    let m = message();
-    if(!m)
-        return;
-    displayWarning(m);
-    a.toasted = level;
-    a.at = now;
-}
-
-function announceQuality() {
+function reflectEveryoneQuality() {
     let Q = qualityApi();
     if(!Q || !serverConnection)
         return;
@@ -2212,40 +2179,25 @@ function announceQuality() {
     for(let id in serverConnection.up)
         self = Q.worst(self, streamQuality(serverConnection.up[id]));
 
-    /** @type {Map<string, {level: string, name: string}>} */
+    /** @type {Map<string, string>} */
     let peers = new Map();
     for(let id in serverConnection.down) {
         let c = serverConnection.down[id];
         let key = c.source || id;
-        let p = peers.get(key);
-        let level = streamQuality(c);
-        if(!p)
-            peers.set(key, {level, name: c.username ||
-                            Sozvon.i18n.t('quality.anonymous')});
-        else
-            p.level = Q.worst(p.level, level);
+        peers.set(key, Q.worst(peers.get(key) || 'good', streamQuality(c)));
     }
 
-    // If every remote link degrades at once, the common factor is us: say so
-    // once instead of blaming each person in turn.  With a single remote
-    // there is no telling the two sides apart from the down link alone.
-    let levels = [...peers.values()].map(p => p.level);
-    let everyone = levels.length >= 2 &&
+    // If every remote link degrades at once, the common factor is us.  With
+    // a single remote there is no telling the two sides apart from the down
+    // link alone.
+    let levels = [...peers.values()];
+    let everyone = self === 'good' && levels.length >= 2 &&
         levels.every(l => l === 'weak' || l === 'bad');
-    let selfDegraded = self !== 'good';
-
-    announce('self', self, () => qualityMessage(true, self, ''));
-    announce('everyone', everyone && !selfDegraded ? 'bad' : 'good',
-             () => Sozvon.i18n.t(everyone ? 'quality.everyone' : 'quality.selfRestored'));
-
-    for(let [key, p] of peers)
-        announce(key, p.level,
-                 () => qualityMessage(false, p.level, p.name),
-                 everyone || selfDegraded);
-
-    for(let key of [...qualityAnnounced.keys()])
-        if(key !== 'self' && key !== 'everyone' && !peers.has(key))
-            qualityAnnounced.delete(key);
+    if(everyone === qualityEveryone)
+        return;
+    qualityEveryone = everyone;
+    for(let id in serverConnection.up)
+        setQualityIndicator(serverConnection.up[id]);
 }
 
 /**
@@ -3904,7 +3856,7 @@ function setMediaStatus(c) {
     // (Sozvon: replaces upstream's "Cannot receive media ..., still trying".)
     if(state === 'failed' || (good && streamQuality(c) === 'lost')) {
         feedQuality(c, state, null);
-        announceQuality();
+        reflectEveryoneQuality();
     }
 }
 
