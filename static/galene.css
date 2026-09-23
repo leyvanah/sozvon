@@ -3607,7 +3607,17 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
 .e2ee-block-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    /* Above everything on the stage, below the dock (1040), so the way out of
+       the call stays reachable.  It sat at 1000 and the empty-room placeholder
+       (.stage-empty, 1010, opaque) was painted over it: the one moment this
+       overlay most needs to be read is a room with nobody in it, which is
+       exactly when that placeholder is up.  1030 rather than 1020, because
+       1020 is taken by the thumbnail lift (body.thumb-over-idle
+       #video-container) and this element comes first in the markup, so at
+       equal depth the lift would bury it again -- with a peer present whose
+       camera is off, which is one of the states that blocks in the first
+       place. */
+    z-index: 1030;
     padding: 1.5rem;
     background: var(--hover-strong);
 }
