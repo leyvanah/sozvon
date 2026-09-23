@@ -3626,6 +3626,12 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     align-items: center;
     justify-content: center;
 }
+/* The reason under the notice: a quieter second line, not a second notice. */
+.e2ee-block-why {
+    margin: 0.6rem 0 0;
+    color: var(--text-2);
+}
+
 .e2ee-block-card {
     max-width: 30rem;
     text-align: center;

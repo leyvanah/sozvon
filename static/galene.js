@@ -5491,6 +5491,20 @@ function enforceE2EEMediaPolicy() {
     let e2ee = serverConnection && serverConnection.e2ee;
     let blocked = !!(e2ee && e2ee.state === 'blocked');
     setVisibility('e2ee-block-overlay', blocked);
+    // Which reason to show under the notice.  The notice itself cannot name
+    // one without guessing, and the guess was wrong for the state where
+    // nobody else is in the room yet and it is this browser that cannot
+    // encrypt.  The lines live in the markup, one per reason, so they are
+    // translated with the rest of the page. (Sozvon)
+    let reasons = {
+        'multipeer': 'e2ee-why-multipeer',
+        'unsupported': 'e2ee-why-unsupported',
+        'peer-unsupported': 'e2ee-why-peer-unsupported',
+        'transform': 'e2ee-why-transform',
+    };
+    for(let reason in reasons)
+        setVisibility(reasons[reason],
+                      blocked && !!e2ee && e2ee.detail === reason);
     if(blocked) {
         // Never publish in clear when encryption is required.
         closeUpMedia('camera');

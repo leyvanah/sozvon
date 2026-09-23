@@ -468,12 +468,12 @@ test('local media is not published while the controller refuses', () => {
     assert.strictEqual(mayPublish(null), true);
 });
 
-/** @param {string} state */
-function runMediaPolicy(state) {
+/** @param {string} state @param {string} [detail] */
+function runMediaPolicy(state, detail) {
     const closed = [];
     const visibility = {};
     const ctx = vm.createContext({
-        serverConnection: {e2ee: {state: state}},
+        serverConnection: {e2ee: {state: state, detail: detail || null}},
         setVisibility: (id, visible) => visibility[id] = visible,
         closeUpMedia: label => closed.push(label),
         setButtonsVisibility: () => {},
@@ -490,6 +490,31 @@ test('a blocked call has its local media closed and says so on screen', () => {
         'local media kept publishing after the call was blocked',
     );
     assert.strictEqual(r.visibility['e2ee-block-overlay'], true);
+});
+
+// The notice says what is wrong with this call, not what is usually wrong
+// with a call: the version that guessed named a peer who could not encrypt
+// and a crowd of three, in a room with nobody in it at all.
+test('the blocked notice shows the reason this call has, and only that one', () => {
+    const lines = {
+        'multipeer': 'e2ee-why-multipeer',
+        'unsupported': 'e2ee-why-unsupported',
+        'peer-unsupported': 'e2ee-why-peer-unsupported',
+        'transform': 'e2ee-why-transform',
+    };
+    for(const reason of Object.keys(lines)) {
+        const r = runMediaPolicy('blocked', reason);
+        for(const [other, id] of Object.entries(lines))
+            assert.strictEqual(
+                r.visibility[id], other === reason,
+                `blocked for ${reason}: ${id} should be ` +
+                `${other === reason ? 'shown' : 'hidden'}`,
+            );
+    }
+    // A call that is not blocked says nothing at all.
+    const fine = runMediaPolicy('established');
+    for(const id of Object.values(lines))
+        assert.strictEqual(fine.visibility[id], false, id);
 });
 
 test('a call that is merely unencrypted keeps publishing', () => {
