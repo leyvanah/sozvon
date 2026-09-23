@@ -150,7 +150,8 @@ test('a completion that outlives its session writes nothing back', async () => {
     );
     assert.strictEqual(e.peer, null);
     assert.strictEqual(e.sas, null, 'an authentication string outlived its session');
-    assert.strictEqual(e.chatKey, null, 'a chat key outlived its session');
+    assert.strictEqual(e.chatSendKey, null, 'a chat key outlived its session');
+    assert.strictEqual(e.chatRecvKey, null, 'a chat key outlived its session');
 });
 
 // The same run, stopped earlier: the media keys must not reach the worker
@@ -183,7 +184,7 @@ test('a completion that is still current establishes the session', async () => {
     await e.finalize();
     assert.strictEqual(e.state, 'established');
     assert.ok(e.sas && e.sas.length > 0);
-    assert.ok(e.chatKey);
+    assert.ok(e.chatSendKey && e.chatRecvKey);
     assert.strictEqual(
         e.worker.messages.filter(m => m.type === 'key').length, 4,
         'one key per (sender, media kind)',
@@ -1316,4 +1317,116 @@ test('an encrypted call is remembered past the connection it was on', () => {
     assert.strictEqual(ctx.e2eeWasEncrypted, true);
     ctx.gotE2EEState.call({state: 'blocked'});
     assert.strictEqual(ctx.e2eeWasEncrypted, true, 'forgotten on the next change');
+});
+
+// ---- encrypted chat the server relays ---------------------------------------
+//
+// The server cannot read encrypted chat, but it decides what reaches whom and
+// under whose id.  A message must open only as what it was: from the peer, to
+// us, once, in its place.
+
+/**
+ * Two controllers in an established call, with the encrypted chat each one
+ * sends caught on its way to the server.
+ */
+async function chatting(ctx) {
+    const {a, b} = await handshake(ctx);
+    const outbox = {aaa: [], zzz: []};
+    for(const [e, id] of [[a, 'aaa'], [b, 'zzz']])
+        e.sc.userMessage = (kind, dest, payload) => {
+            if(kind === 'e2eechat')
+                outbox[id].push(payload);
+        };
+    return {a: a, b: b, outbox: outbox};
+}
+
+test('encrypted chat reaches the other side', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    assert.strictEqual(await a.sendChat('', 'hello'), true);
+    const got = await b.decryptChat('aaa', outbox.aaa[0]);
+    assert.strictEqual(got.text, 'hello');
+    assert.strictEqual(got.kind, '');
+    assert.strictEqual(got.missed, 0);
+});
+
+test("your own message sent back to you does not open as the other person's", async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'something I said');
+    // The server hands it back to its author under the peer's id.
+    const got = await a.decryptChat('zzz', outbox.aaa[0]).catch(() => null);
+    assert.strictEqual(got, null, 'your own words were shown as theirs');
+    // The same message does open where it was sent: the refusal above is
+    // about who it came back to, not a message that opens nowhere.
+    assert.strictEqual(
+        (await b.decryptChat('aaa', outbox.aaa[0])).text, 'something I said',
+    );
+});
+
+test('a message comes only from the peer', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'hello');
+    assert.strictEqual(
+        await b.decryptChat('somebody-else', outbox.aaa[0]), null,
+        'a message was attributed to whoever the server said sent it',
+    );
+    assert.strictEqual((await b.decryptChat('aaa', outbox.aaa[0])).text, 'hello');
+});
+
+test('a message is shown once, and in its place', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'one');
+    await a.sendChat('', 'two');
+    const [one, two] = outbox.aaa;
+
+    assert.strictEqual((await b.decryptChat('aaa', two)).text, 'two');
+    assert.strictEqual(
+        await b.decryptChat('aaa', one), null,
+        'an older message was shown after a newer one',
+    );
+    assert.strictEqual(
+        await b.decryptChat('aaa', two), null, 'a message was replayed',
+    );
+});
+
+// Changing the number does not help: it is sealed into the message.
+test('a message given another number does not open', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'hello');
+    const moved = Object.assign({}, outbox.aaa[0], {seq: 5});
+    await assert.rejects(b.decryptChat('aaa', moved));
+    // and a message that did not open does not move the count on
+    assert.strictEqual((await b.decryptChat('aaa', outbox.aaa[0])).text, 'hello');
+});
+
+test('a message held back shows up as a gap', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'one');
+    await a.sendChat('', 'two');
+    await a.sendChat('', 'three');
+    assert.strictEqual((await b.decryptChat('aaa', outbox.aaa[0])).missed, 0);
+    const got = await b.decryptChat('aaa', outbox.aaa[2]);
+    assert.strictEqual(got.text, 'three');
+    assert.strictEqual(got.missed, 1);
+});
+
+// Two messages sent at once must still go out in their order, or the other
+// side would take the second for a replay of the first.
+test('messages sent at once keep their order', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await Promise.all([
+        a.sendChat('', 'one'), a.sendChat('me', 'two'), a.sendChat('', 'three'),
+    ]);
+    assert.deepStrictEqual(outbox.aaa.map(m => m.seq), [0, 1, 2]);
+    const texts = await Promise.all(
+        outbox.aaa.map(m => b.decryptChat('aaa', m)),
+    );
+    assert.deepStrictEqual(texts.map(t => t.text), ['one', 'two', 'three']);
+    assert.strictEqual(texts[1].kind, 'me');
 });

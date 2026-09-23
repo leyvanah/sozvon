@@ -340,19 +340,21 @@ test('an unknown key id fails loudly', async () => {
 
 // ---- chat -----------------------------------------------------------------
 
+const aad = crypto.chatAAD('alice', 'bob', 0, '');
+
 test('chat survives a round trip', async () => {
     const h = await handshake();
-    const key = await crypto.deriveChatKey(h.aSecret, h.t);
+    const key = await crypto.deriveChatKey(h.aSecret, h.t, 'alice');
     const text = 'Привет — hello 👋 <b>not markup</b>';
-    const {iv, ct} = await crypto.encryptChat(key, text);
-    assert.strictEqual(await crypto.decryptChat(key, iv, ct), text);
+    const {iv, ct} = await crypto.encryptChat(key, text, aad);
+    assert.strictEqual(await crypto.decryptChat(key, iv, ct, aad), text);
 });
 
 test('chat uses a fresh IV per message', async () => {
     const h = await handshake();
-    const key = await crypto.deriveChatKey(h.aSecret, h.t);
-    const one = await crypto.encryptChat(key, 'same text');
-    const two = await crypto.encryptChat(key, 'same text');
+    const key = await crypto.deriveChatKey(h.aSecret, h.t, 'alice');
+    const one = await crypto.encryptChat(key, 'same text', aad);
+    const two = await crypto.encryptChat(key, 'same text', aad);
     assert.notStrictEqual(one.iv, two.iv, 'the IV repeated');
     assert.notStrictEqual(one.ct, two.ct);
 });
@@ -360,21 +362,52 @@ test('chat uses a fresh IV per message', async () => {
 test('chat from another call does not decrypt', async () => {
     const h1 = await handshake();
     const h2 = await handshake();
-    const key1 = await crypto.deriveChatKey(h1.aSecret, h1.t);
-    const key2 = await crypto.deriveChatKey(h2.aSecret, h2.t);
-    const {iv, ct} = await crypto.encryptChat(key1, 'secret');
-    await assert.rejects(crypto.decryptChat(key2, iv, ct));
+    const key1 = await crypto.deriveChatKey(h1.aSecret, h1.t, 'alice');
+    const key2 = await crypto.deriveChatKey(h2.aSecret, h2.t, 'alice');
+    const {iv, ct} = await crypto.encryptChat(key1, 'secret', aad);
+    await assert.rejects(crypto.decryptChat(key2, iv, ct, aad));
+});
+
+// One key for both directions let a message sent back to its author open as
+// one from the other side.
+test('each direction of chat has a key of its own', async () => {
+    const h = await handshake();
+    const alice = await crypto.deriveChatKey(h.aSecret, h.t, 'alice');
+    const bob = await crypto.deriveChatKey(h.aSecret, h.t, 'bob');
+    const {iv, ct} = await crypto.encryptChat(alice, 'secret', aad);
+    await assert.rejects(
+        crypto.decryptChat(bob, iv, ct, aad),
+        "one direction's key opened the other's message",
+    );
+});
+
+// What a message is sealed together with has to be what it is opened with:
+// another sender, recipient, place in the sequence or kind does not open.
+test('a chat message opens only with what it was sent with', async () => {
+    const h = await handshake();
+    const key = await crypto.deriveChatKey(h.aSecret, h.t, 'alice');
+    const {iv, ct} = await crypto.encryptChat(key, 'secret', aad);
+    for(const [what, other] of [
+        ['sender', crypto.chatAAD('bob', 'bob', 0, '')],
+        ['recipient', crypto.chatAAD('alice', 'alice', 0, '')],
+        ['number', crypto.chatAAD('alice', 'bob', 1, '')],
+        ['kind', crypto.chatAAD('alice', 'bob', 0, 'me')],
+        // the ids are two fields, not one string
+        ['split', crypto.chatAAD('alic', 'ebob', 0, '')],
+    ])
+        await assert.rejects(
+            crypto.decryptChat(key, iv, ct, other),
+            `a message opened with another ${what}`,
+        );
 });
 
 test('the chat key is not the media key', async () => {
     const h = await handshake();
-    const chat = await crypto.deriveChatKey(h.aSecret, h.t);
-    const media = await crypto.deriveMediaKey(
-        h.aSecret, h.t, 'chat',
-    );
-    const {iv, ct} = await crypto.encryptChat(chat, 'secret');
+    const chat = await crypto.deriveChatKey(h.aSecret, h.t, 'alice');
+    const media = await crypto.deriveMediaKey(h.aSecret, h.t, 'alice');
+    const {iv, ct} = await crypto.encryptChat(chat, 'secret', aad);
     await assert.rejects(
-        crypto.decryptChat(media, iv, ct),
+        crypto.decryptChat(media, iv, ct, aad),
         'the two derivations collided',
     );
 });

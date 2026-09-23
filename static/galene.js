@@ -7668,9 +7668,13 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
         return;
     case 'e2eechat':
         if(e2eeActive() && serverConnection.e2ee) {
-            serverConnection.e2ee.decryptChat(message).then(function(res) {
+            serverConnection.e2ee.decryptChat(id, message).then(function(res) {
                 if(!res)
                     return;
+                // The server relays the encrypted chat and can hold some of
+                // it back; the sequence numbers show that it did.
+                if(res.missed > 0)
+                    displayWarning(Sozvon.i18n.t('e2ee.chatMissed'));
                 let G = guestNameApi();
                 if(G) {
                     let m = G.classify(res.kind, res.text);

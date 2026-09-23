@@ -67,7 +67,16 @@
         this.handshakeTimer = null;
         this.secret = null;
         this.peerSupports = null;    // null unknown | true | false (peer can encrypt)
-        this.chatKey = null;         // AES-GCM key for two-party chat
+        // Two-party chat: a key per direction, and a sequence number per
+        // direction that the messages are authenticated with.
+        this.chatSendKey = null;
+        this.chatRecvKey = null;
+        this.chatSendSeq = 0;        // the number our next message gets
+        this.chatRecvSeq = -1;       // the last number we accepted
+        // Chat is encrypted and decrypted one message at a time, in order:
+        // numbers taken out of order would read as a replay.
+        this.chatSendQueue = Promise.resolve();
+        this.chatRecvQueue = Promise.resolve();
 
         // Whether attaching an encryptor has ever failed.  `supported` is
         // what the browser claimed at startup; this is what happened when we
@@ -265,13 +274,20 @@
         this.secret = null;
         this.sas = null;
         this.peerSupports = null;
-        this.chatKey = null;
+        this.dropChatKeys();
         this.stopHandshakeTimer();
         if(this.worker) {
             this.worker.postMessage({type: 'clear'});
             // Safe default: drop unkeyed frames rather than leak cleartext.
             this.worker.postMessage({type: 'mode', cleartext: false});
         }
+    };
+
+    E2EE.prototype.dropChatKeys = function() {
+        this.chatSendKey = null;
+        this.chatRecvKey = null;
+        this.chatSendSeq = 0;
+        this.chatRecvSeq = -1;
     };
 
     E2EE.prototype.stopHandshakeTimer = function() {
@@ -295,7 +311,7 @@
         this.stopHandshakeTimer();
         this.secret = null;
         this.sas = null;
-        this.chatKey = null;
+        this.dropChatKeys();
         if(this.worker) {
             this.worker.postMessage({type: 'clear'});
             this.worker.postMessage({type: 'mode', cleartext: false});
@@ -499,11 +515,16 @@
             }
         }
 
-        // Key for two-party text chat, bound to the same transcript.
-        let chatKey = await C.deriveChatKey(secret, salt);
+        // Keys for two-party text chat, bound to the same transcript: ours
+        // to send with, the peer's to receive with.
+        let chatSendKey = await C.deriveChatKey(secret, salt, this.sc.id);
+        let chatRecvKey = await C.deriveChatKey(secret, salt, peer);
         if(gen !== this.generation)
             return;
-        this.chatKey = chatKey;
+        this.chatSendKey = chatSendKey;
+        this.chatRecvKey = chatRecvKey;
+        this.chatSendSeq = 0;
+        this.chatRecvSeq = -1;
 
         // Switch the worker to encrypt/decrypt (it may have been forwarding
         // cleartext while this call was momentarily a >2-party or downgraded).
@@ -578,7 +599,7 @@
 
     /** Whether outgoing chat can be end-to-end encrypted right now. */
     E2EE.prototype.canChat = function() {
-        return this.state === 'established' && !!this.chatKey && !!this.peer;
+        return this.state === 'established' && !!this.chatSendKey && !!this.peer;
     };
 
     /**
@@ -589,25 +610,74 @@
      * @param {string} text
      * @returns {Promise<boolean>}
      */
-    E2EE.prototype.sendChat = async function(kind, text) {
+    E2EE.prototype.sendChat = function(kind, text) {
+        let run = this.chatSendQueue.then(() => this.sendChatNow(kind, text));
+        this.chatSendQueue = run.catch(() => {});
+        return run;
+    };
+
+    E2EE.prototype.sendChatNow = async function(kind, text) {
         if(!this.canChat())
             return false;
-        let enc = await C.encryptChat(this.chatKey, text);
-        this.sc.userMessage('e2eechat', this.peer,
-                            {kind: kind || '', iv: enc.iv, ct: enc.ct}, true);
+        let gen = this.generation, peer = this.peer, key = this.chatSendKey;
+        kind = kind || '';
+        let seq = this.chatSendSeq;
+        let enc = await C.encryptChat(
+            key, text, C.chatAAD(this.sc.id, peer, seq, kind),
+        );
+        if(gen !== this.generation)
+            return false; // the session ended while this was being sealed
+        this.chatSendSeq = seq + 1;
+        this.sc.userMessage('e2eechat', peer,
+                            {kind: kind, seq: seq, iv: enc.iv, ct: enc.ct},
+                            true);
         return true;
     };
 
     /**
      * Decrypt a received 'e2eechat' user message.
+     *
+     * Only a message from the peer of the current session opens, only once,
+     * and only in the order it was sent: each carries the sender's sequence
+     * number, authenticated together with who sent it to whom.  A message the
+     * server sends back to its author, replays or reorders is dropped.
+     * Messages it withholds show up as a gap, which is reported as `missed`.
+     *
+     * @param {string} from - the sender's id, as the server gives it
      * @param {any} payload
-     * @returns {Promise<{kind: string, text: string}|null>}
+     * @returns {Promise<{kind: string, text: string, missed: number}|null>}
      */
-    E2EE.prototype.decryptChat = async function(payload) {
-        if(!this.chatKey || !payload || !payload.iv || !payload.ct)
+    E2EE.prototype.decryptChat = function(from, payload) {
+        let run = this.chatRecvQueue.then(
+            () => this.decryptChatNow(from, payload),
+        );
+        this.chatRecvQueue = run.catch(() => {});
+        return run;
+    };
+
+    E2EE.prototype.decryptChatNow = async function(from, payload) {
+        if(this.state !== 'established' || !this.chatRecvKey ||
+           from !== this.peer || !payload ||
+           typeof payload.iv !== 'string' || typeof payload.ct !== 'string')
             return null;
-        let text = await C.decryptChat(this.chatKey, payload.iv, payload.ct);
-        return {kind: payload.kind || '', text: text};
+        let seq = payload.seq;
+        if(!Number.isSafeInteger(seq) || seq <= this.chatRecvSeq ||
+           seq >= 2 ** 48)
+            return null;
+        let kind = typeof payload.kind === 'string' ? payload.kind : '';
+        let gen = this.generation;
+        let text = await C.decryptChat(
+            this.chatRecvKey, payload.iv, payload.ct,
+            C.chatAAD(from, this.sc.id, seq, kind),
+        );
+        if(gen !== this.generation)
+            return null;
+        // Moved on only once the message has opened: a number on something
+        // that does not open says nothing, and must not shut out the real
+        // messages after it.
+        let missed = seq - this.chatRecvSeq - 1;
+        this.chatRecvSeq = seq;
+        return {kind: kind, text: text, missed: missed};
     };
 
     global.SozvonE2EE = E2EE;

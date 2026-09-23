@@ -254,45 +254,74 @@
     // ---- chat encryption ----------------------------------------------------
 
     /**
-     * Derive the AES-256-GCM key used to encrypt text chat in a two-party
-     * end-to-end encrypted call.  Bound to the same transcript as the media
-     * keys and the SAS, so it inherits their man-in-the-middle protection.
+     * Derive the AES-256-GCM key one sender encrypts text chat with in a
+     * two-party end-to-end encrypted call.  Bound to the same transcript as
+     * the media keys and the SAS, so it inherits their man-in-the-middle
+     * protection.  Each direction has a key of its own, so a message sent back
+     * to its author does not open as one from the other side.
      * @param {Uint8Array} secret
      * @param {Uint8Array} salt - transcript() of this handshake
+     * @param {string} senderId
      * @returns {Promise<CryptoKey>}
      */
-    async function deriveChatKey(secret, salt) {
-        let raw = await hkdf(secret, salt, 'chat', 32);
+    async function deriveChatKey(secret, salt, senderId) {
+        let raw = await hkdf(secret, salt, 'chat|' + senderId, 32);
         return await subtle.importKey(
             'raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'],
         );
     }
 
     /**
-     * Encrypt a chat message.  Chat has no monotonic counter, so we use a
-     * fresh random 96-bit IV per message (safe for AES-GCM at chat volumes).
+     * What a chat message is authenticated together with: who sent it to
+     * whom, its place in the sender's sequence and its kind.  A message
+     * replayed, reordered or passed off as another kind then fails to open.
+     * @param {string} senderId
+     * @param {string} recipientId
+     * @param {number} seq - 0, 1, 2... per sender
+     * @param {string} kind
+     * @returns {Uint8Array}
+     */
+    function chatAAD(senderId, recipientId, seq, kind) {
+        let n = new Uint8Array(6);
+        writeUint48(n, 0, seq);
+        return concat(
+            te.encode('sozvon-chat-v' + PROTOCOL_VERSION),
+            lengthPrefixed(te.encode(senderId)),
+            lengthPrefixed(te.encode(recipientId)),
+            n,
+            lengthPrefixed(te.encode(kind)),
+        );
+    }
+
+    /**
+     * Encrypt a chat message.  A fresh random 96-bit IV per message is safe
+     * for AES-GCM at chat volumes.
      * @param {CryptoKey} key
      * @param {string} text
+     * @param {Uint8Array} aad - chatAAD() of this message
      * @returns {Promise<{iv: string, ct: string}>} base64 IV and ciphertext
      */
-    async function encryptChat(key, text) {
+    async function encryptChat(key, text, aad) {
         let iv = global.crypto.getRandomValues(new Uint8Array(12));
         let ct = new Uint8Array(await subtle.encrypt(
-            {name: 'AES-GCM', iv: iv}, key, te.encode(text),
+            {name: 'AES-GCM', iv: iv, additionalData: aad}, key, te.encode(text),
         ));
         return {iv: b64(iv), ct: b64(ct)};
     }
 
     /**
-     * Decrypt a chat message produced by encryptChat.  Throws on tampering.
+     * Decrypt a chat message produced by encryptChat.  Throws on tampering,
+     * and on associated data other than it was sealed with.
      * @param {CryptoKey} key
      * @param {string} ivB64
      * @param {string} ctB64
+     * @param {Uint8Array} aad - chatAAD() the message is expected to carry
      * @returns {Promise<string>}
      */
-    async function decryptChat(key, ivB64, ctB64) {
+    async function decryptChat(key, ivB64, ctB64, aad) {
         let pt = await subtle.decrypt(
-            {name: 'AES-GCM', iv: unb64(ivB64)}, key, unb64(ctB64),
+            {name: 'AES-GCM', iv: unb64(ivB64), additionalData: aad},
+            key, unb64(ctB64),
         );
         return td.decode(pt);
     }
@@ -404,7 +433,7 @@
         // media keys + frames
         deriveMediaKey, encryptFrame, decryptFrame,
         // chat
-        deriveChatKey, encryptChat, decryptChat,
+        deriveChatKey, chatAAD, encryptChat, decryptChat,
         clearPrefixLength, OVERHEAD, TAG_BYTES, TRAILER_BYTES, SALT_BYTES,
     };
 
