@@ -701,9 +701,15 @@ function liftFunctionOr(ctx, file, name, before) {
 }
 
 /** @param {string|null} state - the controller state, or null for no connection */
-function mayPublish(state) {
+/**
+ * @param {string|null} state
+ * @param {boolean} [whileAsking] - what mayPublishWhileAsking() answers
+ */
+function mayPublish(state, whileAsking) {
     const ctx = vm.createContext({
-        serverConnection: state === null ? null : {e2ee: {state: state}},
+        serverConnection: state === null ? null : {e2ee: {
+            state: state, mayPublishWhileAsking: () => !!whileAsking,
+        }},
     });
     vm.runInContext(liftFunction('galene.js', 'mayPublishLocalMedia'), ctx);
     return ctx.mayPublishLocalMedia();
@@ -729,18 +735,23 @@ test('local media is not published while the controller refuses', () => {
  * @param {string} [detail]
  * @param {boolean} [consent] - refused only until the user agrees
  */
-function runMediaPolicy(state, detail, consent) {
+function runMediaPolicy(state, detail, consent, whileAsking) {
     const closed = [];
     const visibility = {};
     const ctx = vm.createContext({
         serverConnection: {e2ee: {
             state: state, detail: detail || null,
             awaitsClearConsent: () => !!consent,
+            mayPublishWhileAsking: () => !!whileAsking,
         }},
         setVisibility: (id, visible) => visibility[id] = visible,
         closeUpMedia: label => closed.push(label),
         setButtonsVisibility: () => {},
     });
+    // The policy asks mayPublishLocalMedia() whether to close the camera;
+    // before it did, it closed on every refusal.
+    liftFunctionOr(ctx, 'galene.js', 'mayPublishLocalMedia',
+                   'function mayPublishLocalMedia() { return false; }');
     vm.runInContext(liftFunction('galene.js', 'enforceE2EEMediaPolicy'), ctx);
     ctx.enforceE2EEMediaPolicy();
     return {closed: closed, visibility: visibility};
@@ -1215,8 +1226,7 @@ test('chat falls back to an ordinary message where encryption is not required', 
 });
 
 test('a call waiting for the user to agree offers the way on, and says why', () => {
-    const r = runMediaPolicy('blocked', 'multipeer', true);
-    assert.deepStrictEqual(r.closed, ['camera', 'screenshare']);
+    const r = runMediaPolicy('blocked', 'multipeer', true, true);
     assert.strictEqual(r.visibility['e2ee-block-overlay'], true);
     assert.strictEqual(r.visibility['e2ee-block-consent'], true);
     assert.strictEqual(r.visibility['e2ee-continue-clear'], true);
@@ -1481,4 +1491,88 @@ test('a message whose encrypted call ended is not sent in clear', async () => {
     );
     assert.deepStrictEqual(r.errors, ['e2ee.chatLost']);
     assert.strictEqual(r.input.value, 'text for the other person');
+});
+
+// ---- a refusal that may go away by itself -----------------------------------
+//
+// A participant who reconnects gets a new id while the server keeps the old,
+// dead session for up to 45 seconds: for that long the room holds three, and
+// an encrypted call is refused until the user agrees.  Closing the camera then
+// would leave both people with their cameras off once the old session is gone
+// and the call is encrypted again.  While this browser can encrypt, nothing
+// leaves in clear anyway: the worker drops what it has no key for.
+
+test('a refusal that only waits for consent keeps the camera', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    a.addUser('old-session-of-zzz');
+    assert.ok(a.awaitsClearConsent());
+    assert.strictEqual(a.mayPublishWhileAsking(), true);
+    assert.strictEqual(lastMode(a), false, 'the worker would pass media in clear');
+
+    const r = runMediaPolicy('blocked', 'multipeer', true, true);
+    assert.deepStrictEqual(
+        r.closed, [],
+        'the camera was closed for a refusal that may go away by itself',
+    );
+    assert.strictEqual(r.visibility['e2ee-block-consent'], true);
+    assert.strictEqual(mayPublish('blocked', true), true,
+                       'the camera could not come back after a reconnect');
+});
+
+// ... and comes back by itself once the old session is gone.
+test('the encrypted call resumes once the extra session is gone', async () => {
+    const ctx = loadController();
+    const {a, b} = await handshake(ctx);
+    a.addUser('old-session-of-zzz');
+    assert.strictEqual(a.state, 'blocked');
+    a.delUser('old-session-of-zzz');
+    assert.strictEqual(a.state, 'handshaking');
+    // relay the new handshake: b answers a's hello
+    const relay = [];
+    a.sc.userMessage = (k, d, p) => relay.push({to: b, from: 'aaa', p: p});
+    b.sc.userMessage = (k, d, p) => relay.push({to: a, from: 'zzz', p: p});
+    // b too saw the extra session come and go
+    b.addUser('old-session-of-zzz');
+    b.delUser('old-session-of-zzz');
+    // delUser() started both handshakes; key generation is asynchronous,
+    // so wait for the messages rather than for a queue that is still empty.
+    for(let i = 0; i < 200 && (a.state !== 'established' ||
+                                b.state !== 'established'); i++) {
+        if(relay.length) {
+            const m = relay.shift();
+            await m.to.onMessage(m.from, m.p);
+        } else {
+            await new Promise(resolve => setImmediate(resolve));
+        }
+    }
+    assert.strictEqual(a.state, 'established');
+    assert.strictEqual(b.state, 'established');
+});
+
+// Where this browser cannot encrypt, a track has no encryptor at all: the
+// camera must still be closed, consent or not.
+test('a browser whose encryptor failed still closes the camera while asking', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    assert.strictEqual(a.attachSender(refusingSender(), 'video'), false);
+    assert.strictEqual(a.state, 'blocked');
+    assert.ok(a.awaitsClearConsent());
+    assert.strictEqual(a.mayPublishWhileAsking(), false);
+
+    const r = runMediaPolicy('blocked', 'transform', true, false);
+    assert.deepStrictEqual(r.closed, ['camera', 'screenshare']);
+    assert.strictEqual(mayPublish('blocked', false), false);
+});
+
+test('a group that requires encryption still closes the camera', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    a.setRequire(true);
+    a.addUser('third');
+    assert.strictEqual(a.mayPublishWhileAsking(), false);
+    assert.deepStrictEqual(
+        runMediaPolicy('blocked', 'multipeer', false, false).closed,
+        ['camera', 'screenshare'],
+    );
 });

@@ -235,6 +235,23 @@
     };
 
     /**
+     * Whether local media may stay published while the call is refused.
+     *
+     * Only while it waits for the user's consent, and only while this browser
+     * can encrypt: the worker is then not in cleartext mode, so every frame
+     * goes through an encryptor that either has no key and drops it, or seals
+     * it for the session that was established.  Nothing leaves in clear, and
+     * the camera does not have to be closed -- which matters when the reason
+     * goes away by itself, as a reconnecting participant's old session does
+     * once the server notices it is dead.  Where this browser cannot encrypt,
+     * a track has no encryptor at all and must be closed.
+     * @returns {boolean}
+     */
+    E2EE.prototype.mayPublishWhileAsking = function() {
+        return this.awaitsClearConsent() && this.canEncrypt();
+    };
+
+    /**
      * The user has agreed to go on without end-to-end encryption.  Holds until
      * the call is encrypted again: every reason to refuse after that is a new
      * question.

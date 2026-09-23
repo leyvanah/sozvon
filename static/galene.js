@@ -3781,7 +3781,11 @@ document.getElementById('media-help-close').onclick = function(e) {
  */
 function mayPublishLocalMedia() {
     let e2ee = serverConnection && serverConnection.e2ee;
-    return !(e2ee && e2ee.state === 'blocked');
+    if(!(e2ee && e2ee.state === 'blocked'))
+        return true;
+    // Refused only until the user agrees, in a browser whose frames still go
+    // through the encryptor: nothing leaves in clear, so the camera may stay.
+    return !!(e2ee.mayPublishWhileAsking && e2ee.mayPublishWhileAsking());
 }
 
 /**
@@ -6711,7 +6715,7 @@ function enforceE2EEMediaPolicy() {
     for(let reason in reasons)
         setVisibility(reasons[reason],
                       blocked && !!e2ee && e2ee.detail === reason);
-    if(blocked) {
+    if(blocked && !mayPublishLocalMedia()) {
         // Never publish in clear when encryption is required.
         closeUpMedia('camera');
         closeUpMedia('screenshare');
@@ -10569,8 +10573,8 @@ document.getElementById('rejoinbutton').onclick = function(e) {
 };
 
 // Sozvon: the user agrees to go on without end-to-end encryption in a call
-// that has lost it.  Media stays off: the camera and microphone were closed
-// when the call was refused, and turning them on again is the user's to do.
+// that has lost it.  Media is left as it is: whatever is still published goes
+// on, now in clear, and what the refusal closed is the user's to turn on.
 document.getElementById('e2ee-continue-clear').onclick = function(e) {
     e.preventDefault();
     let e2ee = serverConnection && serverConnection.e2ee;
