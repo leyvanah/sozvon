@@ -4468,6 +4468,45 @@ body.drawer-open .sidenav {
    without a name, drawn once as nothing. */
 .peer-nopicture .label { display: none; }
 
+/* The <video> in a tile with no picture is still what plays the sound, so it
+   stays in the tree -- but it is not shown.  An element with no frames to
+   paint draws the browser's own placeholder instead, and in the Android
+   WebView that is a large "play" triangle: turning the camera off replaced a
+   person with a media-player control that says nothing about who is there.
+   visibility, not display: the tile takes its shape from this element. */
+.peer-nopicture video { visibility: hidden; }
+
+/* The participant's avatar in the middle of a tile with no picture: the
+   initial and the colour bucket of their row in the people list
+   (personAvatar()), so the tile and the list name the same person the same
+   way.  Sized off the tile's height, which every such tile has (a ratio or a
+   video gives it one), and nudged up to clear the label along the bottom. */
+.stage-person-avatar {
+    position: absolute;
+    left: 50%;
+    top: 45%;
+    transform: translate(-50%, -50%);
+    height: 42%;
+    max-height: 104px;
+    min-height: 32px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--av-0);
+    color: var(--text);
+    font-size: clamp(14px, 4.5vmin, 40px);
+    font-weight: 500;
+    line-height: 1;
+    user-select: none;
+    pointer-events: none;
+}
+.stage-person-avatar.av-1 { background: var(--av-1); }
+.stage-person-avatar.av-2 { background: var(--av-2); }
+.stage-person-avatar.av-3 { background: var(--av-3); }
+.stage-person-avatar.av-4 { background: var(--av-4); }
+
 /* Mirrors .label: the name sits along the bottom of the tile, where it sits
    on a tile that has a picture. */
 .stage-person-label {

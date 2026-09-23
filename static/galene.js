@@ -4206,14 +4206,66 @@ function renderStagePeople() {
                            maxHeight > 0 ? maxHeight + 'px' : 'none');
 
     people.forEach(function(row) {
-        let label = personLabel(row);
-        if(!label)
-            return;
         let tile = document.createElement('div');
         tile.className = 'stage-person';
-        tile.appendChild(label);
-        host.appendChild(tile);
+        if(setPersonCard(tile, row))
+            host.appendChild(tile);
     });
+}
+
+/**
+ * Sozvon: draw a participant into a tile that has no picture in it -- their
+ * avatar in the middle, with the initial and the colour the people list gives
+ * them, and the label along the bottom.  Whatever card the tile carried
+ * before is replaced.
+ *
+ * Every tile that stands in for a missing picture goes through here (the
+ * empty stage, the placeholder cells in the grid, and real tiles whose
+ * camera is off), so a person looks the same wherever they are drawn, and the
+ * same as in the list, rather than being an unlabelled box in one place and
+ * a name in another.
+ *
+ * @param {HTMLElement} tile
+ * @param {Element} row - the participant's row in #users
+ * @returns {boolean} false if there was nobody to draw
+ */
+function setPersonCard(tile, row) {
+    tile.querySelectorAll(
+        ':scope > .stage-person-label, :scope > .stage-person-avatar',
+    ).forEach(function(e) { e.remove(); });
+    let label = personLabel(row);
+    if(!label)
+        return false;
+    let avatar = personAvatar(row);
+    if(avatar)
+        tile.appendChild(avatar);
+    tile.appendChild(label);
+    return true;
+}
+
+/**
+ * Sozvon: the big round avatar for a tile with no picture, copied from the
+ * participant's row so the initial and the colour bucket come from the one
+ * place that works them out (setUserStatus()).
+ *
+ * @param {Element} row - the participant's row in #users
+ * @returns {HTMLElement|null}
+ */
+function personAvatar(row) {
+    let src = row.querySelector('.up-avatar');
+    if(!src)
+        return null;
+    let avatar = document.createElement('span');
+    avatar.className = 'stage-person-avatar';
+    let colour = Array.prototype.find.call(src.classList, function(c) {
+        return /^av-\d+$/.test(c);
+    });
+    if(colour)
+        avatar.classList.add(colour);
+    avatar.setAttribute('aria-hidden', 'true');
+    let ini = src.querySelector('.up-ini');
+    avatar.textContent = (ini && ini.textContent) || '?';
+    return avatar;
 }
 
 /**
@@ -4310,23 +4362,17 @@ function syncPersonTiles() {
             tile.remove();
             return;
         }
-        let label = personLabel(row);
-        if(label) {
-            tile.textContent = '';
-            tile.appendChild(label);
-        }
+        if(tile instanceof HTMLElement)
+            setPersonCard(tile, row);
         wanted.delete(id);
     });
 
     wanted.forEach(function(row, id) {
-        let label = personLabel(row);
-        if(!label)
-            return;
         let tile = document.createElement('div');
         tile.className = 'peer peer-person';
         tile.dataset.userId = id;
-        tile.appendChild(label);
-        peers.appendChild(tile);
+        if(setPersonCard(tile, row))
+            peers.appendChild(tile);
     });
 
     reflectPicturelessTiles();
@@ -4353,27 +4399,24 @@ function reflectPicturelessTiles() {
         let tile = document.getElementById('peer-' + c.localId);
         if(!tile)
             return;
-        let old = tile.querySelector(':scope > .stage-person-label');
+        let clear = function() {
+            tile.querySelectorAll(
+                ':scope > .stage-person-label, :scope > .stage-person-avatar',
+            ).forEach(function(e) { e.remove(); });
+            tile.classList.remove('peer-nopicture');
+        };
         // A picture needs no explaining: it shows a face, and the plain label
         // under it is upstream's business.
         if(tileShowsPicture(tile)) {
-            if(old)
-                old.remove();
-            tile.classList.remove('peer-nopicture');
+            clear();
             return;
         }
         let row = userId && document.getElementById('user-' + userId);
-        let label = row ? personLabel(row) : null;
-        if(!label) {
-            if(old)
-                old.remove();
-            tile.classList.remove('peer-nopicture');
+        if(!row || !setPersonCard(tile, row)) {
+            clear();
             return;
         }
-        if(old)
-            old.remove();
         tile.classList.add('peer-nopicture');
-        tile.appendChild(label);
     };
     for(let id in serverConnection.up)
         reflect(serverConnection.up[id], serverConnection.id);

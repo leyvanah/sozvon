@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
@@ -507,6 +508,16 @@ class MainActivity : AppCompatActivity() {
             override fun onHideCustomView() {
                 hideFullscreen()
             }
+
+            // A <video> with no frame to show gets this bitmap as its poster.
+            // Left to the WebView, it is a large grey "play" triangle, which
+            // is what a participant who turned the camera off, or one whose
+            // first frame has not arrived yet, looked like in a call: a
+            // media-player control instead of a person.  The web client draws
+            // its own card over such a tile, and a transparent poster lets it
+            // show through. (Sozvon)
+            override fun getDefaultVideoPoster(): Bitmap =
+                Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         }
 
         webView.webViewClient = object : WebViewClient() {
