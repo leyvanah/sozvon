@@ -24,8 +24,10 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const {pathToFileURL} = require('node:url');
 
 const srcDir = path.join(__dirname, '..', 'src');
+const rendererDir = path.join(srcDir, 'renderer');
 
 const quiet = {log() {}, warn() {}, error() {}};
 
@@ -177,7 +179,14 @@ function from(url) {
   return {senderFrame: {url: url}};
 }
 
-const OUR_LAUNCHER = 'file:///opt/sozvon/desktop/src/renderer/launcher.html';
+// The app's own pages are the ones in the app's own directory, so these are
+// built from it rather than written out.
+const OUR_LAUNCHER = pathToFileURL(path.join(rendererDir, 'launcher.html')).href;
+const OUR_DEPLOY = pathToFileURL(path.join(rendererDir, 'deploy.html')).href;
+// A page loaded from disk that is not ours: a downloaded file, or anything
+// else a file:// address can be pointed at.
+const A_LOCAL_FILE = pathToFileURL(
+  path.join(srcDir, '..', '..', 'elsewhere.html')).href;
 const A_SERVER_PAGE = 'https://untrusted.example/group/lobby/';
 
 // ---- which page is handed the app's controls -------------------------------
@@ -188,19 +197,21 @@ const A_SERVER_PAGE = 'https://untrusted.example/group/lobby/';
  */
 function runPreload(url) {
   const exposed = {};
+  const electron = {
+    contextBridge: {
+      exposeInMainWorld: (name, api) => exposed[name] = api,
+    },
+    ipcRenderer: {
+      sendSync: () => 'system',
+      invoke: () => Promise.resolve(),
+      send() {},
+      on() {},
+      removeAllListeners() {},
+    },
+  };
   const ctx = vm.createContext({
-    require: () => ({
-      contextBridge: {
-        exposeInMainWorld: (name, api) => exposed[name] = api,
-      },
-      ipcRenderer: {
-        sendSync: () => 'system',
-        invoke: () => Promise.resolve(),
-        send() {},
-        on() {},
-        removeAllListeners() {},
-      },
-    }),
+    require: (name) => name === 'electron' ? electron : require(name),
+    __dirname: srcDir,
     location: new URL(url),
     localStorage: {setItem() {}},
     console: quiet,
@@ -221,11 +232,25 @@ test('a server page is not handed the app controls', () => {
 });
 
 test('the app\'s own pages are handed the app controls', () => {
-  const exposed = runPreload(OUR_LAUNCHER);
-  assert.strictEqual(typeof exposed.sozvon, 'object');
-  for(const method of ['getConfig', 'setConfig', 'openGroup', 'startDeploy',
-                       'answerHostKey'])
-    assert.strictEqual(typeof exposed.sozvon[method], 'function', method);
+  for(const page of [OUR_LAUNCHER, OUR_DEPLOY]) {
+    const exposed = runPreload(page);
+    assert.strictEqual(typeof exposed.sozvon, 'object', page);
+    for(const method of ['getConfig', 'setConfig', 'openGroup', 'startDeploy',
+                         'answerHostKey'])
+      assert.strictEqual(typeof exposed.sozvon[method], 'function', method);
+  }
+});
+
+// Loaded from disk is not the same as ours.  What separates them is the
+// directory, not the scheme: by scheme, any local file would be one of the
+// app's own pages, and the fence would rest on Chromium refusing to navigate
+// to file:// from the web -- which is not ours to promise.
+test('a local file that is not one of our pages is not handed them', () => {
+  const exposed = runPreload(A_LOCAL_FILE);
+  assert.strictEqual(
+    exposed.sozvon, undefined,
+    "a page was given the app's privileged bridge merely for being on disk",
+  );
 });
 
 // ---- which calls the main process answers ----------------------------------
@@ -270,6 +295,14 @@ test('the app\'s own pages are answered', async () => {
 
 // A call whose frame has gone -- the page navigated away while it was in
 // flight -- cannot be shown to be ours, so it is not treated as ours.
+test('a local file that is not one of our pages is not answered', async () => {
+  const app = loadMain();
+  await assert.rejects(
+    async () => app.invokes.get('config:get')(from(A_LOCAL_FILE)),
+    'a page was answered merely for being on disk',
+  );
+});
+
 test('a call from a frame that is gone is refused', async () => {
   const app = loadMain();
   const vanished = {get senderFrame() {
@@ -348,6 +381,11 @@ test('the window stays on our own pages and the user\'s own servers', () => {
   const mayStay = (url) => app.read(`mayStayInWindow(${JSON.stringify(url)})`);
 
   assert.strictEqual(mayStay(OUR_LAUNCHER), true);
+  assert.strictEqual(mayStay(OUR_DEPLOY), true);
+  assert.strictEqual(
+    mayStay(A_LOCAL_FILE), false,
+    'the window could be sent to any file on the machine',
+  );
   assert.strictEqual(mayStay('https://known.example/group/x/'), true);
   assert.strictEqual(
     mayStay('https://untrusted.example/'), false,

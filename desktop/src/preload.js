@@ -1,4 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const path = require('path');
+const { pathToFileURL } = require('url');
 
 // Two kinds of page share the view this preload is attached to, and they are
 // not owed the same things.
@@ -11,11 +13,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 //     written by whoever found the fault.  It gets the bridge the Android app
 //     offers and nothing more.
 //
-// The protocol is what separates them: our pages are the only ones that can
-// be loaded from disk.  The main process checks the sender of every
-// privileged call as well -- this decides what a page is handed, not what the
-// main process is willing to answer.
-const ourOwnPage = location.protocol === 'file:';
+// Where the page is loaded from separates them, and where means the
+// directory rather than the scheme: our pages are the ones that live beside
+// this file.  The main process checks the sender of every privileged call as
+// well -- this decides what a page is handed, not what the main process is
+// willing to answer.
+const ourPages = pathToFileURL(
+  path.join(__dirname, 'renderer') + path.sep).href.toLowerCase();
+const ourOwnPage = location.protocol === 'file:' &&
+      location.href.toLowerCase().startsWith(ourPages);
 const serverPage = location.protocol === 'http:' || location.protocol === 'https:';
 
 // Hand the app's appearance to a server's own client before its scripts run.

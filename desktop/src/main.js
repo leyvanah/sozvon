@@ -1,5 +1,6 @@
 const { app, BrowserWindow, WebContentsView, session, ipcMain, Menu, shell, nativeImage, nativeTheme } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const crypto = require('crypto');
 const { createTray } = require('./tray');
@@ -245,6 +246,31 @@ function hubEntry() {
   return (config.servers || []).find(s => s && s.url && s.hub) || null;
 }
 
+// Where the app's own pages live.  Everything under here is ours -- the
+// launcher, the deploy wizard -- and nothing else is, whatever scheme it
+// arrived with.  The protocol alone would not do: a page that reached
+// file:// by any route would then be holding the app's own controls, and
+// what stops it is Chromium's refusal to navigate there from the web, which
+// is not ours to promise.
+const OUR_PAGES = pathToFileURL(
+  path.join(__dirname, 'renderer') + path.sep).href.toLowerCase();
+
+/**
+ * Whether an address is one of the app's own pages.
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isOurPage(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'file:') return false;
+    return u.href.toLowerCase().startsWith(OUR_PAGES);
+  } catch {
+    return false;
+  }
+}
+
 /** An address as a person would recognise it, for a line in the log. */
 function originOrUrl(url) {
   try {
@@ -357,7 +383,7 @@ function openInBrowser(url) {
  * @returns {boolean}
  */
 function mayStayInWindow(url) {
-  return url.startsWith('file://') || isKnownServer(url);
+  return isOurPage(url) || isKnownServer(url);
 }
 
 /** Open the operator room, from the tray or from a window that is elsewhere. */
@@ -1000,11 +1026,7 @@ function fromOurOwnPage(event) {
     return false;
   }
   if (!frame) return false;
-  try {
-    return new URL(frame.url).protocol === 'file:';
-  } catch {
-    return false;
-  }
+  return isOurPage(frame.url);
 }
 
 /**
