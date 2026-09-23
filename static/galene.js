@@ -7211,6 +7211,32 @@ function formatTime(time) {
 }
 
 /**
+ * An ordinary chat message, as the server relayed it.
+ *
+ * The server read this one and keeps it in the room's history.  In a group
+ * running end-to-end encryption that is worth saying on the message itself:
+ * the interface offers an encrypted call, and this message was not part of
+ * it.  Where encryption is required our own client sends no such message at
+ * all, so one that arrives came from an older client -- or from the server,
+ * which is the party the encryption is there to exclude.  Chat history
+ * arrives here too, and is server-held by definition. (Sozvon)
+ *
+ * @param {string} id
+ * @param {string} peerId
+ * @param {string} dest
+ * @param {string} nick
+ * @param {Date} time
+ * @param {boolean} privileged
+ * @param {boolean} history
+ * @param {string} kind
+ * @param {string|HTMLElement} message
+ */
+function gotChat(id, peerId, dest, nick, time, privileged, history, kind, message) {
+    addToChatbox(id, peerId, dest, nick, time, privileged, history, kind,
+                 message, e2eeActive());
+}
+
+/**
  * @typedef {Object} lastMessage
  * @property {string} [nick]
  * @property {string} [peerId]
@@ -7231,8 +7257,10 @@ let lastMessage = {};
  * @param {boolean} history
  * @param {string} kind
  * @param {string|HTMLElement} message
+ * @param {boolean} [unencrypted] - the server relayed this one in clear while
+ *     the group is running end-to-end encryption, and the message says so
  */
-function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, message) {
+function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, message, unencrypted) {
     if(kind === 'caption') {
         displayCaption(message);
         return;
@@ -7339,6 +7367,17 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
         container.appendChild(body);
         container.classList.add('message-me');
         lastMessage = {};
+    }
+    // Said in words, on the message, and on every one of them: a colour
+    // alone is a convention the reader has to have been taught, and a run of
+    // messages from one person draws only one header to hang it off. (Sozvon)
+    if(unencrypted) {
+        container.classList.add('message-unencrypted');
+        let tag = document.createElement('span');
+        tag.textContent = Sozvon.i18n.t('chat.unencrypted');
+        tag.title = Sozvon.i18n.t('chat.unencryptedTitle');
+        tag.classList.add('message-unencrypted-tag');
+        footer.appendChild(tag);
     }
     container.appendChild(footer);
 
@@ -9513,7 +9552,7 @@ async function serverConnect() {
     serverConnection.onknock = gotKnock;
     serverConnection.onknockrefused = gotKnockRefused;
     serverConnection.onjoined = gotJoined;
-    serverConnection.onchat = addToChatbox;
+    serverConnection.onchat = gotChat;
     serverConnection.onusermessage = gotUserMessage;
     serverConnection.onfiletransfer = gotFileTransfer;
     if(typeof SozvonE2EE !== 'undefined') {

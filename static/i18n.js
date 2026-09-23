@@ -247,6 +247,8 @@
             'e2ee.notEncrypted': 'This call is not encrypted',
             'e2ee.blocked': 'Unencrypted connections are blocked',
             'e2ee.chatBlocked': 'Not sent: this group requires end-to-end encryption, and this message could not be encrypted',
+            'chat.unencrypted': 'not encrypted',
+            'chat.unencryptedTitle': 'This message passed through the server in clear and is in the room\'s history. The end-to-end encrypted messages in this call did not.',
             'e2ee.blockedOverlay': 'Unencrypted connections are blocked. This call cannot be end-to-end encrypted (a participant cannot encrypt, or there are more than two), so the connection is blocked.',
             // Browser support
             'browser.unsupported': 'Your browser does not support video calls. Please open this link in Chrome, Firefox, Safari or Edge.',
@@ -472,6 +474,8 @@
             'e2ee.notEncrypted': 'Звонок не зашифрован',
             'e2ee.blocked': 'Включена блокировка незашифрованных соединений',
             'e2ee.chatBlocked': 'Не отправлено: в этой комнате обязательно сквозное шифрование, а зашифровать сообщение не удалось',
+            'chat.unencrypted': 'не зашифровано',
+            'chat.unencryptedTitle': 'Это сообщение прошло через сервер в открытом виде и осталось в истории комнаты. Сообщения со сквозным шифрованием в этом звонке — нет.',
             'e2ee.blockedOverlay': 'Включена блокировка незашифрованных соединений. Этот звонок нельзя зашифровать (собеседник не поддерживает шифрование или участников больше двух), поэтому подключение заблокировано.',
             // Поддержка браузера
             'browser.unsupported': 'Этот браузер не поддерживает видеозвонки. Откройте эту ссылку в Chrome, Firefox, Safari или Edge.',

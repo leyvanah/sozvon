@@ -2143,6 +2143,19 @@ body.nav-hidden .nav-menu {
     font-size: var(--fs-sm);
 }
 
+/* A message the server could read, in a call that is otherwise end-to-end
+   encrypted.  The word carries it -- the edge is there so a run of them can
+   be taken in at a glance, not so the colour has to be learnt. */
+.message-unencrypted {
+    border-left: 2px solid var(--warn);
+}
+
+.message-unencrypted-tag {
+    color: var(--warn);
+    font-size: var(--fs-sm);
+    letter-spacing: .02em;
+}
+
 /* --- Inputs / selects ----------------------------------------------------
    Filled, not outlined.  A field is found by the shape of its fill, and the
    drawer stacks five of them in a column: outlined, that column reads as five
