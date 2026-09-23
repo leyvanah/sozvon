@@ -1974,7 +1974,7 @@ function feedBitrate(c, report) {
         return;
     }
     if(!c.userdata.bitrate)
-        c.userdata.bitrate = new B.Controller();
+        c.userdata.bitrate = new B.Controller(B.START_CAP);
     let r = c.userdata.bitrate.update(B.snapshot(report.values(), Date.now()));
     if(r.changed)
         console.info('bitrate: asking', c.username || c.source,
@@ -2071,13 +2071,17 @@ async function applySendCap(c) {
     if(!c.pc)
         return;
     let s = doSimulcast();
-    let t = autoThroughput(c, getMaxVideoThroughput(), s);
+    let setting = getMaxVideoThroughput();
+    let t = autoThroughput(c, setting, s);
+    // A stream nobody has set yet is sending what setUpStream gave it, the
+    // plain setting.  A cap that arrives before this stream's first poll
+    // -- the start cap always may -- must still differ from that, or it is
+    // never applied.
+    if(!('sentThroughput' in c.userdata))
+        c.userdata.sentThroughput = setting;
     if(c.userdata.sentThroughput === t)
         return;
-    let first = !('sentThroughput' in c.userdata);
     c.userdata.sentThroughput = t;
-    if(first)
-        return;
     console.info('bitrate: sending', c.id, 'at', t === null ? 'full rate' : t);
     await setSendParameters(c, t, s);
 }

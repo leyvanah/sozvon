@@ -34,6 +34,13 @@
 // its video.  Caps drop fast and rise slowly, and are lifted altogether once
 // the link has been healthy long enough: full quality when the path allows it.
 //
+// A new stream starts capped rather than free.  Left alone the sender climbs
+// to 2-3 Mbit/s within seconds, and over the TCP relay the lag that builds
+// there takes a minute of decreases to drain -- the first minute of every
+// call, audio behind and breaking up (2026-09-23).  Starting at START_CAP and
+// opening while playback stays healthy costs a well-connected call about a
+// minute of slightly softer picture instead.
+//
 // Like connection-quality.js this has no DOM or WebRTC dependency, so the
 // control logic is tested under Node.
 
@@ -61,6 +68,7 @@
     // 2^32 it is not a valid maxBitrate at all).
     const MAX_CAP = 100000000;
     const RELEASE_AT = 3000000;     // a cap this high is lifted entirely
+    const START_CAP = 1000000;      // what a new stream is first asked for
     const DECREASE = 0.6;           // new cap = DECREASE x what arrived
     const INCREASE = 1.3;
     // When far less arrives than the cap allows, the cap is not what limits
@@ -189,8 +197,14 @@
      * ask its sender for.  cap === null means "no cap, full quality".
      *
      * @constructor
+     * @param {number|null} [startCap] - asked for as soon as video arrives,
+     *     then opened while playback is healthy; none if omitted.
      */
-    function Controller() {
+    function Controller(startCap) {
+        /** @type {number|null} */
+        this.startCap = sanitizeCap(startCap);
+        /** Whether video has arrived since the start or since it stopped. */
+        this.started = false;
         /** @type {number|null} */
         this.cap = null;
         this.prev = null;
@@ -225,6 +239,7 @@
         // No video coming in at all -- the sender stopped it, or we stopped
         // asking for it: a cap we asked for is not ours to hold any more.
         if(!snap.video) {
+            this.started = false;
             this.rates = [];
             this.bad = 0;
             this.good = 0;
@@ -235,6 +250,15 @@
                 this.sentAt = now;
             }
             return {cap: null, changed, send: changed, sample};
+        }
+
+        // Video resuming after a pause restarts high just like a new stream.
+        if(!this.started) {
+            this.started = true;
+            if(this.startCap !== null && this.cap === null) {
+                this.cap = this.startCap;
+                this.changedAt = now;
+            }
         }
 
         // Zero counts too: a rate from before the video stopped arriving
@@ -389,7 +413,8 @@
     }
 
     const api = {
-        CONGESTED, HEALTHY, MIN_CAP, MAX_CAP, RELEASE_AT, DECREASE, INCREASE,
+        CONGESTED, HEALTHY, MIN_CAP, MAX_CAP, RELEASE_AT, START_CAP,
+        DECREASE, INCREASE,
         INCREASE_UNUSED, UNUSED_BELOW,
         BAD_TO_DECREASE, GOOD_TO_INCREASE, MIN_DECREASE_GAP, WARMUP,
         MIN_INCREASE_GAP, REFRESH, TTL, MESSAGE_KIND,
