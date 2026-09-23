@@ -34,6 +34,12 @@
 (function(global) {
     const C = global.SozvonE2EECrypto;
 
+    // How long a handshake may take before it is given up.  Two browsers on
+    // a working connection finish in well under a second; a handshake still
+    // open after this is either stuck or being held open by somebody who
+    // needs the time.
+    const HANDSHAKE_TIMEOUT = 30000;
+
     /**
      * @param {ServerConnection} sc
      * @constructor
@@ -57,6 +63,7 @@
         this.myPub = null;           // Uint8Array
         this.peerPub = null;
         this.peerCommit = null;      // initiator stores the responder's commitment
+        this.handshakeTimer = null;
         this.secret = null;
         this.peerSupports = null;    // null unknown | true | false (peer can encrypt)
         this.chatKey = null;         // AES-GCM key for two-party chat
@@ -223,11 +230,41 @@
         this.sas = null;
         this.peerSupports = null;
         this.chatKey = null;
+        this.stopHandshakeTimer();
         if(this.worker) {
             this.worker.postMessage({type: 'clear'});
             // Safe default: drop unkeyed frames rather than leak cleartext.
             this.worker.postMessage({type: 'mode', cleartext: false});
         }
+    };
+
+    E2EE.prototype.stopHandshakeTimer = function() {
+        if(this.handshakeTimer !== null) {
+            global.clearTimeout(this.handshakeTimer);
+            this.handshakeTimer = null;
+        }
+    };
+
+    /**
+     * Give up on this session: the handshake did not check out.  Anything a
+     * completion still in flight would write back belongs to a session that
+     * has failed, so it is stopped the way resetPeer() stops it, and the
+     * worker is left dropping frames.  The peer and our own key stay, so
+     * that further messages from the same peer do not start a new handshake
+     * behind the failure.
+     * @param {string} detail
+     */
+    E2EE.prototype.fail = function(detail) {
+        this.generation++;
+        this.stopHandshakeTimer();
+        this.secret = null;
+        this.sas = null;
+        this.chatKey = null;
+        if(this.worker) {
+            this.worker.postMessage({type: 'clear'});
+            this.worker.postMessage({type: 'mode', cleartext: false});
+        }
+        this.setState('failed', detail);
     };
 
     // ---- handshake ----------------------------------------------------------
@@ -248,6 +285,12 @@
         this.ensureWorker();
         // Drop unkeyed frames during the handshake; never forward cleartext.
         this.setWorkerMode(false);
+        let gen = this.generation;
+        this.handshakeTimer = global.setTimeout(() => {
+            this.handshakeTimer = null;
+            if(gen === this.generation && this.state === 'handshaking')
+                this.fail('timeout');
+        }, HANDSHAKE_TIMEOUT);
 
         let kp = await C.generateKeyPair();
         if(this.peer !== peer)
@@ -307,12 +350,30 @@
             break;
         case 'commit':
             if(this.role === 'initiator') {
-                this.peerCommit = C.unb64(payload.commit);
+                let commit = C.unb64(payload.commit);
+                // One commitment per handshake.  The commitment is what stops
+                // the responder's key from being chosen after ours is known;
+                // a second one, arriving after our key went out, would let
+                // whoever sent it pick a key to suit the emoji.  An honest
+                // responder repeats the same one for every hello, so an exact
+                // repeat is harmless and needs no answer.
+                if(this.peerCommit) {
+                    if(!C.bytesEqual(commit, this.peerCommit))
+                        this.fail('commitment');
+                    return;
+                }
+                this.peerCommit = commit;
                 this.send({t: 'dh', pub: C.b64(this.myPub)});
             }
             break;
         case 'dh': {
             let pub = C.unb64(payload.pub);
+            // One key from the peer per handshake, for the same reason.
+            if(this.peerPub) {
+                if(!C.bytesEqual(pub, this.peerPub))
+                    this.fail('commitment');
+                return;
+            }
             if(this.role === 'responder') {
                 this.peerPub = pub;
                 this.send({t: 'dh', pub: C.b64(this.myPub)});
@@ -323,9 +384,11 @@
                 let h = await C.commit(pub);
                 if(!C.bytesEqual(h, this.peerCommit)) {
                     // Commitment broken: the responder's key was substituted.
-                    this.setState('failed', 'commitment');
+                    this.fail('commitment');
                     return;
                 }
+                if(this.peerPub || this.state !== 'handshaking')
+                    return; // another key got in while we were hashing
                 this.peerPub = pub;
                 await this.finalize();
             }
@@ -391,6 +454,7 @@
             return;
         this.sas = sas;
         this.peerSupports = true;
+        this.stopHandshakeTimer();
         this.setState('established');
         if(this.onsas)
             this.onsas.call(this, this.sas);

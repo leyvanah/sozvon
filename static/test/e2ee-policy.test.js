@@ -47,9 +47,17 @@ class FakeWorker {
  * @returns {any} the context, carrying SozvonE2EECrypto and SozvonE2EE
  */
 function loadController() {
+    const timers = [];
     const ctx = vm.createContext({
         crypto: webcrypto, TextEncoder, TextDecoder, Uint8Array,
         btoa, atob, console: quiet,
+        // Timers the test fires by hand: a handshake timeout has nothing to
+        // wait for here, and a real one would hold the test run open.
+        setTimeout: (fn) => timers.push({fn: fn, live: true}),
+        clearTimeout: (id) => {
+            if(timers[id - 1])
+                timers[id - 1].live = false;
+        },
         Worker: FakeWorker,
         RTCRtpScriptTransform: class {
             constructor(worker, options) {
@@ -58,6 +66,15 @@ function loadController() {
         },
     });
     ctx.self = ctx;
+    ctx.timers = timers;
+    ctx.fireTimers = () => {
+        for(const t of timers.slice()) {
+            if(t.live) {
+                t.live = false;
+                t.fn();
+            }
+        }
+    };
     for(const file of ['e2ee-crypto.js', 'e2ee.js'])
         vm.runInContext(
             fs.readFileSync(path.join(staticDir, file), 'utf8'), ctx,
@@ -230,6 +247,124 @@ test('a substituted public key is still refused', async () => {
     const {a} = await handshake(ctx, true);
     assert.strictEqual(a.state, 'failed');
     assert.strictEqual(a.sas, null);
+});
+
+// ---- a handshake the server rewrites ---------------------------------------
+//
+// The server relays every handshake message and can write any of them itself.
+// What it must not be able to do is choose a key after it has seen the other
+// side's: that is what lets it search for a pair of keys that shows the same
+// emoji on both legs of a man-in-the-middle, and the emoji are the only thing
+// that would give it away.
+
+/** A key pair the server makes up, as it would to stand in the middle. */
+async function forgedKey(C) {
+    const pub = await C.exportPublic((await C.generateKeyPair()).publicKey);
+    return {pub: pub, commit: C.b64(await C.commit(pub))};
+}
+
+/**
+ * An initiator ('aaa' < 'zzz') that has sent its hello and is waiting for the
+ * responder's commitment.
+ */
+async function waitingInitiator(ctx) {
+    const sent = [];
+    const e = new ctx.SozvonE2EE({
+        id: 'aaa', userMessage: (kind, dest, payload) => sent.push(payload),
+    });
+    e.users.add('zzz');
+    await e.startWith('zzz');
+    return {e: e, sent: sent};
+}
+
+test('a second commitment with another key fails the handshake', async () => {
+    const ctx = loadController();
+    const C = ctx.SozvonE2EECrypto;
+    const {e, sent} = await waitingInitiator(ctx);
+    const throwaway = await forgedKey(C);
+    const chosen = await forgedKey(C);
+
+    // A commitment to a key the server does not mean to use: our key goes
+    // out in answer, and the server now has all it needs to search.
+    await e.onMessage('zzz', {t: 'commit', commit: throwaway.commit});
+    assert.ok(sent.some(m => m.t === 'dh'), 'our key did not go out');
+    // Then the commitment to the key the search came up with, and that key.
+    await e.onMessage('zzz', {t: 'commit', commit: chosen.commit});
+    await e.onMessage('zzz', {t: 'dh', pub: C.b64(chosen.pub)});
+
+    assert.strictEqual(
+        e.state, 'failed',
+        'a key chosen after ours was known was accepted, so the emoji could ' +
+        'have been made to match',
+    );
+    assert.strictEqual(e.detail, 'commitment');
+    assert.strictEqual(e.sas, null);
+    assert.strictEqual(
+        e.worker.messages.filter(m => m.type === 'key').length, 0,
+        'the worker was given keys for a session that failed',
+    );
+});
+
+// An honest responder answers every hello with its commitment, so the same
+// one arriving twice is ordinary and must not break the call.
+test('the same commitment twice is not a failure', async () => {
+    const ctx = loadController();
+    const C = ctx.SozvonE2EECrypto;
+    const {e} = await waitingInitiator(ctx);
+    const responder = await forgedKey(C);
+
+    await e.onMessage('zzz', {t: 'commit', commit: responder.commit});
+    await e.onMessage('zzz', {t: 'commit', commit: responder.commit});
+    await e.onMessage('zzz', {t: 'dh', pub: C.b64(responder.pub)});
+    assert.strictEqual(e.state, 'established');
+});
+
+// The responder has no commitment to check, but it too takes one key per
+// handshake: two different ones is somebody writing into the exchange.
+test('a responder given two different keys fails the handshake', async () => {
+    const ctx = loadController();
+    const C = ctx.SozvonE2EECrypto;
+    const e = new ctx.SozvonE2EE({id: 'zzz', userMessage() {}});
+    e.users.add('aaa');
+    await e.startWith('aaa');
+    const one = await forgedKey(C);
+    const two = await forgedKey(C);
+
+    await Promise.all([
+        e.onMessage('aaa', {t: 'dh', pub: C.b64(one.pub)}),
+        e.onMessage('aaa', {t: 'dh', pub: C.b64(two.pub)}),
+    ]);
+    assert.strictEqual(e.state, 'failed');
+    assert.strictEqual(e.sas, null);
+});
+
+test('a handshake that does not finish in time fails', async () => {
+    const ctx = loadController();
+    const {e} = await waitingInitiator(ctx);
+    assert.strictEqual(e.state, 'handshaking');
+    assert.ok(ctx.timers.length > 0, 'the handshake is not timed at all');
+    ctx.fireTimers();
+    assert.strictEqual(
+        e.state, 'failed',
+        'a handshake nobody answers stays open for as long as anybody likes',
+    );
+    assert.strictEqual(e.detail, 'timeout');
+});
+
+test('the timeout does not touch a handshake that finished', async () => {
+    const ctx = loadController();
+    const {a, b} = await handshake(ctx);
+    ctx.fireTimers();
+    assert.strictEqual(a.state, 'established');
+    assert.strictEqual(b.state, 'established');
+});
+
+test('the timeout does not touch a peer who has left', async () => {
+    const ctx = loadController();
+    const {e} = await waitingInitiator(ctx);
+    e.delUser('zzz');
+    ctx.fireTimers();
+    assert.strictEqual(e.state, 'idle');
 });
 
 /** A sender whose transform cannot be set, as an unsupporting browser has. */
