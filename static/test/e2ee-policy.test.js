@@ -422,6 +422,28 @@ function liftFunction(file, name) {
     return src.slice(start, end + 3);
 }
 
+/**
+ * Lift a function the code under test may not have yet, with what it did
+ * before instead.  Without this a test of new behaviour fails on the old code
+ * for want of a function rather than for doing the old thing, which says far
+ * less: the point of running these against the commit before the fix is to
+ * watch the old behaviour happen.
+ *
+ * @param {any} ctx
+ * @param {string} file
+ * @param {string} name
+ * @param {string} before - the source of a stand-in, as the old code behaved
+ */
+function liftFunctionOr(ctx, file, name, before) {
+    let source;
+    try {
+        source = liftFunction(file, name);
+    } catch {
+        source = before;
+    }
+    vm.runInContext(source, ctx);
+}
+
 /** @param {string|null} state - the controller state, or null for no connection */
 function mayPublish(state) {
     const ctx = vm.createContext({
@@ -728,12 +750,86 @@ async function runHandleInput(o) {
             },
         },
     });
+    // handleInput asks mayChatInClear() whether an ordinary chat message may
+    // be sent at all; that decision is galene.js's own, so it is lifted too
+    // rather than stubbed.
+    liftFunctionOr(ctx, 'galene.js', 'mayChatInClear',
+                   'function mayChatInClear() { return true; }');
     vm.runInContext(src.slice(start, end), ctx);
     ctx.handleInput();
     // the two fallbacks that go through sendChat() are asynchronous
     await new Promise(resolve => setImmediate(resolve));
     return {sent: sent, errors: errors, input: input};
 }
+
+/**
+ * Run the /msg command out of galene.js's command table.  It does not go
+ * through handleInput's fallback at all: the command is dispatched and
+ * returns, so whatever it does about encryption it has to do itself.
+ *
+ * @param {boolean} require - the group's "require encryption" option
+ * @returns {{sent: any[][], error: any}}
+ */
+function runPrivateMessage(require) {
+    const src = fs.readFileSync(path.join(staticDir, 'galene.js'), 'utf8');
+    const start = src.indexOf('commands.msg = {');
+    const end = src.indexOf('\n};\n', start);
+    assert.ok(
+        start >= 0 && end > start,
+        'galene.js no longer declares `commands.msg = {` — this test locates ' +
+        'it by that text and needs updating',
+    );
+
+    const sent = [];
+    const ctx = vm.createContext({
+        console: quiet,
+        commands: {},
+        Sozvon: {i18n: {t: k => k}},
+        e2eeActive: () => true,
+        addToChatbox: () => {},
+        parseCommand: (r) => {
+            const space = r.indexOf(' ');
+            return [r.slice(0, space), r.slice(space + 1)];
+        },
+        findUserId: () => 'zzz',
+        serverConnection: {
+            id: 'aaa',
+            username: 'me',
+            users: {zzz: {username: 'them'}},
+            chat: (...args) => sent.push(args),
+            e2ee: {require: require},
+        },
+    });
+    liftFunctionOr(ctx, 'galene.js', 'mayChatInClear',
+                   'function mayChatInClear() { return true; }');
+    vm.runInContext(src.slice(start, end + 4), ctx);
+
+    let error = null;
+    try {
+        ctx.commands.msg.f('msg', 'them hello');
+    } catch(e) {
+        error = e;
+    }
+    return {sent: sent, error: error};
+}
+
+// The command table is a fourth way into serverConnection.chat, and it never
+// passes handleInput's fallback: it sends and returns.
+test('a private message is not sent in clear when the group requires encryption', () => {
+    const r = runPrivateMessage(true);
+    assert.deepStrictEqual(
+        r.sent, [],
+        'a private message went to the server in clear',
+    );
+    assert.ok(r.error, 'the message was dropped without telling the user');
+});
+
+test('a private message is sent where encryption is not required', () => {
+    const r = runPrivateMessage(false);
+    assert.strictEqual(r.error, null);
+    assert.strictEqual(r.sent.length, 1);
+    assert.strictEqual(r.sent[0][2], 'hello');
+});
 
 const CHAT_MODES = ['unusable', 'refuses', 'fails'];
 

@@ -5400,6 +5400,22 @@ function e2eeActive() {
 }
 
 /**
+ * Whether an ordinary chat message may be sent at all.
+ *
+ * An ordinary chat message goes through the server in clear and stays in the
+ * room's history.  Where the group requires end-to-end encryption that is the
+ * one thing the requirement exists to prevent, so there is no falling back to
+ * it: the message is not sent and the user is told.  Everywhere else it is
+ * the ordinary way to send a message. (Sozvon)
+ *
+ * @returns {boolean}
+ */
+function mayChatInClear() {
+    let e2ee = serverConnection && serverConnection.e2ee;
+    return !(e2eeActive() && e2ee && e2ee.require);
+}
+
+/**
  * Whether the current group runs in E2EE mode and this browser can encrypt,
  * so we attach the encrypting transforms and prefer VP8.
  *
@@ -7888,6 +7904,12 @@ commands.msg = {
         let id = findUserId(p[0]);
         if(!id)
             throw new Error(`Unknown user ${p[0]}`);
+        // A private message is an ordinary chat message with a recipient on
+        // it: the server reads it like any other.  The encrypted channel
+        // carries no such thing -- it has exactly one other end -- so where
+        // encryption is required there is nothing to fall back to. (Sozvon)
+        if(!mayChatInClear())
+            throw new Error(Sozvon.i18n.t('e2ee.privateBlocked'));
         serverConnection.chat('', id, p[1]);
         addToChatbox(serverConnection.id, null, id, serverConnection.username,
                      new Date(), false, false, '', p[1]);
@@ -8241,8 +8263,7 @@ function handleInput() {
      * interface still offers an encrypted call. (Sozvon)
      */
     function sendCleartext() {
-        let e2ee = serverConnection.e2ee;
-        if(e2eeActive() && e2ee && e2ee.require) {
+        if(!mayChatInClear()) {
             displayError(Sozvon.i18n.t('e2ee.chatBlocked'));
             // The box was emptied when this message was taken from it; hand
             // the text back unless the user has started typing something else.
