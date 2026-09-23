@@ -6714,7 +6714,12 @@ function updateE2EEUI() {
         ind.classList.add('e2ee-bad');
         if(icon)
             icon.className = 'fas fa-unlock';
-        ind.title = Sozvon.i18n.t('e2ee.failed');
+        // A handshake that ran out of time or met another version of the
+        // page is not evidence of interception, and should not read as one.
+        ind.title = Sozvon.i18n.t({
+            'timeout': 'e2ee.failedTimeout',
+            'version': 'e2ee.failedVersion',
+        }[e2ee.detail] || 'e2ee.failed');
         setVisibility('e2ee-indicator', true);
         break;
     default: // idle / handshaking: nothing to compare yet

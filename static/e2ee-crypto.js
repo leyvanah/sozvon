@@ -158,12 +158,40 @@
         return new Uint8Array(bits);
     }
 
-    // The SAS / media keys are bound to the exact pair of public keys that were
-    // exchanged (in initiator-then-responder order).  A man-in-the-middle that
-    // substitutes its own keys therefore yields a different transcript, hence a
-    // different SAS and incompatible media keys on the two legs.
-    function transcriptSalt(initiatorPub, responderPub) {
-        return concat(te.encode('sozvon-e2ee-v1'), initiatorPub, responderPub);
+    // Version of the handshake and of everything derived from it.  Peers on
+    // different versions derive different keys, so the handshake carries it
+    // and a peer on another one is refused rather than shown other emoji.
+    const PROTOCOL_VERSION = 2;
+
+    function lengthPrefixed(u8) {
+        return concat(new Uint8Array([u8.length >>> 8, u8.length & 0xff]), u8);
+    }
+
+    /**
+     * Hash of the whole handshake, the salt everything is derived under.
+     *
+     * The SAS, media and chat keys are bound to the exact public keys that
+     * were exchanged, in their roles, so a man-in-the-middle that substitutes
+     * its own keys gets a different SAS and incompatible keys on each leg.
+     * They are bound as well to the responder's commitment and to the two
+     * participant ids the roles were decided by, as ZRTP binds its SAS to the
+     * hash of the whole exchange (RFC 6189, 4.5.2): whatever either side took
+     * from the handshake is in what it shows the user.
+     *
+     * @param {{initiatorId: string, responderId: string,
+     *          commit: Uint8Array,
+     *          initiatorPub: Uint8Array, responderPub: Uint8Array}} t
+     * @returns {Promise<Uint8Array>}
+     */
+    async function transcript(t) {
+        return await sha256(concat(
+            te.encode('sozvon-e2ee-v' + PROTOCOL_VERSION),
+            lengthPrefixed(te.encode(t.initiatorId)),
+            lengthPrefixed(te.encode(t.responderId)),
+            lengthPrefixed(t.commit),
+            lengthPrefixed(t.initiatorPub),
+            lengthPrefixed(t.responderPub),
+        ));
     }
 
     // ---- Short Authentication String (emoji) --------------------------------
@@ -192,13 +220,12 @@
 
     /**
      * Derive the emoji SAS that both peers display for out-of-band comparison.
+     * @param {Uint8Array} secret
+     * @param {Uint8Array} salt - transcript() of this handshake
      * @returns {Promise<string[]>}
      */
-    async function deriveSAS(secret, initiatorPub, responderPub) {
-        let bytes = await hkdf(
-            secret, transcriptSalt(initiatorPub, responderPub),
-            'sas', SAS_LENGTH,
-        );
+    async function deriveSAS(secret, salt) {
+        let bytes = await hkdf(secret, salt, 'sas', SAS_LENGTH);
         let out = [];
         for(let i = 0; i < SAS_LENGTH; i++)
             // 256 is a multiple of 64, so (byte & 63) is unbiased.
@@ -212,13 +239,13 @@
      * Derive the AES-256-GCM key a given sender uses.  Each sender gets a
      * distinct key (info bound to its id) so that a plain monotonic frame
      * counter never reuses an (key, IV) pair across senders.
+     * @param {Uint8Array} secret
+     * @param {Uint8Array} salt - transcript() of this handshake
+     * @param {string} senderId
      * @returns {Promise<CryptoKey>}
      */
-    async function deriveMediaKey(secret, initiatorPub, responderPub, senderId) {
-        let raw = await hkdf(
-            secret, transcriptSalt(initiatorPub, responderPub),
-            'media|' + senderId, 32,
-        );
+    async function deriveMediaKey(secret, salt, senderId) {
+        let raw = await hkdf(secret, salt, 'media|' + senderId, 32);
         return await subtle.importKey(
             'raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'],
         );
@@ -230,12 +257,12 @@
      * Derive the AES-256-GCM key used to encrypt text chat in a two-party
      * end-to-end encrypted call.  Bound to the same transcript as the media
      * keys and the SAS, so it inherits their man-in-the-middle protection.
+     * @param {Uint8Array} secret
+     * @param {Uint8Array} salt - transcript() of this handshake
      * @returns {Promise<CryptoKey>}
      */
-    async function deriveChatKey(secret, initiatorPub, responderPub) {
-        let raw = await hkdf(
-            secret, transcriptSalt(initiatorPub, responderPub), 'chat', 32,
-        );
+    async function deriveChatKey(secret, salt) {
+        let raw = await hkdf(secret, salt, 'chat', 32);
         return await subtle.importKey(
             'raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'],
         );
@@ -371,6 +398,7 @@
         concat, bytesEqual, b64, unb64,
         // key agreement
         generateKeyPair, exportPublic, importPublic, agree, sha256, commit, hkdf,
+        transcript, PROTOCOL_VERSION,
         // authentication
         deriveSAS, EMOJI, SAS_LENGTH,
         // media keys + frames

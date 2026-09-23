@@ -32,7 +32,23 @@ async function handshake() {
     const bSecret = await crypto.agree(
         b.privateKey, await crypto.importPublic(aPub),
     );
-    return {a, b, aPub, bPub, aSecret, bSecret};
+    const t = await crypto.transcript(fields({aPub, bPub}));
+    return {a, b, aPub, bPub, aSecret, bSecret, t};
+}
+
+/**
+ * What transcript() is given, for a handshake in which a initiated.
+ * @param {{aPub: Uint8Array, bPub: Uint8Array}} keys
+ * @param {object} [changes] - fields to replace
+ */
+function fields(keys, changes) {
+    return Object.assign({
+        initiatorId: 'alice',
+        responderId: 'bob',
+        commit: new Uint8Array(32).fill(7),
+        initiatorPub: keys.aPub,
+        responderPub: keys.bPub,
+    }, changes || {});
 }
 
 test('both peers reach the same shared secret', async () => {
@@ -44,8 +60,8 @@ test('both peers reach the same shared secret', async () => {
 
 test('both peers display the same emoji SAS', async () => {
     const h = await handshake();
-    const sasA = await crypto.deriveSAS(h.aSecret, h.aPub, h.bPub);
-    const sasB = await crypto.deriveSAS(h.bSecret, h.aPub, h.bPub);
+    const sasA = await crypto.deriveSAS(h.aSecret, h.t);
+    const sasB = await crypto.deriveSAS(h.bSecret, h.t);
     assert.deepStrictEqual(sasA, sasB);
     assert.strictEqual(sasA.length, crypto.SAS_LENGTH);
     for(const e of sasA)
@@ -71,8 +87,12 @@ test('a man in the middle produces different SAS on the two legs', async () => {
         bob.privateKey, await crypto.importPublic(malloryPub),
     );
 
-    const sasAlice = await crypto.deriveSAS(aliceLeg, alicePub, malloryPub);
-    const sasBob = await crypto.deriveSAS(bobLeg, malloryPub, bobPub);
+    const sasAlice = await crypto.deriveSAS(aliceLeg, await crypto.transcript(
+        fields({aPub: alicePub, bPub: malloryPub}),
+    ));
+    const sasBob = await crypto.deriveSAS(bobLeg, await crypto.transcript(
+        fields({aPub: malloryPub, bPub: bobPub}),
+    ));
     assert.notDeepStrictEqual(
         sasAlice, sasBob,
         'the two legs of a MITM showed the same emoji — the SAS would not ' +
@@ -85,9 +105,44 @@ test('a man in the middle produces different SAS on the two legs', async () => {
 // than pass silently.
 test('the SAS is bound to the order of the two public keys', async () => {
     const h = await handshake();
-    const forward = await crypto.deriveSAS(h.aSecret, h.aPub, h.bPub);
-    const reversed = await crypto.deriveSAS(h.aSecret, h.bPub, h.aPub);
+    const forward = await crypto.deriveSAS(h.aSecret, h.t);
+    const reversed = await crypto.deriveSAS(h.aSecret, await crypto.transcript(
+        fields(h, {initiatorPub: h.bPub, responderPub: h.aPub}),
+    ));
     assert.notDeepStrictEqual(forward, reversed);
+});
+
+// Everything either side took from the handshake is in what it shows: two
+// sides that disagree about any of it see different emoji.
+test('the SAS is bound to every part of the handshake', async () => {
+    const h = await handshake();
+    const sas = async changes => (await crypto.deriveSAS(
+        h.aSecret, await crypto.transcript(fields(h, changes)),
+    )).join('');
+    const base = await sas({});
+    for(const changes of [
+        {initiatorId: 'mallory'},
+        {responderId: 'mallory'},
+        // the two ids are hashed as two fields, not one string
+        {initiatorId: 'alic', responderId: 'ebob'},
+        {commit: new Uint8Array(32).fill(8)},
+    ])
+        assert.notStrictEqual(
+            await sas(changes), base,
+            `the SAS does not depend on ${JSON.stringify(changes)}`,
+        );
+});
+
+// A transcript is a SHA-256 digest, so the ids and keys are length-prefixed
+// before it: without that, moving a byte from one field to the next would
+// leave the hash, and the SAS, unchanged.
+test('the transcript is a digest of length-prefixed fields', async () => {
+    const h = await handshake();
+    assert.strictEqual(h.t.length, 32);
+    const moved = await crypto.transcript(
+        fields(h, {initiatorId: 'alic', responderId: 'ebob'}),
+    );
+    assert.ok(!crypto.bytesEqual(h.t, moved));
 });
 
 test('the emoji alphabet is a power of two', () => {
@@ -128,7 +183,7 @@ const salt = new Uint8Array([1, 2, 3, 4, 5, 6]);
 
 async function mediaKey(senderId = 'alice') {
     const h = await handshake();
-    return await crypto.deriveMediaKey(h.aSecret, h.aPub, h.bPub, senderId);
+    return await crypto.deriveMediaKey(h.aSecret, h.t, senderId);
 }
 
 test('the clear prefix is the length the SFU parses', () => {
@@ -225,9 +280,9 @@ test('each sender gets a distinct key', async () => {
     // (key, IV) pair across senders and break AES-GCM outright.
     const h = await handshake();
     const alice = await crypto.deriveMediaKey(
-        h.aSecret, h.aPub, h.bPub, 'alice',
+        h.aSecret, h.t, 'alice',
     );
-    const bob = await crypto.deriveMediaKey(h.aSecret, h.aPub, h.bPub, 'bob');
+    const bob = await crypto.deriveMediaKey(h.aSecret, h.t, 'bob');
 
     const plain = frame(32);
     const byAlice = await crypto.encryptFrame(
@@ -287,7 +342,7 @@ test('an unknown key id fails loudly', async () => {
 
 test('chat survives a round trip', async () => {
     const h = await handshake();
-    const key = await crypto.deriveChatKey(h.aSecret, h.aPub, h.bPub);
+    const key = await crypto.deriveChatKey(h.aSecret, h.t);
     const text = 'Привет — hello 👋 <b>not markup</b>';
     const {iv, ct} = await crypto.encryptChat(key, text);
     assert.strictEqual(await crypto.decryptChat(key, iv, ct), text);
@@ -295,7 +350,7 @@ test('chat survives a round trip', async () => {
 
 test('chat uses a fresh IV per message', async () => {
     const h = await handshake();
-    const key = await crypto.deriveChatKey(h.aSecret, h.aPub, h.bPub);
+    const key = await crypto.deriveChatKey(h.aSecret, h.t);
     const one = await crypto.encryptChat(key, 'same text');
     const two = await crypto.encryptChat(key, 'same text');
     assert.notStrictEqual(one.iv, two.iv, 'the IV repeated');
@@ -305,17 +360,17 @@ test('chat uses a fresh IV per message', async () => {
 test('chat from another call does not decrypt', async () => {
     const h1 = await handshake();
     const h2 = await handshake();
-    const key1 = await crypto.deriveChatKey(h1.aSecret, h1.aPub, h1.bPub);
-    const key2 = await crypto.deriveChatKey(h2.aSecret, h2.aPub, h2.bPub);
+    const key1 = await crypto.deriveChatKey(h1.aSecret, h1.t);
+    const key2 = await crypto.deriveChatKey(h2.aSecret, h2.t);
     const {iv, ct} = await crypto.encryptChat(key1, 'secret');
     await assert.rejects(crypto.decryptChat(key2, iv, ct));
 });
 
 test('the chat key is not the media key', async () => {
     const h = await handshake();
-    const chat = await crypto.deriveChatKey(h.aSecret, h.aPub, h.bPub);
+    const chat = await crypto.deriveChatKey(h.aSecret, h.t);
     const media = await crypto.deriveMediaKey(
-        h.aSecret, h.aPub, h.bPub, 'chat',
+        h.aSecret, h.t, 'chat',
     );
     const {iv, ct} = await crypto.encryptChat(chat, 'secret');
     await assert.rejects(

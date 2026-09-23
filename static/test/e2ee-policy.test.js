@@ -99,6 +99,7 @@ async function readyToFinalize(ctx) {
     e.keyPair = await C.generateKeyPair();
     e.myPub = await C.exportPublic(e.keyPair.publicKey);
     e.peerPub = await C.exportPublic((await C.generateKeyPair()).publicKey);
+    e.peerCommit = await C.commit(e.peerPub);
     return e;
 }
 
@@ -207,7 +208,7 @@ async function handshake(ctx, tamper) {
             if(tamper && id === 'zzz' && payload.t === 'dh') {
                 const pub = C.unb64(payload.pub);
                 pub[1] ^= 1;
-                payload = {t: 'dh', pub: C.b64(pub)};
+                payload = Object.assign({}, payload, {pub: C.b64(pub)});
             }
             queue.push({from: id, dest: dest, payload: payload});
         },
@@ -286,11 +287,11 @@ test('a second commitment with another key fails the handshake', async () => {
 
     // A commitment to a key the server does not mean to use: our key goes
     // out in answer, and the server now has all it needs to search.
-    await e.onMessage('zzz', {t: 'commit', commit: throwaway.commit});
+    await e.onMessage('zzz', {v: 2, t: 'commit', commit: throwaway.commit});
     assert.ok(sent.some(m => m.t === 'dh'), 'our key did not go out');
     // Then the commitment to the key the search came up with, and that key.
-    await e.onMessage('zzz', {t: 'commit', commit: chosen.commit});
-    await e.onMessage('zzz', {t: 'dh', pub: C.b64(chosen.pub)});
+    await e.onMessage('zzz', {v: 2, t: 'commit', commit: chosen.commit});
+    await e.onMessage('zzz', {v: 2, t: 'dh', pub: C.b64(chosen.pub)});
 
     assert.strictEqual(
         e.state, 'failed',
@@ -313,9 +314,9 @@ test('the same commitment twice is not a failure', async () => {
     const {e} = await waitingInitiator(ctx);
     const responder = await forgedKey(C);
 
-    await e.onMessage('zzz', {t: 'commit', commit: responder.commit});
-    await e.onMessage('zzz', {t: 'commit', commit: responder.commit});
-    await e.onMessage('zzz', {t: 'dh', pub: C.b64(responder.pub)});
+    await e.onMessage('zzz', {v: 2, t: 'commit', commit: responder.commit});
+    await e.onMessage('zzz', {v: 2, t: 'commit', commit: responder.commit});
+    await e.onMessage('zzz', {v: 2, t: 'dh', pub: C.b64(responder.pub)});
     assert.strictEqual(e.state, 'established');
 });
 
@@ -331,11 +332,38 @@ test('a responder given two different keys fails the handshake', async () => {
     const two = await forgedKey(C);
 
     await Promise.all([
-        e.onMessage('aaa', {t: 'dh', pub: C.b64(one.pub)}),
-        e.onMessage('aaa', {t: 'dh', pub: C.b64(two.pub)}),
+        e.onMessage('aaa', {v: 2, t: 'dh', pub: C.b64(one.pub)}),
+        e.onMessage('aaa', {v: 2, t: 'dh', pub: C.b64(two.pub)}),
     ]);
     assert.strictEqual(e.state, 'failed');
     assert.strictEqual(e.sas, null);
+});
+
+// A page loaded before a deploy derives its keys the old way.  Going on with
+// it would put different emoji in front of the two people, which is exactly
+// what an interception looks like; the handshake stops and says why instead.
+test('a peer on another version of the handshake is refused, and why', async () => {
+    const ctx = loadController();
+    const C = ctx.SozvonE2EECrypto;
+    const {e} = await waitingInitiator(ctx);
+    const responder = await forgedKey(C);
+
+    await e.onMessage('zzz', {t: 'commit', commit: responder.commit});
+    assert.strictEqual(e.state, 'failed');
+    assert.strictEqual(e.detail, 'version');
+});
+
+test('every handshake message says its version', async () => {
+    const ctx = loadController();
+    const sent = [];
+    const e = new ctx.SozvonE2EE({
+        id: 'zzz', userMessage: (kind, dest, payload) => sent.push(payload),
+    });
+    e.users.add('aaa');
+    await e.startWith('aaa');
+    assert.deepStrictEqual(sent.map(m => m.t), ['hello', 'commit']);
+    for(const m of sent)
+        assert.strictEqual(m.v, ctx.SozvonE2EECrypto.PROTOCOL_VERSION, m.t);
 });
 
 test('a handshake that does not finish in time fails', async () => {

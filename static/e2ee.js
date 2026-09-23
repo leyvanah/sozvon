@@ -61,6 +61,7 @@
         this.startingFor = null;
         this.keyPair = null;
         this.myPub = null;           // Uint8Array
+        this.myCommit = null;        // SHA-256 of myPub
         this.peerPub = null;
         this.peerCommit = null;      // initiator stores the responder's commitment
         this.handshakeTimer = null;
@@ -224,6 +225,7 @@
         this.startingFor = null;
         this.keyPair = null;
         this.myPub = null;
+        this.myCommit = null;
         this.peerPub = null;
         this.peerCommit = null;
         this.secret = null;
@@ -293,20 +295,28 @@
         }, HANDSHAKE_TIMEOUT);
 
         let kp = await C.generateKeyPair();
-        if(this.peer !== peer)
+        let myPub = await C.exportPublic(kp.publicKey);
+        let myCommit = await C.commit(myPub);
+        if(this.peer !== peer || gen !== this.generation)
             return; // peer changed while generating
         this.keyPair = kp;
-        this.myPub = await C.exportPublic(kp.publicKey);
+        this.myPub = myPub;
+        this.myCommit = myCommit;
         this.startingFor = null;
 
         this.send({t: 'hello'});
         if(this.role === 'responder')
-            this.send({t: 'commit', commit: C.b64(await C.commit(this.myPub))});
+            this.send({t: 'commit', commit: C.b64(this.myCommit)});
     };
 
     E2EE.prototype.send = function(payload) {
-        if(this.peer)
+        if(this.peer) {
+            // Every message but 'nocrypto', which a peer on any version has
+            // to understand, says which version of the handshake it is for.
+            if(payload.t !== 'nocrypto')
+                payload = Object.assign({v: C.PROTOCOL_VERSION}, payload);
             this.sc.userMessage('e2ee', this.peer, payload, true);
+        }
     };
 
     /**
@@ -340,13 +350,20 @@
         // restart arrives as a leave+join (new user id) via del/addUser.
         if(this.state === 'established' || this.state === 'failed')
             return;
-        if(!this.myPub)
+        if(!this.myCommit)
             return;
+        if(payload.v !== C.PROTOCOL_VERSION) {
+            // The peer derives its keys another way: going on would show two
+            // different sets of emoji, which is what an interception looks
+            // like.  Say what it is instead.
+            this.fail('version');
+            return;
+        }
 
         switch(payload.t) {
         case 'hello':
             if(this.role === 'responder')
-                this.send({t: 'commit', commit: C.b64(await C.commit(this.myPub))});
+                this.send({t: 'commit', commit: C.b64(this.myCommit)});
             break;
         case 'commit':
             if(this.role === 'initiator') {
@@ -407,7 +424,9 @@
         let gen = this.generation;
         let keyPair = this.keyPair, myPub = this.myPub;
         let peerPub = this.peerPub, peer = this.peer, role = this.role;
-        if(!keyPair || !myPub || !peerPub || !peer) {
+        let initiator = role === 'initiator';
+        let commit = initiator ? this.peerCommit : this.myCommit;
+        if(!keyPair || !myPub || !peerPub || !peer || !commit) {
             // Nothing to finish: the session was reset before this ran.  Say
             // so, or a controller stuck in 'handshaking' has nothing to
             // explain it.
@@ -421,8 +440,15 @@
         if(gen !== this.generation)
             return;
         this.secret = secret;
-        let iPub = role === 'initiator' ? myPub : peerPub;
-        let rPub = role === 'initiator' ? peerPub : myPub;
+        let salt = await C.transcript({
+            initiatorId: initiator ? this.sc.id : peer,
+            responderId: initiator ? peer : this.sc.id,
+            commit: commit,
+            initiatorPub: initiator ? myPub : peerPub,
+            responderPub: initiator ? peerPub : myPub,
+        });
+        if(gen !== this.generation)
+            return;
 
         // One key per (sender, media kind); each gets its own IV space.
         let owners = [this.sc.id, peer];
@@ -430,7 +456,7 @@
         for(let owner of owners) {
             for(let kind of kinds) {
                 let streamId = owner + '|' + kind;
-                let key = await C.deriveMediaKey(secret, iPub, rPub, streamId);
+                let key = await C.deriveMediaKey(secret, salt, streamId);
                 if(gen !== this.generation)
                     return;
                 this.ensureWorker().postMessage(
@@ -440,7 +466,7 @@
         }
 
         // Key for two-party text chat, bound to the same transcript.
-        let chatKey = await C.deriveChatKey(secret, iPub, rPub);
+        let chatKey = await C.deriveChatKey(secret, salt);
         if(gen !== this.generation)
             return;
         this.chatKey = chatKey;
@@ -449,7 +475,7 @@
         // cleartext while this call was momentarily a >2-party or downgraded).
         this.setWorkerMode(false);
 
-        let sas = await C.deriveSAS(secret, iPub, rPub);
+        let sas = await C.deriveSAS(secret, salt);
         if(gen !== this.generation)
             return;
         this.sas = sas;
