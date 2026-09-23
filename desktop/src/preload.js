@@ -1,4 +1,28 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const path = require('path');
+const { pathToFileURL } = require('url');
+
+// Two kinds of page share the view this preload is attached to, and they are
+// not owed the same things.
+//
+//   * Ours, loaded from disk (file://): the launcher and the deploy wizard.
+//     They are the app's own interface and drive the app -- the server list,
+//     the settings, the install over SSH.
+//   * A server's, loaded over the network from an address the user typed.
+//     That page is written by whoever runs the server, and a fault in it is
+//     written by whoever found the fault.  It gets the bridge the Android app
+//     offers and nothing more.
+//
+// Where the page is loaded from separates them, and where means the
+// directory rather than the scheme: our pages are the ones that live beside
+// this file.  The main process checks the sender of every privileged call as
+// well -- this decides what a page is handed, not what the main process is
+// willing to answer.
+const ourPages = pathToFileURL(
+  path.join(__dirname, 'renderer') + path.sep).href.toLowerCase();
+const ourOwnPage = location.protocol === 'file:' &&
+      location.href.toLowerCase().startsWith(ourPages);
+const serverPage = location.protocol === 'http:' || location.protocol === 'https:';
 
 // Hand the app's appearance to a server's own client before its scripts run.
 //
@@ -13,7 +37,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // This is the one synchronous call in the app, and the reason is the timing:
 // anything asynchronous resolves after the page has already painted.
 try {
-  if (location.protocol === 'http:' || location.protocol === 'https:') {
+  if (serverPage) {
     const pref = ipcRenderer.sendSync('app:theme-sync');
     if (pref) localStorage.setItem('sozvon-theme', pref);
   }
@@ -21,7 +45,8 @@ try {
   // A page may forbid storage; the client then falls back to the system.
 }
 
-contextBridge.exposeInMainWorld('sozvon', {
+// The app's own controls, for the app's own pages only.
+if (ourOwnPage) contextBridge.exposeInMainWorld('sozvon', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
   openGroup: (serverUrl, group) => ipcRenderer.invoke('group:open', { serverUrl, group }),
@@ -49,7 +74,7 @@ contextBridge.exposeInMainWorld('sozvon', {
 // back to the server picker and a way to drop the saved login.  Without it a
 // server page is a dead end -- the window has no address bar, and the client
 // has no idea it is running inside anything.
-contextBridge.exposeInMainWorld('SozvonApp', {
+if (serverPage) contextBridge.exposeInMainWorld('SozvonApp', {
   changeServer: () => ipcRenderer.invoke('group:back-to-launcher'),
   resetLogin: () => ipcRenderer.invoke('app:reset-login'),
   // This page keeps working when it is off screen, and is meant to: the

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, WebContentsView, session, ipcMain, Menu, shell, nativeImage, nativeTheme } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const crypto = require('crypto');
 const { createTray } = require('./tray');
@@ -243,6 +244,170 @@ function showWindow() {
  */
 function hubEntry() {
   return (config.servers || []).find(s => s && s.url && s.hub) || null;
+}
+
+// Where the app's own pages live.  Everything under here is ours -- the
+// launcher, the deploy wizard -- and nothing else is, whatever scheme it
+// arrived with.  The protocol alone would not do: a page that reached
+// file:// by any route would then be holding the app's own controls, and
+// what stops it is Chromium's refusal to navigate there from the web, which
+// is not ours to promise.
+const OUR_PAGES = pathToFileURL(
+  path.join(__dirname, 'renderer') + path.sep).href.toLowerCase();
+
+/**
+ * Whether an address is one of the app's own pages.
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isOurPage(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'file:') return false;
+    return u.href.toLowerCase().startsWith(OUR_PAGES);
+  } catch {
+    return false;
+  }
+}
+
+/** An address as a person would recognise it, for a line in the log. */
+function originOrUrl(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return String(url);
+  }
+}
+
+/**
+ * The origins the user has actually chosen: every server in the list, and
+ * the one opened last.  group:open adds a server before it loads it, so an
+ * address typed into the launcher is here by the time its page appears.
+ *
+ * @returns {Set<string>}
+ */
+function knownOrigins() {
+  const out = new Set();
+  const add = (url) => {
+    try {
+      if (url) out.add(new URL(url).origin);
+    } catch { /* an entry that is not an address buys nothing */ }
+  };
+  for (const s of config.servers || []) add(s && s.url);
+  add(config.serverUrl);
+  return out;
+}
+
+/**
+ * Whether an address is one of the user's own servers.
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isKnownServer(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  const known = knownOrigins();
+  if (known.has(u.origin)) return true;
+  // A server remembered as http:// that answers over https:// is the same
+  // server, upgraded.  Accept that direction and only that one: an install
+  // ends up on TLS, and a person who typed the address without one should
+  // not lose the camera over it.
+  if (u.protocol === 'https:') return known.has(`http://${u.host}`);
+  return false;
+}
+
+// What a page in this view may be granted without asking, once it is known
+// to be one of the user's own servers.  A call needs the camera, the
+// microphone and the screen; the rest are what the client uses around them.
+const ALLOWED_PERMISSIONS = [
+  'media', 'display-capture', 'notifications', 'fullscreen',
+  'clipboard-read', 'clipboard-sanitized-write',
+];
+
+/**
+ * Whether a page may be granted a permission without being asked about.
+ *
+ * The name of the capability alone says nothing about who is asking: a page
+ * reached by a redirect, or one belonging to a server the user has since
+ * removed, would otherwise be handed the same camera and the same clipboard
+ * as the server the user chose.
+ *
+ * @param {string} permission
+ * @param {string} url - the address asking
+ * @returns {boolean}
+ */
+function permissionFor(permission, url) {
+  return ALLOWED_PERMISSIONS.includes(permission) && isKnownServer(url);
+}
+
+/**
+ * The address that asked for a permission.
+ *
+ * Electron names the asking frame in the details, and that is the answer
+ * whenever it is there.  The window's own address is only the same thing
+ * while the frame asking is the main one: a page can put anybody's page in
+ * an iframe, and taking the address around it would hand a stranger whatever
+ * the server the user chose is allowed.  Where neither can be established
+ * there is nothing to check against, and an empty address is granted
+ * nothing.
+ *
+ * @param {Electron.WebContents} wc
+ * @param {object} [details]
+ * @returns {string}
+ */
+function askingAddress(wc, details) {
+  if (details) {
+    if (details.requestingUrl) return details.requestingUrl;
+    if (details.securityOrigin) return details.securityOrigin;
+    if (details.isMainFrame === false) return '';
+  }
+  return (wc && wc.getURL()) || '';
+}
+
+/**
+ * Hand an address to the user's browser, if it is the kind of address a
+ * browser opens.
+ *
+ * shell.openExternal gives the address to whatever the operating system has
+ * registered for its scheme, which for anything but http and https means
+ * starting a local program with an argument the page chose.  A page that is
+ * refused the window must not get that instead.
+ *
+ * @param {string} url
+ */
+function openInBrowser(url) {
+  let protocol;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    protocol = '';
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    console.error(`not opened: ${originOrUrl(url)} is not a web address`);
+    return;
+  }
+  shell.openExternal(url);
+}
+
+/**
+ * Whether an address may be opened in the app's own window.
+ *
+ * This window has no address bar, so a page that can send it anywhere can
+ * show the person any site at all and they have no way to tell.  Our own
+ * pages and the user's own servers stay; everything else belongs in the
+ * browser, where it can be seen.
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+function mayStayInWindow(url) {
+  return isOurPage(url) || isKnownServer(url);
 }
 
 /** Open the operator room, from the tray or from a window that is elsewhere. */
@@ -593,15 +758,60 @@ function createWindow() {
     cb(-3);
   });
 
-  contentView.webContents.session.setPermissionRequestHandler((wc, permission, cb) => {
-    const allowed = ['media', 'display-capture', 'notifications', 'fullscreen', 'clipboard-read', 'clipboard-sanitized-write'];
-    cb(allowed.includes(permission));
-  });
+  contentView.webContents.session.setPermissionRequestHandler(
+    (wc, permission, cb, details) => {
+      const url = askingAddress(wc, details);
+      const ok = permissionFor(permission, url);
+      if (!ok)
+        console.error(`refused ${permission} for ${originOrUrl(url)}`);
+      cb(ok);
+    });
+
+  // The synchronous side of the same question: navigator.permissions.query,
+  // and the checks Chromium makes on its own before it ever raises a request.
+  // Left at its default it answers for the request handler above and quietly
+  // disagrees with it.
+  contentView.webContents.session.setPermissionCheckHandler(
+    (wc, permission, requestingOrigin, details) =>
+      permissionFor(permission,
+                    requestingOrigin || askingAddress(wc, details)));
 
   contentView.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openInBrowser(url);
     return { action: 'deny' };
   });
+
+  // A new window already goes to the real browser; a navigation of this view
+  // did not, and this window has no address bar to say where it ended up.  A
+  // page could therefore send the view anywhere and the person would have no
+  // way to tell -- which is worth more to whoever wants a password than any
+  // of it is worth to us.  Our own pages and the user's own servers stay
+  // here; everything else opens where it can be seen.
+  //
+  // The cost is a server whose group hands the client an external login
+  // portal (groupStatus.authPortal): the client navigates this view to it,
+  // and that now opens in the browser instead, where the redirect back does
+  // not reach the app.  No server of ours uses one.
+  const keepInside = (e, url, stranded) => {
+    if (mayStayInWindow(url)) return;
+    e.preventDefault();
+    console.error(`kept out of the app window: ${originOrUrl(url)}`);
+    openInBrowser(url);
+    // A refused redirect leaves nothing in the view -- the load it was part
+    // of is over.  Come back to the launcher and say where the address went,
+    // rather than leaving a blank window.  Deferred: navigating from inside
+    // a navigation event is asking for trouble.
+    if (stranded)
+      setTimeout(() => showLauncher(
+        `Адрес открыт в браузере: ${originOrUrl(url)}`), 0);
+  };
+
+  contentView.webContents.on('will-navigate', (e, url) => keepInside(e, url, false));
+
+  // A server that answers with a redirect would otherwise walk straight past
+  // the check above -- and a server's page is the one thing here we are least
+  // able to vouch for.
+  contentView.webContents.on('will-redirect', (e, url) => keepInside(e, url, true));
 
   // A server page that fails to load leaves Chromium's own error page in the
   // window, which has no way out either.  Come back to the launcher and say
@@ -816,10 +1026,76 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-ipcMain.handle('config:get', () => config);
-ipcMain.handle('config:set', (_e, patch) => {
+// --------------------------------------------------------- IPC spheres ---
+//
+// The view below the bar carries our own pages, loaded from disk, and a
+// server's page, loaded over the network.  preload.js hands the app's
+// controls only to the first kind; this is the other half of the same fence,
+// and it is not redundant: a preload decides what a page is given, and this
+// decides what the main process is willing to answer.  Either one alone is a
+// single point of failure, and one of them is a file that is easy to extend
+// without noticing what it is for.
+
+/**
+ * Whether a call came from one of the app's own pages.
+ *
+ * @param {Electron.IpcMainEvent|Electron.IpcMainInvokeEvent} event
+ * @returns {boolean}
+ */
+function fromOurOwnPage(event) {
+  let frame;
+  try {
+    // Accessing the frame of a navigation that has already gone throws.
+    frame = event.senderFrame;
+  } catch {
+    return false;
+  }
+  if (!frame) return false;
+  return isOurPage(frame.url);
+}
+
+/**
+ * Register a handler for a channel only the app's own pages may use.
+ *
+ * @param {string} channel
+ * @param {(event: Electron.IpcMainInvokeEvent, ...args: any[]) => any} fn
+ */
+function handleOurs(channel, fn) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!fromOurOwnPage(event)) {
+      console.error(`refused ${channel}: not from one of our own pages`);
+      throw new Error(`${channel} is not available to this page`);
+    }
+    return fn(event, ...args);
+  });
+}
+
+handleOurs('config:get', () => config);
+
+// What a page may set, and what it is read as.
+//
+// Most of the configuration is written by this process alone: the certificate
+// pins, the SSH host key fingerprints, the server list, the address last
+// opened.  Those are what the app trusts, and a patch that could name them
+// would be a way to rewrite that trust from a page.  So the patch is not
+// merged as it arrives -- the keys a page is allowed to set are listed here,
+// by hand, and everything else is dropped and said out loud, because a key
+// that is meant to be here and is missing should be obvious rather than
+// silent.
+const SETTABLE_CONFIG = {
+  allowInsecureCerts: Boolean,
+};
+
+handleOurs('config:set', (_e, patch) => {
   const before = config.allowInsecureCerts;
-  config = { ...config, ...patch };
+  const clean = {};
+  for (const key of Object.keys(patch || {})) {
+    if (Object.prototype.hasOwnProperty.call(SETTABLE_CONFIG, key))
+      clean[key] = SETTABLE_CONFIG[key](patch[key]);
+    else
+      console.error(`config:set: ignoring ${key}, which no page may set`);
+  }
+  config = { ...config, ...clean };
   saveConfig(config);
 
   // Chromium remembers how it verified a host, so our certificate check only
@@ -828,7 +1104,7 @@ ipcMain.handle('config:set', (_e, patch) => {
   // used to admit this by saying a restart was needed, which is a chore to
   // hand to somebody when the app can do it itself.  Deferred a moment so
   // this call's reply and the write above both land first.
-  if (patch && 'allowInsecureCerts' in patch &&
+  if ('allowInsecureCerts' in clean &&
       before !== config.allowInsecureCerts) {
     setTimeout(() => {
       app.relaunch();
@@ -842,7 +1118,7 @@ ipcMain.handle('config:set', (_e, patch) => {
 // operator hub that page is the operator's dashboard, which is where the person
 // who owns the server belongs -- not in a call.  There is no room to remember
 // in that case, so the recent list is left alone.
-ipcMain.handle('group:open', (_e, { serverUrl, group }) => {
+handleOurs('group:open', (_e, { serverUrl, group }) => {
   if (!mainWindow) return;
   const base = serverUrl.replace(/\/+$/, '');
   const url = group
@@ -860,7 +1136,7 @@ ipcMain.handle('group:open', (_e, { serverUrl, group }) => {
 // The operator room is the server's front page: on a server whose group is an
 // operator hub, that is the dashboard.  Same address the launcher opens when
 // the room field is left empty.
-ipcMain.handle('bar:open-hub', () => {
+handleOurs('bar:open-hub', () => {
   if (!contentView) return;
   let origin;
   try {
@@ -873,11 +1149,11 @@ ipcMain.handle('bar:open-hub', () => {
   contentView.webContents.loadURL(`${origin}/`);
 });
 
-ipcMain.handle('bar:reload', () => contentView && contentView.webContents.reload());
+handleOurs('bar:reload', () => contentView && contentView.webContents.reload());
 
-ipcMain.handle('bar:state', () => barState());
+handleOurs('bar:state', () => barState());
 
-ipcMain.handle('servers:remove', (_e, url) => {
+handleOurs('servers:remove', (_e, url) => {
   config.servers = (config.servers || []).filter(s => !sameServer(s.url, url));
   if (sameServer(config.serverUrl, url)) {
     const next = config.servers[0];
@@ -889,7 +1165,7 @@ ipcMain.handle('servers:remove', (_e, url) => {
   return config;
 });
 
-ipcMain.handle('servers:rename', (_e, { url, name }) => {
+handleOurs('servers:rename', (_e, { url, name }) => {
   const s = (config.servers || []).find(s => sameServer(s.url, url));
   if (s) s.name = String(name || '').trim().slice(0, 60);
   saveConfig(config);
@@ -945,7 +1221,7 @@ ipcMain.on('app:theme-sync', (e) => {
 
 // ---------------------------------------------------------------- deploy ---
 
-ipcMain.handle('deploy:open', () => {
+handleOurs('deploy:open', () => {
   if (!contentView) return;
   contentView.webContents.loadFile(path.join(__dirname, 'renderer', 'deploy.html'));
 });
@@ -961,12 +1237,15 @@ function askHostKey(info) {
   return new Promise((resolve) => {
     if (!mainWindow) { resolve(false); return; }
     const known = (config.knownHosts || {})[`${info.host}:${info.port}`];
-    const timer = setTimeout(() => {
-      ipcMain.removeAllListeners('deploy:hostkey-answer');
-      resolve(false);
-    }, 5 * 60 * 1000);
-
-    ipcMain.once('deploy:hostkey-answer', (_e, accepted) => {
+    // Answering this is accepting a host key, so it is for the deploy page
+    // and nobody else.  A call from anywhere else is ignored rather than
+    // taken as "no": the prompt stays up, and the person still decides.
+    const onAnswer = (e, accepted) => {
+      if (!fromOurOwnPage(e)) {
+        console.error('refused deploy:hostkey-answer: not from one of our own pages');
+        return;
+      }
+      ipcMain.removeListener('deploy:hostkey-answer', onAnswer);
       clearTimeout(timer);
       if (accepted) {
         config.knownHosts = { ...(config.knownHosts || {}) };
@@ -974,7 +1253,14 @@ function askHostKey(info) {
         saveConfig(config);
       }
       resolve(!!accepted);
-    });
+    };
+
+    const timer = setTimeout(() => {
+      ipcMain.removeListener('deploy:hostkey-answer', onAnswer);
+      resolve(false);
+    }, 5 * 60 * 1000);
+
+    ipcMain.on('deploy:hostkey-answer', onAnswer);
 
     // A key that changed is not the same question as a key never seen: one
     // is routine, the other means the server was replaced -- or someone is
@@ -987,7 +1273,7 @@ function askHostKey(info) {
   });
 }
 
-ipcMain.handle('deploy:start', async (_e, opts) => {
+handleOurs('deploy:start', async (_e, opts) => {
   const { Deployer, originOf } = require('./deploy/deployer');
   const send = (channel, payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
