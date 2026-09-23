@@ -1240,3 +1240,80 @@ test('chat is not sent in clear while the user has not agreed to it', async () =
     assert.deepStrictEqual(r.errors, ['e2ee.clearNotAgreed']);
     assert.strictEqual(r.input.value, 'text for the other person');
 });
+
+// ---- a reconnect the server answers with encryption switched off ----------
+
+/**
+ * Merge a join's status over the one before, as gotJoined() does, and hand
+ * back what keepE2EEStatus() made of it.
+ *
+ * @param {object} before - groupStatus before the join
+ * @param {object} status - the join's status
+ */
+function joinWithStatus(before, status) {
+    const ctx = vm.createContext({groupStatus: Object.assign({}, before)});
+    // Before these existed a join's status was merged in and obeyed.
+    liftFunctionOr(ctx, 'galene.js', 'e2eeStatus',
+                   'function e2eeStatus() { return {}; }');
+    liftFunctionOr(ctx, 'galene.js', 'keepE2EEStatus',
+                   'function keepE2EEStatus() { return false; }');
+    const snapshot = ctx.e2eeStatus(ctx.groupStatus);
+    for(const key in status)
+        ctx.groupStatus[key] = status[key];
+    const dropped = ctx.keepE2EEStatus(snapshot);
+    return {dropped: dropped, status: ctx.groupStatus};
+}
+
+test('a reconnect answered with encryption switched off keeps it on, and says so', () => {
+    const encrypted = {name: 'room', e2ee: true, requireE2ee: true};
+    for(const status of [
+        {e2ee: false},
+        {requireE2ee: false},
+        {e2ee: false, requireE2ee: false},
+        // e2eeActive() also turns off in an operator hub
+        {operatorRoom: true},
+    ]) {
+        const r = joinWithStatus(encrypted, status);
+        assert.strictEqual(r.dropped, true, JSON.stringify(status));
+        assert.strictEqual(r.status.e2ee, true, JSON.stringify(status));
+        assert.strictEqual(r.status.requireE2ee, true, JSON.stringify(status));
+        assert.strictEqual(r.status.operatorRoom, false, JSON.stringify(status));
+    }
+});
+
+// A server that means no harm leaves the fields out when they are false, so
+// an ordinary reconnect must not set anything off.
+test('an ordinary reconnect is not taken for one', () => {
+    const r = joinWithStatus(
+        {name: 'room', e2ee: true}, {name: 'room', displayName: 'Room'},
+    );
+    assert.strictEqual(r.dropped, false);
+    assert.strictEqual(r.status.e2ee, true);
+    assert.ok(!r.status.requireE2ee, 'a requirement was made up');
+});
+
+test('a room that never encrypted is left as the server says', () => {
+    const r = joinWithStatus({name: 'room'}, {e2ee: false});
+    assert.strictEqual(r.dropped, false);
+    assert.strictEqual(r.status.e2ee, false);
+
+    const hub = joinWithStatus({name: 'hub', e2ee: true, operatorRoom: true},
+                               {e2ee: true, operatorRoom: true});
+    assert.strictEqual(hub.dropped, false);
+    assert.strictEqual(hub.status.operatorRoom, true);
+});
+
+test('an encrypted call is remembered past the connection it was on', () => {
+    const ctx = vm.createContext({
+        e2eeWasEncrypted: false,
+        updateE2EEUI: () => {},
+        enforceE2EEMediaPolicy: () => {},
+    });
+    vm.runInContext(liftFunction('galene.js', 'gotE2EEState'), ctx);
+    ctx.gotE2EEState.call({state: 'handshaking'});
+    assert.strictEqual(ctx.e2eeWasEncrypted, false);
+    ctx.gotE2EEState.call({state: 'established'});
+    assert.strictEqual(ctx.e2eeWasEncrypted, true);
+    ctx.gotE2EEState.call({state: 'blocked'});
+    assert.strictEqual(ctx.e2eeWasEncrypted, true, 'forgotten on the next change');
+});

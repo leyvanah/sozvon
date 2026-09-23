@@ -85,6 +85,15 @@ const RECONNECT_MAX_DELAY = 30000;
 let groupStatus = {};
 
 /**
+ * Whether this page has had an end-to-end encrypted call in this group.
+ * Outlives the connection, and with it the E2EE controller, so that a
+ * reconnect does not forget it.  (Sozvon)
+ *
+ * @type {boolean}
+ */
+let e2eeWasEncrypted = false;
+
+/**
  * Whether "remember me" was ticked at join time; checked on a successful join
  * to decide whether to mint a remember-token (operators only).
  * @type {{group: string, username: string, remember: boolean}|null}
@@ -6385,6 +6394,50 @@ function e2eeActive() {
 }
 
 /**
+ * The part of a group's status that decides whether its calls are end-to-end
+ * encrypted. (Sozvon)
+ *
+ * @param {Object<string,any>} status
+ * @returns {{e2ee: boolean, requireE2ee: boolean, operatorRoom: boolean}}
+ */
+function e2eeStatus(status) {
+    return {
+        e2ee: !!status.e2ee,
+        requireE2ee: !!status.requireE2ee,
+        operatorRoom: !!status.operatorRoom,
+    };
+}
+
+/**
+ * Keep a join from switching end-to-end encryption off in this page.
+ *
+ * Whether the group encrypts is the server's answer to every join, and the
+ * server is the party the encryption keeps out.  Dropping the connection and
+ * answering the reconnect with "e2ee": false would otherwise take a call to
+ * plaintext with only the padlock to show for it, and the camera would be
+ * republished on its own.  A server that means no harm never says so: the
+ * fields are left out when false, and a join's status is merged over the one
+ * before.  So once this page has seen the group encrypt, it goes on doing so,
+ * and a status that says otherwise is reported rather than obeyed. (Sozvon)
+ *
+ * @param {{e2ee: boolean, requireE2ee: boolean, operatorRoom: boolean}} before
+ *     e2eeStatus() of groupStatus before the join's status was merged in
+ * @returns {boolean} whether the join's status tried to switch it off
+ */
+function keepE2EEStatus(before) {
+    if(!before.e2ee || before.operatorRoom)
+        return false;
+    let now = e2eeStatus(groupStatus);
+    let dropped = !now.e2ee || now.operatorRoom ||
+        (before.requireE2ee && !now.requireE2ee);
+    groupStatus.e2ee = true;
+    groupStatus.operatorRoom = false;
+    if(before.requireE2ee)
+        groupStatus.requireE2ee = true;
+    return dropped;
+}
+
+/**
  * Whether an ordinary chat message may be sent at all.
  *
  * An ordinary chat message goes through the server in clear and stays in the
@@ -6611,6 +6664,10 @@ function gotE2EESas(sas) {
  * @this {SozvonE2EE}
  */
 function gotE2EEState() {
+    // Carried over to the controller of the next connection: a room that has
+    // had an encrypted call does not go on in clear without the user.
+    if(this.state === 'established')
+        e2eeWasEncrypted = true;
     updateE2EEUI();
     enforceE2EEMediaPolicy();
     // a new encrypted session, or none: send our name again when it is up
@@ -7234,8 +7291,12 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
             token = null;
         }
         // don't discard endPoint and friends
+        let e2eeBefore = e2eeStatus(groupStatus);
         for(let key in status)
             groupStatus[key] = status[key];
+        let e2eeDropped = keepE2EEStatus(e2eeBefore);
+        if(e2eeDropped)
+            displayError(Sozvon.i18n.t('e2ee.statusDropped'));
         if(serverConnection.e2ee)
             serverConnection.e2ee.setRequire(groupStatus.requireE2ee);
         usingRememberToken = false;
@@ -7257,7 +7318,9 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
                                          'toast.reconnectedAfterAway' :
                                          'toast.reconnected'));
         stopReconnect();
-        if(wasReconnecting && kind === 'join')
+        // Not after a status that tried to switch encryption off: whatever
+        // else it may have got wrong, the camera stays with the user.
+        if(wasReconnecting && kind === 'join' && !e2eeDropped)
             restore = reconnectMedia;
         reconnectMedia = null;
         if(pendingRemember) {
@@ -11115,6 +11178,7 @@ async function serverConnect() {
     serverConnection.onfiletransfer = gotFileTransfer;
     if(typeof SozvonE2EE !== 'undefined') {
         serverConnection.e2ee = new SozvonE2EE(serverConnection);
+        serverConnection.e2ee.wasEncrypted = e2eeWasEncrypted;
         serverConnection.e2ee.onsas = gotE2EESas;
         serverConnection.e2ee.onstate = gotE2EEState;
     }
