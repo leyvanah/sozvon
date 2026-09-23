@@ -7911,7 +7911,11 @@ commands.msg = {
         if(!mayChatInClear())
             throw new Error(Sozvon.i18n.t('e2ee.privateBlocked'));
         serverConnection.chat('', id, p[1]);
-        addToChatbox(serverConnection.id, null, id, serverConnection.username,
+        // You are the sender, so you go in the peerId slot: an empty one is
+        // read as "this did not come from a person" and drawn as a system
+        // notice.  The message id stays empty -- the server assigns one to
+        // the message it relays, and this is the local echo of it.
+        addToChatbox(null, serverConnection.id, id, serverConnection.username,
                      new Date(), false, false, '', p[1]);
     }
 };

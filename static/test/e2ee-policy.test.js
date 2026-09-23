@@ -781,12 +781,13 @@ function runPrivateMessage(require) {
     );
 
     const sent = [];
+    const drawn = [];
     const ctx = vm.createContext({
         console: quiet,
         commands: {},
         Sozvon: {i18n: {t: k => k}},
         e2eeActive: () => true,
-        addToChatbox: () => {},
+        addToChatbox: (...args) => drawn.push(args),
         parseCommand: (r) => {
             const space = r.indexOf(' ');
             return [r.slice(0, space), r.slice(space + 1)];
@@ -810,7 +811,7 @@ function runPrivateMessage(require) {
     } catch(e) {
         error = e;
     }
-    return {sent: sent, error: error};
+    return {sent: sent, drawn: drawn, error: error};
 }
 
 // The command table is a fourth way into serverConnection.chat, and it never
@@ -829,6 +830,12 @@ test('a private message is sent where encryption is not required', () => {
     assert.strictEqual(r.error, null);
     assert.strictEqual(r.sent.length, 1);
     assert.strictEqual(r.sent[0][2], 'hello');
+    // and its echo says who sent it, like every other message
+    assert.strictEqual(r.drawn.length, 1, 'the message was not echoed locally');
+    assert.strictEqual(
+        r.drawn[0][1], 'aaa',
+        'your own private message was drawn as a system notice',
+    );
 });
 
 const CHAT_MODES = ['unusable', 'refuses', 'fails'];
