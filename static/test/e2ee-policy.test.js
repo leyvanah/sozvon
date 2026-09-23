@@ -491,6 +491,187 @@ test('no tile is built for a stream that has already been closed', async () => {
     await ctx.setMedia({sc: null, localId: 'closed-while-setting-up'});
 });
 
+// ---- how a chat message is drawn ------------------------------------------
+
+// Enough of a document for addToChatbox to build its message in, and no more.
+// What the tests below ask of it is what the reader would see: the classes it
+// hung on the message, and the words in it.
+class FakeElement {}
+
+function fakeDocument() {
+    const make = (tag) => {
+        const el = Object.assign(new FakeElement(), {
+            tag: tag,
+            children: [],
+            classes: new Set(),
+            dataset: {},
+            style: {},
+            textContent: '',
+            title: '',
+            classList: {
+                add: (...names) => names.forEach(n => el.classes.add(n)),
+                remove: (...names) => names.forEach(n => el.classes.delete(n)),
+                contains: (name) => el.classes.has(name),
+                toggle: (name, on) => on ? el.classes.add(name)
+                                         : el.classes.delete(name),
+            },
+            appendChild: (child) => {
+                el.children.push(child);
+                return child;
+            },
+            addEventListener: () => {},
+            /** Every class anywhere in this subtree. */
+            allClasses() {
+                const out = new Set(el.classes);
+                for(const c of el.children)
+                    if(c.allClasses) for(const name of c.allClasses()) out.add(name);
+                return out;
+            },
+            /** Everything the reader would see, as one string. */
+            text() {
+                return el.textContent +
+                    el.children.map(c => c.text ? c.text() : '').join(' ');
+            },
+        });
+        return el;
+    };
+    const box = make('div');
+    box.scrollHeight = 0;
+    box.clientHeight = 100;
+    return {
+        box: box,
+        createElement: make,
+        getElementById: (id) => id === 'box' ? box : make('div'),
+    };
+}
+
+/**
+ * Draw one message with galene.js's own addToChatbox, and hand back what it
+ * put in the box.
+ *
+ * @param {object} o
+ * @param {string|null} o.peerId
+ * @param {boolean} [o.unencrypted]
+ * @param {string} [o.kind]
+ * @returns {{classes: Set<string>, text: string}}
+ */
+function drawMessage(o) {
+    const doc = fakeDocument();
+    const ctx = vm.createContext({
+        console: quiet,
+        document: doc,
+        HTMLElement: FakeElement,
+        Sozvon: {i18n: {t: (key) => `<${key}>`}},
+        serverConnection: {id: 'mine', users: {}, permissions: []},
+        lastMessage: {},
+        panelVisible: () => true,
+        refreshPanelAlert: () => {},
+        formatTime: () => '12:00',
+        formatText: () => doc.createElement('span'),
+        displayCaption: () => {},
+        chatMessageMenu: () => {},
+    });
+    vm.runInContext(liftFunction('galene.js', 'addToChatbox'), ctx);
+    ctx.addToChatbox(
+        null, o.peerId, '', 'somebody', new Date(), false, false,
+        o.kind || '', doc.createElement('span'), o.unencrypted,
+    );
+    const row = doc.box.children[0];
+    assert.ok(row, 'nothing was added to the chat box');
+    return {classes: row.allClasses(), text: row.text()};
+}
+
+test('a message the server could read says so, in words', () => {
+    const marked = drawMessage({peerId: 'them', unencrypted: true});
+    assert.ok(
+        marked.text.includes('<chat.unencrypted>'),
+        'a message the server relayed in clear said nothing about it',
+    );
+    assert.ok(marked.classes.has('message-unencrypted'));
+
+    const plain = drawMessage({peerId: 'them', unencrypted: false});
+    assert.ok(!plain.text.includes('<chat.unencrypted>'));
+    assert.ok(!plain.classes.has('message-unencrypted'));
+});
+
+// The mark has to survive a run of messages from one person, where only the
+// first draws a header.
+test('the mark is on every message, not only the first of a run', () => {
+    for(const kind of ['', 'me']) {
+        const marked = drawMessage({peerId: 'them', unencrypted: true, kind: kind});
+        assert.ok(
+            marked.text.includes('<chat.unencrypted>'),
+            `a "${kind || 'plain'}" message lost the mark`,
+        );
+    }
+});
+
+test('an encrypted message is not drawn as a system notice', () => {
+    const fromPeer = drawMessage({peerId: 'them'});
+    assert.ok(
+        !fromPeer.classes.has('message-system'),
+        'an encrypted message was drawn as machine chatter',
+    );
+    const mine = drawMessage({peerId: 'mine'});
+    assert.ok(mine.classes.has('message-sender'), 'own message lost its styling');
+});
+
+// ---- who the client says a message came from ------------------------------
+
+/**
+ * Run galene.js's gotUserMessage() for one 'e2eechat' message and hand back
+ * the arguments it passed on to addToChatbox.
+ *
+ * @returns {Promise<any[]>}
+ */
+async function relayEncryptedChat(sender) {
+    const drawn = [];
+    const ctx = vm.createContext({
+        console: quiet,
+        e2eeActive: () => true,
+        addToChatbox: (...args) => drawn.push(args),
+        serverConnection: {
+            id: 'mine',
+            users: {[sender]: {username: 'them'}},
+            e2ee: {
+                decryptChat: async () => ({kind: '', text: 'hello'}),
+            },
+        },
+    });
+    vm.runInContext(liftFunction('galene.js', 'gotUserMessage'), ctx);
+    ctx.gotUserMessage(sender, '', 'them', new Date(), false, 'e2eechat',
+                       null, {iv: 'x', ct: 'y'});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.strictEqual(drawn.length, 1, 'the message was not drawn');
+    return drawn[0];
+}
+
+test('a decrypted message carries its sender where every message carries it', async () => {
+    const args = await relayEncryptedChat('them');
+    // addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, message)
+    assert.strictEqual(
+        args[1], 'them',
+        'the sender was not in the peerId slot, so the message is drawn as a ' +
+        'system notice and raises no unread mark',
+    );
+    // There is no server-side message id for something the server never had.
+    assert.ok(!args[0], 'an encrypted message was given a server message id');
+});
+
+test('the echo of an encrypted message you sent carries you', async () => {
+    const drawn = [];
+    const r = await runHandleInput({
+        mode: 'sends', require: true, text: 'text for the other person',
+        onChatbox: (...args) => drawn.push(args),
+    });
+    assert.deepStrictEqual(r.sent, [], 'an encrypted message went to the server');
+    assert.strictEqual(drawn.length, 1, 'the message was not echoed locally');
+    assert.strictEqual(
+        drawn[0][1], 'aaa',
+        'your own encrypted message was drawn as a system notice',
+    );
+});
+
 // ---- the chat fallback in galene.js ---------------------------------------
 
 /**
@@ -501,9 +682,9 @@ test('no tile is built for a stream that has already been closed', async () => {
  * not a copy of it, so it goes stale the moment the source does.
  *
  * @param {object} o
- * @param {'unusable'|'refuses'|'fails'} o.mode - how the encrypted path ends:
- *     the channel is not usable at all, sendChat() reports it did not send,
- *     or sendChat() rejects
+ * @param {'unusable'|'refuses'|'fails'|'sends'} o.mode - how the encrypted
+ *     path ends: the channel is not usable at all, sendChat() reports it did
+ *     not send, sendChat() rejects, or it goes out encrypted
  * @param {boolean} o.require - the group's "require encryption" option
  * @param {string} o.text - what the user typed
  * @returns {Promise<{sent: any[][], errors: any[], input: {value: string}}>}
@@ -528,7 +709,9 @@ async function runHandleInput(o) {
         Sozvon: {i18n: {t: k => k}},
         e2eeActive: () => true,
         displayError: e => errors.push(e),
-        addToChatbox: () => {},
+        addToChatbox: (...args) => {
+            if(o.onChatbox) o.onChatbox(...args);
+        },
         serverConnection: {
             socket: {},
             id: 'aaa',
@@ -540,7 +723,7 @@ async function runHandleInput(o) {
                 sendChat: async () => {
                     if(o.mode === 'fails')
                         throw new Error('injected encryption failure');
-                    return false;
+                    return o.mode === 'sends';
                 },
             },
         },
