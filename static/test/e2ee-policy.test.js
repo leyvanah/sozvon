@@ -1535,15 +1535,18 @@ test('the encrypted call resumes once the extra session is gone', async () => {
     // b too saw the extra session come and go
     b.addUser('old-session-of-zzz');
     b.delUser('old-session-of-zzz');
-    // delUser() started both handshakes; key generation is asynchronous,
-    // so wait for the messages rather than for a queue that is still empty.
-    for(let i = 0; i < 200 && (a.state !== 'established' ||
-                                b.state !== 'established'); i++) {
+    // delUser() started both handshakes, and their keys are generated off
+    // the main thread: wait for the messages until a deadline, rather than
+    // for a number of event-loop turns a loaded machine can spin through
+    // before the first key is ready.
+    const deadline = Date.now() + 10000;
+    while((a.state !== 'established' || b.state !== 'established') &&
+          Date.now() < deadline) {
         if(relay.length) {
             const m = relay.shift();
             await m.to.onMessage(m.from, m.p);
         } else {
-            await new Promise(resolve => setImmediate(resolve));
+            await new Promise(resolve => setTimeout(resolve, 5));
         }
     }
     assert.strictEqual(a.state, 'established');
