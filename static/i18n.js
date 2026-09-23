@@ -306,6 +306,10 @@
             'e2ee.blockedWhy.unsupported': 'This browser cannot encrypt a call. Update it, or open the link in a current Chrome, Edge, Firefox or Safari.',
             'e2ee.blockedWhy.peerUnsupported': 'The other person\'s browser cannot encrypt a call. Ask them to update it, or to open the link in a current Chrome, Edge, Firefox or Safari.',
             'e2ee.blockedWhy.transform': 'The encryption could not be started in this browser.',
+            'e2ee.consentOverlay': 'This call was end-to-end encrypted and can now only go on without encryption. Nothing is being sent until you decide.',
+            'e2ee.consentHint': 'If you did not expect this, leave the call: somebody may be trying to listen in.',
+            'e2ee.continueInClear': 'Continue without encryption',
+            'e2ee.clearNotAgreed': 'Not sent: this call is no longer end-to-end encrypted, and you have not agreed to go on without encryption',
             // Browser support
             'browser.unsupported': 'Your browser does not support video calls. Please open this link in Chrome, Firefox, Safari or Edge.',
         },
@@ -589,6 +593,10 @@
             'e2ee.blockedWhy.unsupported': 'Этот браузер не умеет шифровать звонок. Обновите его или откройте ссылку в свежем Chrome, Edge, Firefox или Safari.',
             'e2ee.blockedWhy.peerUnsupported': 'Браузер собеседника не умеет шифровать звонок. Попросите собеседника обновить браузер или открыть ссылку в свежем Chrome, Edge, Firefox или Safari.',
             'e2ee.blockedWhy.transform': 'В этом браузере не удалось запустить шифрование.',
+            'e2ee.consentOverlay': 'Звонок был зашифрован сквозным шифрованием, а продолжить его теперь можно только без шифрования. Пока вы не решите, ничего не отправляется.',
+            'e2ee.consentHint': 'Если вы этого не ждали, выйдите из звонка: возможно, его пытаются подслушать.',
+            'e2ee.continueInClear': 'Продолжить без шифрования',
+            'e2ee.clearNotAgreed': 'Не отправлено: звонок больше не зашифрован сквозным шифрованием, а продолжать без шифрования вы не соглашались',
             // Поддержка браузера
             'browser.unsupported': 'Этот браузер не поддерживает видеозвонки. Откройте эту ссылку в Chrome, Firefox, Safari или Edge.',
         },

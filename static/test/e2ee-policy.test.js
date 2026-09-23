@@ -560,6 +560,98 @@ test('a group that does not require encryption is not blocked by this', () => {
     assert.strictEqual(e.state, 'idle');
 });
 
+// ---- an encrypted call the server tries to turn into a plaintext one -------
+//
+// What turns a call to plaintext -- a peer saying it cannot encrypt, a third
+// participant -- reaches the client through the server, and the server can
+// make up either.  Once a room has had an encrypted call it therefore stops
+// until the user agrees to go on in clear, rather than going on in clear on
+// the server's word with only the padlock to show for it.
+
+/** The mode the controller last put the worker in: true for cleartext. */
+function lastMode(e) {
+    const modes = e.worker.messages.filter(m => m.type === 'mode');
+    return modes[modes.length - 1].cleartext;
+}
+
+test('a peer said to be unable to encrypt does not turn an encrypted call to plaintext', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    assert.strictEqual(a.state, 'established');
+
+    // The message a peer that cannot encrypt sends; nothing proves it came
+    // from the peer rather than from the server.
+    await a.onMessage('zzz', {t: 'nocrypto'});
+    assert.strictEqual(
+        a.state, 'blocked',
+        'an encrypted call went on in clear because the server said so',
+    );
+    assert.strictEqual(lastMode(a), false, 'the worker was told to pass media in clear');
+    assert.ok(a.awaitsClearConsent(), 'the user was not asked');
+});
+
+test('a third participant stops an encrypted call until the user agrees', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+
+    a.addUser('phantom');
+    assert.strictEqual(a.state, 'blocked');
+    assert.strictEqual(a.detail, 'multipeer');
+    assert.strictEqual(lastMode(a), false);
+
+    a.continueInClear();
+    assert.strictEqual(a.state, 'unencrypted');
+    assert.strictEqual(a.detail, 'multipeer');
+    assert.strictEqual(lastMode(a), true);
+    assert.ok(!a.awaitsClearConsent());
+});
+
+// Agreeing covers the call that was lost, not every later one.
+test('agreeing to go on in clear lasts until the call is encrypted again', async () => {
+    const ctx = loadController();
+    const e = await readyToFinalize(ctx);
+    e.wasEncrypted = true;
+    e.clearAgreed = true;
+    await e.finalize();
+    assert.strictEqual(e.state, 'established');
+    assert.strictEqual(e.clearAgreed, false);
+
+    e.addUser('phantom');
+    assert.strictEqual(e.state, 'blocked', 'an earlier yes answered a new question');
+});
+
+// Where the group requires encryption there is nothing to agree to.
+test('a group that requires encryption offers no way on in clear', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    a.setRequire(true);
+    await a.onMessage('zzz', {t: 'nocrypto'});
+    assert.strictEqual(a.state, 'blocked');
+    assert.ok(!a.awaitsClearConsent());
+    a.continueInClear();
+    assert.strictEqual(a.state, 'blocked');
+});
+
+// A room that has never had an encrypted call is not changed by this: a peer
+// that cannot encrypt makes an unencrypted call, as before.
+test('a room that was never encrypted goes on unencrypted as before', async () => {
+    const ctx = loadController();
+    const {e} = await waitingInitiator(ctx);
+    await e.onMessage('zzz', {t: 'nocrypto'});
+    assert.strictEqual(e.state, 'unencrypted');
+});
+
+// galene.js carries the fact that a room was encrypted over to the controller
+// of the next connection, so a reconnect does not reset it.
+test('a room remembered as encrypted is protected from the first message', async () => {
+    const ctx = loadController();
+    const {e} = await waitingInitiator(ctx);
+    e.wasEncrypted = true;
+    await e.onMessage('zzz', {t: 'nocrypto'});
+    assert.strictEqual(e.state, 'blocked');
+    assert.ok(e.awaitsClearConsent());
+});
+
 // ---- the media policy in galene.js ----------------------------------------
 
 /**
@@ -631,12 +723,19 @@ test('local media is not published while the controller refuses', () => {
     assert.strictEqual(mayPublish(null), true);
 });
 
-/** @param {string} state @param {string} [detail] */
-function runMediaPolicy(state, detail) {
+/**
+ * @param {string} state
+ * @param {string} [detail]
+ * @param {boolean} [consent] - refused only until the user agrees
+ */
+function runMediaPolicy(state, detail, consent) {
     const closed = [];
     const visibility = {};
     const ctx = vm.createContext({
-        serverConnection: {e2ee: {state: state, detail: detail || null}},
+        serverConnection: {e2ee: {
+            state: state, detail: detail || null,
+            awaitsClearConsent: () => !!consent,
+        }},
         setVisibility: (id, visible) => visibility[id] = visible,
         closeUpMedia: label => closed.push(label),
         setButtonsVisibility: () => {},
@@ -975,6 +1074,7 @@ async function runHandleInput(o) {
             chat: (...args) => sent.push(args),
             e2ee: {
                 require: o.require,
+                awaitsClearConsent: () => !!o.consent,
                 canChat: () => o.mode !== 'unusable',
                 sendChat: async () => {
                     if(o.mode === 'fails')
@@ -1108,4 +1208,35 @@ test('chat falls back to an ordinary message where encryption is not required', 
         assert.strictEqual(r.sent[0][2], 'text for the other person');
         assert.strictEqual(r.input.value, '', `${mode}: the box was not cleared`);
     }
+});
+
+test('a call waiting for the user to agree offers the way on, and says why', () => {
+    const r = runMediaPolicy('blocked', 'multipeer', true);
+    assert.deepStrictEqual(r.closed, ['camera', 'screenshare']);
+    assert.strictEqual(r.visibility['e2ee-block-overlay'], true);
+    assert.strictEqual(r.visibility['e2ee-block-consent'], true);
+    assert.strictEqual(r.visibility['e2ee-continue-clear'], true);
+    assert.strictEqual(
+        r.visibility['e2ee-block-required'], false,
+        'the notice blamed a room setting that is not on',
+    );
+    assert.strictEqual(r.visibility['e2ee-why-multipeer'], true);
+
+    const required = runMediaPolicy('blocked', 'multipeer', false);
+    assert.strictEqual(required.visibility['e2ee-block-required'], true);
+    assert.strictEqual(required.visibility['e2ee-block-consent'], false);
+    assert.strictEqual(
+        required.visibility['e2ee-continue-clear'], false,
+        'a group that requires encryption offered a way round it',
+    );
+});
+
+test('chat is not sent in clear while the user has not agreed to it', async () => {
+    const r = await runHandleInput({
+        mode: 'unusable', require: false, consent: true,
+        text: 'text for the other person',
+    });
+    assert.deepStrictEqual(r.sent, [], 'the message went to the server in clear');
+    assert.deepStrictEqual(r.errors, ['e2ee.clearNotAgreed']);
+    assert.strictEqual(r.input.value, 'text for the other person');
 });

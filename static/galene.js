@@ -6397,7 +6397,12 @@ function e2eeActive() {
  */
 function mayChatInClear() {
     let e2ee = serverConnection && serverConnection.e2ee;
-    return !(e2eeActive() && e2ee && e2ee.require);
+    if(!(e2eeActive() && e2ee))
+        return true;
+    // A call that stopped being encrypted and waits for the user to agree to
+    // go on in clear holds its chat back as well as its media.
+    return !e2ee.require &&
+        !(e2ee.awaitsClearConsent && e2ee.awaitsClearConsent());
 }
 
 /**
@@ -6627,6 +6632,14 @@ function enforceE2EEMediaPolicy() {
     let e2ee = serverConnection && serverConnection.e2ee;
     let blocked = !!(e2ee && e2ee.state === 'blocked');
     setVisibility('e2ee-block-overlay', blocked);
+    // Refused by the group, or only until the user agrees to go on in clear:
+    // the second says so and offers the way on.
+    let consent = blocked && !!e2ee.awaitsClearConsent &&
+        e2ee.awaitsClearConsent();
+    setVisibility('e2ee-block-required', blocked && !consent);
+    setVisibility('e2ee-block-consent', consent);
+    setVisibility('e2ee-block-consent-hint', consent);
+    setVisibility('e2ee-continue-clear', consent);
     // Which reason to show under the notice.  The notice itself cannot name
     // one without guessing, and the guess was wrong for the state where
     // nobody else is in the room yet and it is this browser that cannot
@@ -9323,7 +9336,9 @@ commands.msg = {
         // carries no such thing -- it has exactly one other end -- so where
         // encryption is required there is nothing to fall back to. (Sozvon)
         if(!mayChatInClear())
-            throw new Error(Sozvon.i18n.t('e2ee.privateBlocked'));
+            throw new Error(Sozvon.i18n.t(serverConnection.e2ee.require ?
+                                          'e2ee.privateBlocked' :
+                                          'e2ee.clearNotAgreed'));
         serverConnection.chat('', id, p[1]);
         // You are the sender, so you go in the peerId slot: an empty one is
         // read as "this did not come from a person" and drawn as a system
@@ -9682,7 +9697,9 @@ function handleInput() {
      */
     function sendCleartext() {
         if(!mayChatInClear()) {
-            displayError(Sozvon.i18n.t('e2ee.chatBlocked'));
+            displayError(Sozvon.i18n.t(serverConnection.e2ee.require ?
+                                       'e2ee.chatBlocked' :
+                                       'e2ee.clearNotAgreed'));
             // The box was emptied when this message was taken from it; hand
             // the text back unless the user has started typing something else.
             if(input.value === '')
@@ -10474,6 +10491,16 @@ document.getElementById('rejoinbutton').onclick = function(e) {
     // optimistic setConnected(true) a normal join would give us. (Sozvon)
     setConnected(true);
     serverConnect();
+};
+
+// Sozvon: the user agrees to go on without end-to-end encryption in a call
+// that has lost it.  Media stays off: the camera and microphone were closed
+// when the call was refused, and turning them on again is the user's to do.
+document.getElementById('e2ee-continue-clear').onclick = function(e) {
+    e.preventDefault();
+    let e2ee = serverConnection && serverConnection.e2ee;
+    if(e2ee)
+        e2ee.continueInClear();
 };
 
 // Sozvon: bypass the quick rejoin to log in as someone else. reconnectLastJoin

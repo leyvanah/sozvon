@@ -77,6 +77,16 @@
         // handshake must not put the padlock back over them.
         this.transformFailed = false;
 
+        // Whether this room has had an end-to-end encrypted call, in this
+        // page or, as galene.js remembers it, on a connection before this one.
+        // What turns an encrypted call into a plaintext one -- a peer that
+        // says it cannot encrypt, a third participant -- arrives through the
+        // server, which can make up either.  So once the room has been
+        // encrypted, it does not go back to plaintext on the server's word:
+        // the call stops until the user agrees (clearAgreed).
+        this.wasEncrypted = false;
+        this.clearAgreed = false;
+
         // Session counter, bumped by resetPeer().  finalize() is a chain of
         // awaits and the peer can leave under any of them; the number a run
         // started with says whether the session it is completing is still the
@@ -192,16 +202,40 @@
         this.startWith(peer);
     };
 
-    // Move to the unencrypted-but-allowed state, or refuse outright when the
-    // group requires encryption.  Never leaves secure media flowing in clear.
+    // Move to the unencrypted-but-allowed state, or refuse: outright when the
+    // group requires encryption, and until the user agrees when this room
+    // has had an encrypted call.  Never leaves secure media flowing in clear.
     E2EE.prototype.downgrade = function(reason) {
-        if(this.require) {
+        if(this.require || (this.wasEncrypted && !this.clearAgreed)) {
             this.setWorkerMode(false);
             this.setState('blocked', reason);
         } else {
             this.setWorkerMode(true);
             this.setState('unencrypted', reason);
         }
+    };
+
+    /**
+     * Whether the call is refused only until the user agrees to go on
+     * without encryption, as opposed to refused by the group.
+     * @returns {boolean}
+     */
+    E2EE.prototype.awaitsClearConsent = function() {
+        return this.state === 'blocked' && !this.require &&
+            this.wasEncrypted && !this.clearAgreed;
+    };
+
+    /**
+     * The user has agreed to go on without end-to-end encryption.  Holds until
+     * the call is encrypted again: every reason to refuse after that is a new
+     * question.
+     */
+    E2EE.prototype.continueInClear = function() {
+        if(!this.awaitsClearConsent())
+            return;
+        this.clearAgreed = true;
+        this.setWorkerMode(true);
+        this.setState('unencrypted', this.detail);
     };
 
     // Tell the worker to forward frames unchanged (cleartext) or to
@@ -481,6 +515,8 @@
         this.sas = sas;
         this.peerSupports = true;
         this.stopHandshakeTimer();
+        this.wasEncrypted = true;
+        this.clearAgreed = false;
         this.setState('established');
         if(this.onsas)
             this.onsas.call(this, this.sas);
