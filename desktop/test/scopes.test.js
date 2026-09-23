@@ -335,6 +335,44 @@ test('only the settings a page is meant to set are taken', async () => {
   );
 });
 
+// The host-key answer is a send() rather than an invoke(), so its check is
+// written by hand rather than through handleOurs().  It also fails
+// differently: handleOurs throws, which surfaces, while this one returns and
+// leaves the wizard waiting.  Both directions, then.
+test('the host-key prompt is answered by the deploy page and nobody else', async () => {
+  const app = loadMain();
+  app.buildWindow();
+
+  const asked = app.read(
+    'askHostKey({host: "h.example", port: 22, fingerprint: "SHA256:new"})');
+  let settled = null;
+  asked.then(v => settled = v);
+
+  const listeners = app.sends.get('deploy:hostkey-answer');
+  assert.ok(listeners && listeners.length === 1,
+            'nothing is listening for the answer');
+
+  // A page from a server says yes.  It is not asked.
+  listeners[0](from(A_SERVER_PAGE), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.strictEqual(
+    settled, null,
+    "a page from a server accepted the deploy target's host key",
+  );
+  assert.strictEqual(
+    app.read('config.knownHosts')['h.example:22'], undefined,
+    'a host key was written on the say-so of a page from a server',
+  );
+
+  // The deploy page says yes.  It is.
+  listeners[0](from(OUR_DEPLOY), true);
+  assert.strictEqual(await asked, true, 'the deploy page was not heard');
+  assert.strictEqual(
+    app.read('config.knownHosts')['h.example:22'], 'SHA256:new',
+    'the accepted host key was not remembered',
+  );
+});
+
 // ---- what a page may be granted, and where the window may go ---------------
 
 test('the camera goes to the user\'s own servers and nowhere else', () => {
