@@ -400,6 +400,39 @@ test('the window stays on our own pages and the user\'s own servers', () => {
 // through the window the app actually builds, and call what it handed
 // Chromium.
 
+// Who asked matters, and the window's own address is not the answer when the
+// asking is done from inside an iframe.
+test('a permission asked for from an embedded page is judged by that page', () => {
+  const app = loadMain();
+  const wired = app.buildWindow();
+  const onKnownServer = {getURL: () => 'https://known.example/group/x/'};
+  const ask = (details) => {
+    let answer;
+    wired.permissionRequest(onKnownServer, 'media', (ok) => answer = ok, details);
+    return answer;
+  };
+
+  assert.strictEqual(
+    ask({requestingUrl: 'https://untrusted.example/frame.html',
+         isMainFrame: false}),
+    false,
+    'an embedded stranger was granted what the page around it is allowed',
+  );
+  // Electron names it differently for media; either name is the frame's.
+  assert.strictEqual(
+    ask({securityOrigin: 'https://untrusted.example', isMainFrame: false}),
+    false,
+  );
+  // Nothing names the asking frame, and it is not the main one: there is
+  // nothing to check, so nothing is granted.
+  assert.strictEqual(
+    ask({isMainFrame: false}), false,
+    "a request that named no address was granted the window's own",
+  );
+  // The main frame of a server the user chose is still the ordinary case.
+  assert.strictEqual(ask({isMainFrame: true}), true);
+});
+
 test('the permission handler the window installs asks who is calling', () => {
   const app = loadMain();
   const wired = app.buildWindow();

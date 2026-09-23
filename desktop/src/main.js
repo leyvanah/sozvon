@@ -347,6 +347,30 @@ function permissionFor(permission, url) {
 }
 
 /**
+ * The address that asked for a permission.
+ *
+ * Electron names the asking frame in the details, and that is the answer
+ * whenever it is there.  The window's own address is only the same thing
+ * while the frame asking is the main one: a page can put anybody's page in
+ * an iframe, and taking the address around it would hand a stranger whatever
+ * the server the user chose is allowed.  Where neither can be established
+ * there is nothing to check against, and an empty address is granted
+ * nothing.
+ *
+ * @param {Electron.WebContents} wc
+ * @param {object} [details]
+ * @returns {string}
+ */
+function askingAddress(wc, details) {
+  if (details) {
+    if (details.requestingUrl) return details.requestingUrl;
+    if (details.securityOrigin) return details.securityOrigin;
+    if (details.isMainFrame === false) return '';
+  }
+  return (wc && wc.getURL()) || '';
+}
+
+/**
  * Hand an address to the user's browser, if it is the kind of address a
  * browser opens.
  *
@@ -736,7 +760,7 @@ function createWindow() {
 
   contentView.webContents.session.setPermissionRequestHandler(
     (wc, permission, cb, details) => {
-      const url = (details && details.requestingUrl) || wc.getURL();
+      const url = askingAddress(wc, details);
       const ok = permissionFor(permission, url);
       if (!ok)
         console.error(`refused ${permission} for ${originOrUrl(url)}`);
@@ -748,8 +772,9 @@ function createWindow() {
   // Left at its default it answers for the request handler above and quietly
   // disagrees with it.
   contentView.webContents.session.setPermissionCheckHandler(
-    (wc, permission, requestingOrigin) =>
-      permissionFor(permission, requestingOrigin || (wc && wc.getURL()) || ''));
+    (wc, permission, requestingOrigin, details) =>
+      permissionFor(permission,
+                    requestingOrigin || askingAddress(wc, details)));
 
   contentView.webContents.setWindowOpenHandler(({ url }) => {
     openInBrowser(url);
