@@ -321,6 +321,31 @@ function permissionFor(permission, url) {
 }
 
 /**
+ * Hand an address to the user's browser, if it is the kind of address a
+ * browser opens.
+ *
+ * shell.openExternal gives the address to whatever the operating system has
+ * registered for its scheme, which for anything but http and https means
+ * starting a local program with an argument the page chose.  A page that is
+ * refused the window must not get that instead.
+ *
+ * @param {string} url
+ */
+function openInBrowser(url) {
+  let protocol;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    protocol = '';
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    console.error(`not opened: ${originOrUrl(url)} is not a web address`);
+    return;
+  }
+  shell.openExternal(url);
+}
+
+/**
  * Whether an address may be opened in the app's own window.
  *
  * This window has no address bar, so a page that can send it anywhere can
@@ -701,7 +726,7 @@ function createWindow() {
       permissionFor(permission, requestingOrigin || (wc && wc.getURL()) || ''));
 
   contentView.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openInBrowser(url);
     return { action: 'deny' };
   });
 
@@ -720,7 +745,7 @@ function createWindow() {
     if (mayStayInWindow(url)) return;
     e.preventDefault();
     console.error(`kept out of the app window: ${originOrUrl(url)}`);
-    shell.openExternal(url);
+    openInBrowser(url);
     // A refused redirect leaves nothing in the view -- the load it was part
     // of is over.  Come back to the launcher and say where the address went,
     // rather than leaving a blank window.  Deferred: navigating from inside
