@@ -2621,6 +2621,10 @@ async function setUpStream(c, stream) {
      * @param {MediaStreamTrack} t
      */
     function addUpTrack(t) {
+        if(!c.sc)
+            // The stream was closed while we were setting it up -- an E2EE
+            // policy change tears local media down from inside this loop.
+            return;
         let settings = getSettings();
         if(c.label === 'camera') {
             if(t.kind === 'audio') {
@@ -2689,6 +2693,11 @@ async function setUpStream(c, stream) {
 
         if(e2eeEnabled()) {
             preferVP8(tr, t.kind);
+            // A failure to attach the encryptor moves the controller to a
+            // state that says this call is not encrypted; where encryption is
+            // required, that state closes this stream at once -- before it is
+            // ever negotiated -- which is what the guard at the top of this
+            // function is for.
             serverConnection.e2ee.attachSender(tr.sender, t.kind);
         }
     }
@@ -2824,6 +2833,22 @@ async function addLocalMedia(localId, force) {
 }
 
 /**
+ * Whether local media may be published right now.
+ *
+ * The E2EE controller settles on 'blocked' whenever the group requires
+ * end-to-end encryption and this call cannot have it -- a peer that cannot
+ * encrypt, more than two participants, a browser that cannot attach an
+ * encryptor, or nobody here yet in a browser that never could.  Publishing
+ * then would put media on the wire in clear, so it does not happen. (Sozvon)
+ *
+ * @returns {boolean}
+ */
+function mayPublishLocalMedia() {
+    let e2ee = serverConnection && serverConnection.e2ee;
+    return !(e2ee && e2ee.state === 'blocked');
+}
+
+/**
  * Does the work of addLocalMedia.  Do not call directly: go through
  * addLocalMedia, which serialises these. (Sozvon)
  *
@@ -2831,8 +2856,7 @@ async function addLocalMedia(localId, force) {
  * @param {{audio?: boolean, video?: boolean}} [force]
  */
 async function addLocalMediaNow(localId, force) {
-    if(serverConnection && serverConnection.e2ee &&
-       serverConnection.e2ee.state === 'blocked') {
+    if(!mayPublishLocalMedia()) {
         // The group requires end-to-end encryption but this call cannot be
         // encrypted; refuse to publish rather than send media in clear.
         displayError(Sozvon.i18n.t('e2ee.blocked'));
@@ -3335,6 +3359,12 @@ function scheduleReconsiderDownRate() {
 /**
  * setMedia adds a new media element corresponding to stream c.
  *
+ * Does nothing for a stream that is already closed: setUpStream can close the
+ * one it is setting up (an E2EE policy change does exactly that), and its
+ * callers go on to call this, which would put back the element that
+ * Stream.close() has just removed -- a tile for a stream that is gone and that
+ * nothing will remove again. (Sozvon)
+ *
  * @param {Stream} c
  * @param {boolean} [mirror]
  *     - whether to mirror the video
@@ -3343,6 +3373,8 @@ function scheduleReconsiderDownRate() {
  *       controls will be created.
  */
 async function setMedia(c, mirror, video) {
+    if(!c.sc)
+        return;
     let div = document.getElementById('peer-' + c.localId);
     if(!div) {
         div = document.createElement('div');
@@ -3819,8 +3851,17 @@ function registerControlHandlers(localId, media, container) {
 function delMedia(localId) {
     let mediadiv = document.getElementById('peers');
     let peer = document.getElementById('peer-' + localId);
-    if(!peer)
-        throw new Error('Removing unknown media');
+    if(!peer) {
+        // A stream can be closed before it ever had a tile: an E2EE policy
+        // change closes local media from inside setUpStream, and setMedia
+        // declines to build a tile for a stream that is already closed.  So
+        // there is nothing to remove and nothing has gone wrong -- but the
+        // buttons still have to stop saying we are publishing, and an
+        // exception on a path the app takes by design is noise that later
+        // hides the real ones. (Sozvon)
+        setButtonsVisibility();
+        return;
+    }
 
     let media = /** @type{HTMLVideoElement} */
         (document.getElementById('media-' + localId));
@@ -5368,6 +5409,22 @@ function e2eeActive() {
 }
 
 /**
+ * Whether an ordinary chat message may be sent at all.
+ *
+ * An ordinary chat message goes through the server in clear and stays in the
+ * room's history.  Where the group requires end-to-end encryption that is the
+ * one thing the requirement exists to prevent, so there is no falling back to
+ * it: the message is not sent and the user is told.  Everywhere else it is
+ * the ordinary way to send a message. (Sozvon)
+ *
+ * @returns {boolean}
+ */
+function mayChatInClear() {
+    let e2ee = serverConnection && serverConnection.e2ee;
+    return !(e2eeActive() && e2ee && e2ee.require);
+}
+
+/**
  * Whether the current group runs in E2EE mode and this browser can encrypt,
  * so we attach the encrypting transforms and prefer VP8.
  *
@@ -5434,6 +5491,20 @@ function enforceE2EEMediaPolicy() {
     let e2ee = serverConnection && serverConnection.e2ee;
     let blocked = !!(e2ee && e2ee.state === 'blocked');
     setVisibility('e2ee-block-overlay', blocked);
+    // Which reason to show under the notice.  The notice itself cannot name
+    // one without guessing, and the guess was wrong for the state where
+    // nobody else is in the room yet and it is this browser that cannot
+    // encrypt.  The lines live in the markup, one per reason, so they are
+    // translated with the rest of the page. (Sozvon)
+    let reasons = {
+        'multipeer': 'e2ee-why-multipeer',
+        'unsupported': 'e2ee-why-unsupported',
+        'peer-unsupported': 'e2ee-why-peer-unsupported',
+        'transform': 'e2ee-why-transform',
+    };
+    for(let reason in reasons)
+        setVisibility(reasons[reason],
+                      blocked && !!e2ee && e2ee.detail === reason);
     if(blocked) {
         // Never publish in clear when encryption is required.
         closeUpMedia('camera');
@@ -5977,7 +6048,7 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         for(let key in status)
             groupStatus[key] = status[key];
         if(serverConnection.e2ee)
-            serverConnection.e2ee.require = !!groupStatus.requireE2ee;
+            serverConnection.e2ee.setRequire(groupStatus.requireE2ee);
         usingRememberToken = false;
         // Sozvon: we are connected and in the group.  Remember the intent to stay
         // connected and the join parameters so an unexpected drop reconnects,
@@ -6338,7 +6409,11 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
                 if(!res)
                     return;
                 let u = serverConnection.users[id];
-                addToChatbox(id, null, '', (u && u.username) || username,
+                // The sender goes in the peerId slot, where every other
+                // message puts it.  There is no message id: this one was
+                // never in the server's chat history, so there is nothing
+                // for an operator to delete by id.
+                addToChatbox(null, id, '', (u && u.username) || username,
                              time || new Date(), false, false,
                              res.kind, res.text);
             }).catch(function(err) {
@@ -7179,6 +7254,32 @@ function formatTime(time) {
 }
 
 /**
+ * An ordinary chat message, as the server relayed it.
+ *
+ * The server read this one and keeps it in the room's history.  In a group
+ * running end-to-end encryption that is worth saying on the message itself:
+ * the interface offers an encrypted call, and this message was not part of
+ * it.  Where encryption is required our own client sends no such message at
+ * all, so one that arrives came from an older client -- or from the server,
+ * which is the party the encryption is there to exclude.  Chat history
+ * arrives here too, and is server-held by definition. (Sozvon)
+ *
+ * @param {string} id
+ * @param {string} peerId
+ * @param {string} dest
+ * @param {string} nick
+ * @param {Date} time
+ * @param {boolean} privileged
+ * @param {boolean} history
+ * @param {string} kind
+ * @param {string|HTMLElement} message
+ */
+function gotChat(id, peerId, dest, nick, time, privileged, history, kind, message) {
+    addToChatbox(id, peerId, dest, nick, time, privileged, history, kind,
+                 message, e2eeActive());
+}
+
+/**
  * @typedef {Object} lastMessage
  * @property {string} [nick]
  * @property {string} [peerId]
@@ -7199,8 +7300,10 @@ let lastMessage = {};
  * @param {boolean} history
  * @param {string} kind
  * @param {string|HTMLElement} message
+ * @param {boolean} [unencrypted] - the server relayed this one in clear while
+ *     the group is running end-to-end encryption, and the message says so
  */
-function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, message) {
+function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, message, unencrypted) {
     if(kind === 'caption') {
         displayCaption(message);
         return;
@@ -7307,6 +7410,17 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
         container.appendChild(body);
         container.classList.add('message-me');
         lastMessage = {};
+    }
+    // Said in words, on the message, and on every one of them: a colour
+    // alone is a convention the reader has to have been taught, and a run of
+    // messages from one person draws only one header to hang it off. (Sozvon)
+    if(unencrypted) {
+        container.classList.add('message-unencrypted');
+        let tag = document.createElement('span');
+        tag.textContent = Sozvon.i18n.t('chat.unencrypted');
+        tag.title = Sozvon.i18n.t('chat.unencryptedTitle');
+        tag.classList.add('message-unencrypted-tag');
+        footer.appendChild(tag);
     }
     container.appendChild(footer);
 
@@ -7813,8 +7927,18 @@ commands.msg = {
         let id = findUserId(p[0]);
         if(!id)
             throw new Error(`Unknown user ${p[0]}`);
+        // A private message is an ordinary chat message with a recipient on
+        // it: the server reads it like any other.  The encrypted channel
+        // carries no such thing -- it has exactly one other end -- so where
+        // encryption is required there is nothing to fall back to. (Sozvon)
+        if(!mayChatInClear())
+            throw new Error(Sozvon.i18n.t('e2ee.privateBlocked'));
         serverConnection.chat('', id, p[1]);
-        addToChatbox(serverConnection.id, null, id, serverConnection.username,
+        // You are the sender, so you go in the peerId slot: an empty one is
+        // read as "this did not come from a person" and drawn as a system
+        // notice.  The message id stays empty -- the server assigns one to
+        // the message it relays, and this is the local echo of it.
+        addToChatbox(null, serverConnection.id, id, serverConnection.username,
                      new Date(), false, false, '', p[1]);
     }
 };
@@ -8157,6 +8281,26 @@ function handleInput() {
     }
 
     let kind = me ? 'me' : '';
+
+    /**
+     * Send the message as an ordinary chat message, which the server reads
+     * and stores.  In a group that requires end-to-end encryption that is not
+     * an acceptable fallback: nothing leaves the browser and the user is told
+     * so, rather than the message reaching the server in clear while the
+     * interface still offers an encrypted call. (Sozvon)
+     */
+    function sendCleartext() {
+        if(!mayChatInClear()) {
+            displayError(Sozvon.i18n.t('e2ee.chatBlocked'));
+            // The box was emptied when this message was taken from it; hand
+            // the text back unless the user has started typing something else.
+            if(input.value === '')
+                input.value = data;
+            return;
+        }
+        serverConnection.chat(kind, '', message);
+    }
+
     try {
         let e2ee = serverConnection.e2ee;
         if(e2eeActive() && e2ee && e2ee.canChat()) {
@@ -8165,17 +8309,17 @@ function handleInput() {
             // sees the cleartext nor keeps it in chat history.
             e2ee.sendChat(kind, message).then(function(sent) {
                 if(sent)
-                    addToChatbox(serverConnection.id, null, '',
+                    addToChatbox(null, serverConnection.id, '',
                                  serverConnection.username, new Date(),
                                  false, false, kind, message);
                 else
-                    serverConnection.chat(kind, '', message);
+                    sendCleartext();
             }).catch(function(err) {
                 console.error(err);
-                serverConnection.chat(kind, '', message);
+                sendCleartext();
             });
         } else {
-            serverConnection.chat(kind, '', message);
+            sendCleartext();
         }
     } catch(e) {
         console.error(e);
@@ -9460,7 +9604,7 @@ async function serverConnect() {
     serverConnection.onknock = gotKnock;
     serverConnection.onknockrefused = gotKnockRefused;
     serverConnection.onjoined = gotJoined;
-    serverConnection.onchat = addToChatbox;
+    serverConnection.onchat = gotChat;
     serverConnection.onusermessage = gotUserMessage;
     serverConnection.onfiletransfer = gotFileTransfer;
     if(typeof SozvonE2EE !== 'undefined') {

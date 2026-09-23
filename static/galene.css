@@ -2143,6 +2143,19 @@ body.nav-hidden .nav-menu {
     font-size: var(--fs-sm);
 }
 
+/* A message the server could read, in a call that is otherwise end-to-end
+   encrypted.  The word carries it -- the edge is there so a run of them can
+   be taken in at a glance, not so the colour has to be learnt. */
+.message-unencrypted {
+    border-left: 2px solid var(--warn);
+}
+
+.message-unencrypted-tag {
+    color: var(--warn);
+    font-size: var(--fs-sm);
+    letter-spacing: .02em;
+}
+
 /* --- Inputs / selects ----------------------------------------------------
    Filled, not outlined.  A field is found by the shape of its fill, and the
    drawer stacks five of them in a column: outlined, that column reads as five
@@ -3594,7 +3607,17 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
 .e2ee-block-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    /* Above everything on the stage, below the dock (1040), so the way out of
+       the call stays reachable.  It sat at 1000 and the empty-room placeholder
+       (.stage-empty, 1010, opaque) was painted over it: the one moment this
+       overlay most needs to be read is a room with nobody in it, which is
+       exactly when that placeholder is up.  1030 rather than 1020, because
+       1020 is taken by the thumbnail lift (body.thumb-over-idle
+       #video-container) and this element comes first in the markup, so at
+       equal depth the lift would bury it again -- with a peer present whose
+       camera is off, which is one of the states that blocks in the first
+       place. */
+    z-index: 1030;
     padding: 1.5rem;
     background: var(--hover-strong);
 }
@@ -3603,6 +3626,12 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     align-items: center;
     justify-content: center;
 }
+/* The reason under the notice: a quieter second line, not a second notice. */
+.e2ee-block-why {
+    margin: 0.6rem 0 0;
+    color: var(--text-2);
+}
+
 .e2ee-block-card {
     max-width: 30rem;
     text-align: center;
