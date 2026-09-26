@@ -1115,8 +1115,17 @@ ServerConnection.prototype.gotRemoteIce = async function(id, candidate) {
     let c = this.up[id];
     if(!c)
         c = this.down[id];
-    if(!c)
-        throw new Error('unknown stream');
+    if(!c) {
+        // A candidate still in flight for a stream we have already closed:
+        // the server replaces a down stream when its layers change (a tile
+        // resized across the low-rate threshold does it), and candidates for
+        // the old one can arrive after the new offer.  A candidate for a
+        // stream that does not exist yet cannot happen, since gotOffer
+        // registers the stream before it awaits anything.  Throwing here
+        // only produced an unhandled rejection.  (Sozvon)
+        console.warn('ICE candidate for unknown stream', id);
+        return;
+    }
     if(c.pc.remoteDescription)
         await c.pc.addIceCandidate(candidate).catch(console.warn);
     else

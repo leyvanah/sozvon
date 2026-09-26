@@ -1,0 +1,9 @@
+{
+  "displayName": "E2EE required",
+  "description": "Encryption mandatory: a client that cannot encrypt must not send media.",
+  "public": true,
+  "e2ee": true,
+  "require-e2ee": true,
+  "users": { "op": { "password": "op", "permissions": "op" } },
+  "wildcard-user": { "password": { "type": "wildcard" }, "permissions": "present" }
+}

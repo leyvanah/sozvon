@@ -1,0 +1,7 @@
+{
+  "displayName": "Smoke",
+  "description": "Plain room reserved for the automated browser smoke test.",
+  "public": true,
+  "users": { "op": { "password": "op", "permissions": "op" } },
+  "wildcard-user": { "password": { "type": "wildcard" }, "permissions": "present" }
+}

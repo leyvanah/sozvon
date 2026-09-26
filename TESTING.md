@@ -35,8 +35,24 @@ undeclared globals. Compare the output before and after a change rather than
 expecting zero, and do not add new ones.
 
 CI runs all of the above on every pull request, plus a race-detector build, a
-`govulncheck` scan, a `gitleaks` sweep of the full history, and a `dash -n`
-parse of the installer.
+`govulncheck` scan, a `gitleaks` sweep of the full history, a `dash -n`
+parse of the installer, and the browser tests below.
+
+### Browser tests
+
+Two real clients in one Chromium, with a synthetic camera and microphone,
+against a server built from the tree. They need Playwright, and take about six
+minutes:
+
+```sh
+cd test/browser && npm ci && npx playwright install chromium && cd ../..
+test/browser/run.sh                    # everything
+test/browser/run.sh smoke              # one spec
+```
+
+`run.sh` builds the server, starts it on port 18443 with the rooms in
+`test/browser/groups/`, runs the suite and stops the server. See
+[test/browser/README.md](test/browser/README.md).
 
 ## Running them automatically before a push
 
@@ -84,6 +100,12 @@ runner. For the parts of the web client that are pure functions: the E2EE
 crypto core, the localisation tables. No framework, no `package.json`, no
 `node_modules`.
 
+**Browser tests** — [test/browser/](test/browser/), Playwright. Two clients
+join a real room through the real login screen and pre-join device check, and
+the tests read what each side actually gets: decoded video frames, tiles,
+labels, the sender's bitrate cap. For behaviour that only exists once two
+browsers hold a call. Slow, so only for what the levels above cannot reach.
+
 **Browser harnesses**, run by hand. [static/e2ee-test.html](static/e2ee-test.html)
 runs both sides of the E2EE handshake in one page and shows the emoji SAS.
 
@@ -103,6 +125,12 @@ section.
 | Localisation | `static/test/i18n.test.js` | English and Russian define the same keys; every key used in markup or scripts exists; placeholders survive translation |
 | Static compression | `webserver/compress_test.go` | `q=0` is a refusal; only text types above the size floor are compressed; the compressed representation gets its own ETag; `Vary` is always set; a range is dropped rather than served wrong; a 304 is not announced as gzipped; end-to-end, the bytes a browser gets decompress to the file |
 | Health endpoint | `webserver/protocol_test.go` | `/healthz` answers — the deploy script's rollback check depends on it |
+| A call, both ways | `test/browser/smoke.spec.js` | two clients each get exactly two tiles; video frames decode on **both** sides; the participant list; chat both ways, markup arriving as text; no page errors |
+| Reconnection | `test/browser/reconnect.spec.js` | a minute-long signalling stall mid-call ends back in the call, camera published again without a click; a rejoin refused because the dead session still holds a seat in a two-person E2EE room is retried |
+| Camera off | `test/browser/videoless.spec.js` | the other side shows the avatar and name instead of an empty video, and the picture again when the camera comes back |
+| Silent microphone | `test/browser/tile-mic.spec.js` | muting marks the tile on the other side, unmuting clears it, joining without a microphone is marked from the start |
+| Call quality | `test/browser/quality.spec.js` | injected packet loss shows the translated indicator on the right tile, recovery hides it, no toasts |
+| Adaptive bitrate | `test/browser/bitrate.spec.js` | a new stream starts at the start cap; lag at the receiver lowers the sender's real `maxBitrate`, recovery raises it |
 
 A note on trusting this table: each of these was checked against a deliberate
 break in the code it covers, and fails when the behaviour is removed. That pass
@@ -110,12 +138,15 @@ found one test that had looked fine and proved nothing (a knocking client
 cannot self-admit — it was refused a step earlier, for an unrelated reason).
 **When adding a test here, break the thing it covers and confirm it goes red.**
 A green test that cannot fail is worse than no test, because it is counted.
+Of the browser rows, the smoke test has been through that pass (freezing
+incoming video turns it red); the others have not yet been checked that way.
 
 ## The manual half
 
-Automated tests here do not open a browser, so a good deal of what this fork
-does — the video stage, the panes, the device check, a call between two real
-clients — is checked by hand against a written protocol before a deploy.
+The browser tests hold a call but do not look at it, and they use a synthetic
+camera, so a good deal of what this fork does — how the video stage and the
+panes look, themes, real devices, phones — is checked by hand against a
+written protocol before a deploy.
 
 That protocol, the inventory of what it exists to catch, and the plan for what
 to automate next are **kept out of this repository**, in a local
