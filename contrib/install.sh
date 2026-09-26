@@ -514,7 +514,8 @@ else
 fi
 
 TMP=$(mktemp -d /tmp/sozvon-install.XXXXXX)
-cleanup_tmp() { rm -rf "$TMP"; }
+UNPACK=
+cleanup_tmp() { rm -rf "$TMP" ${UNPACK:+"$UNPACK"}; }
 
 curl -fsSL -o "$TMP/$ARCHIVE" "$URL" || {
 	cleanup_tmp
@@ -534,11 +535,29 @@ curl -fsSL -o "$TMP/SHA256SUMS" "$SUMS_URL" || {
 }
 
 DEST="$PREFIX/versions/$VERSION"
-rm -rf "$DEST"
-mkdir -p "$DEST"
-tar -xzf "$TMP/$ARCHIVE" -C "$TMP" || { cleanup_tmp; fail "could not unpack $ARCHIVE"; }
-mv "$TMP/sozvon_${VERSION}_linux_${ARCH}"/* "$DEST/" ||
+# Unpack next to $DEST, not over it: reinstalling the version already running
+# means $DEST is what "current" points at, and there is no other version to
+# roll back to.  A full disk or a bad archive must leave that copy alone, so it
+# is replaced only once the new one is complete.  Same filesystem, so the
+# swap below is two renames rather than a copy.
+UNPACK=$(mktemp -d "$PREFIX/versions/.unpack-$VERSION.XXXXXX") ||
+	{ cleanup_tmp; fail "cannot create a directory under $PREFIX/versions"; }
+tar -xzf "$TMP/$ARCHIVE" -C "$UNPACK" || { cleanup_tmp; fail "could not unpack $ARCHIVE"; }
+NEW="$UNPACK/sozvon_${VERSION}_linux_${ARCH}"
+[ -f "$NEW/sozvon" ] && [ -d "$NEW/static" ] ||
 	{ cleanup_tmp; fail "unexpected archive layout"; }
+if [ -e "$DEST" ]; then
+	mv "$DEST" "$UNPACK/old" ||
+		{ cleanup_tmp; fail "cannot move the existing $DEST aside"; }
+fi
+if ! mv "$NEW" "$DEST"; then
+	# Put the working copy back before giving up.
+	[ -e "$UNPACK/old" ] && mv "$UNPACK/old" "$DEST"
+	cleanup_tmp
+	fail "cannot move the new version into $DEST"
+fi
+rm -rf "$UNPACK"
+UNPACK=
 
 # The Android app, served by this server at /sozvon.apk so that whoever is
 # handed a room link can install it from the same address -- no store account,
