@@ -62,6 +62,47 @@ jobs:
       - name: Test
         run: node --test 'static/test/*.test.js'
 
+  browser:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    # Two real clients in one Chromium, with a synthetic camera and
+    # microphone, against a server built from this tree: the only check that
+    # sees video actually decoding in both directions, which is the fork's
+    # most frequent failure and invisible from the sending side.  It used to
+    # run only in the pre-push hook of whoever had it installed; see
+    # test/browser/README.md.
+    timeout-minutes: 25
+    env:
+      CGO_ENABLED: "0"
+      # A skipped test is a check that did no work.  Here that fails the job
+      # rather than hiding in "1 skipped" under a green tick.
+      SOZVON_FAIL_ON_SKIP: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: test/browser/package-lock.json
+      - name: Install Playwright and Chromium
+        working-directory: test/browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run
+        run: test/browser/run.sh
+      - name: Keep traces and screenshots of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-results
+          path: test/browser/test-results/
+          retention-days: 7
+
   govulncheck:
     name: Known-vulnerability scan (informational)
     runs-on: ubuntu-latest
