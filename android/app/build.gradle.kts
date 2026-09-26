@@ -65,6 +65,12 @@ val fetchServerRelease by tasks.registering {
     inputs.property("version", serverVersion)
     inputs.property("repo", serverRepo)
     inputs.property("dir", serverDir ?: "")
+    // A local build changes while its path stays put, so the directory's
+    // contents are an input too -- otherwise Gradle calls the task up to date
+    // and never gets as far as re-copying.  (Sozvon)
+    if (serverDir != null) {
+        inputs.dir(serverDir).withPropertyName("dirContents")
+    }
     outputs.dir(outDir)
     doLast {
         outDir.mkdirs()
@@ -97,7 +103,6 @@ val fetchServerRelease by tasks.registering {
                 source.copyTo(target, overwrite = true)
                 return
             }
-            if (target.exists() && target.length() > 0L) return
             logger.lifecycle("fetching $name")
             URL("$base/$name").openStream().use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
@@ -123,6 +128,15 @@ val fetchServerRelease by tasks.registering {
         // to check against; we write one so that everything downstream -- the
         // app's uploaded mirror, install.sh's own verification -- works
         // exactly as it does for a release.
+        //
+        // For a release it is fetched every time, never reused.  It is a few
+        // lines long, and it is what decides whether the archives already
+        // here can stay: they keep the same names from one version to the
+        // next, so "a file is there" says nothing about which release -- or
+        // which local build -- it came from.  Trusting the file's presence
+        // kept the previous version's checksums after a version bump, and let
+        // a -PsozvonServerDir build pass its own checksums off as a
+        // release's.  (Sozvon)
         if (serverDir == null) {
             fetch("SHA256SUMS", sums)
         }
@@ -141,12 +155,11 @@ val fetchServerRelease by tasks.registering {
             // app looks for.  ".pkg" is passed through untouched; the archive
             // gets its real name back when it lands on the server.
             val f = File(outDir, "$arch.pkg")
-            fetch(name, f)
-            val got = sha256(f)
             if (serverDir != null) {
+                fetch(name, f)
                 // Nothing to check against -- record what we have, in the
                 // format the rest of the chain reads.
-                localSums.append(got).append("  ").append(name).append('\n')
+                localSums.append(sha256(f)).append("  ").append(name).append('\n')
             } else {
                 // The release's own checksum, checked here rather than
                 // trusting the download: a corrupt archive baked into an APK
@@ -155,8 +168,15 @@ val fetchServerRelease by tasks.registering {
                     .firstOrNull { it.trimEnd().endsWith(" $name") || it.trimEnd().endsWith("*$name") }
                     ?.trim()?.substringBefore(' ')
                     ?: throw GradleException("SHA256SUMS has no entry for $name")
-                if (got != want) {
-                    throw GradleException("checksum mismatch for $name: got $got, expected $want")
+                // An archive already here is kept only if it is, byte for
+                // byte, the one this release published; anything else is
+                // downloaded again.
+                if (!f.isFile || sha256(f) != want) {
+                    fetch(name, f)
+                    val got = sha256(f)
+                    if (got != want) {
+                        throw GradleException("checksum mismatch for $name: got $got, expected $want")
+                    }
                 }
             }
             manifest.append(arch).append(' ').append(f.length()).append('\n')
