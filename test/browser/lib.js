@@ -2,6 +2,12 @@
 
 import {expect} from '@playwright/test';
 
+// Opening a (fake) device is the first thing to starve on a busy machine: at
+// 20 s the preview timed out twice in eight runs with every core busy and a
+// go test running beside it.  Waiting for a state, so a longer limit only
+// costs time when something is really wrong.
+const DEVICE_TIMEOUT = 45_000;
+
 /**
  * Turn devices on in the pre-join check and wait until each toggle is really
  * on -- aria-pressed, which the page sets only once the device has opened --
@@ -18,11 +24,11 @@ export async function chooseDevices(page, {cam = true, mic = true} = {}) {
             continue;
         await page.click(id);
         await expect(page.locator(id)).toHaveAttribute('aria-pressed', 'true',
-                                                       {timeout: 20_000});
+                                                       {timeout: DEVICE_TIMEOUT});
     }
     if (cam)
         await page.waitForFunction(() => {
             const v = document.getElementById('precheck-video');
             return v && v.videoWidth > 0;
-        }, null, {timeout: 20_000});
+        }, null, {timeout: DEVICE_TIMEOUT});
 }
