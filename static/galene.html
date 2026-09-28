@@ -7,6 +7,10 @@
          script in the head, ahead of the stylesheets.  Not to be confused
          with the deployment theme hook in static/theme/. -->
     <script src="/theme-init.js"></script>
+    <!-- Lifts the loading overlay below once the page is known to work, and
+         reloads it when a stylesheet or script failed.  Blocking and ahead
+         of the stylesheets, so it sees them fail. -->
+    <script src="/load-guard.js"></script>
     <!-- Deployment theme hook: repointed to the theme's icon; a no-op copy
          the SOZVON micro icon ships in the stock distribution (see static/theme/favicon.svg). -->
     <link rel="icon" type="image/svg+xml" href="/theme/favicon.svg"/>
@@ -31,10 +35,10 @@
        deployment would have had to patch this file.  common.css paints `html`
        with var(--bg) before first paint, covering the same window. -->
   <body class="pre-join">
-    <!-- Sozvon: loading overlay / FOUC guard.  Covers the brief unstyled paint
-         before the large galene.css applies, then galene.js removes it on
-         window 'load'.  Styled in common.css because the CSP forbids inline
-         <style>. -->
+    <!-- Sozvon: loading overlay / FOUC guard.  Covers the page until
+         load-guard.js has seen galene.css apply and galene.js run, and holds
+         its messages when the connection is slow.  Styled in common.css
+         because the CSP forbids inline <style>. -->
     <div id="app-loading"><div class="app-spinner"></div></div>
     <!-- Shown when the group requires end-to-end encryption but this call
          cannot be encrypted.  One reason line is shown under it, the one
