@@ -20,32 +20,9 @@
 
 'use strict';
 
-/**
- * Sozvon: FOUC guard cleanup.  galene.html hides every content block up front
- * with the `hidden` attribute (the browser honours it with no author CSS, so
- * the strict CSP — which forbids inline <style> — cannot block it) and shows a
- * loading overlay (#app-loading) with a spinner.  Once everything has loaded we
- * clear those `hidden` attributes and drop the overlay.  We run on 'load' (not
- * DOMContentLoaded) so galene.css has certainly applied and we never uncover an
- * unstyled page; the timeout is a safety net.
- */
-(function removeLoadingOverlay() {
-    function hide() {
-        // galene.html sets `hidden` only on the FOUC-guard blocks, so clearing
-        // every [hidden] here is safe.
-        document.querySelectorAll('[hidden]').forEach(function(el) {
-            el.removeAttribute('hidden');
-        });
-        let o = document.getElementById('app-loading');
-        if(o)
-            o.remove();
-    }
-    if(document.readyState === 'complete')
-        hide();
-    else
-        window.addEventListener('load', hide);
-    setTimeout(hide, 10000);
-})();
+// Sozvon: the loading overlay (#app-loading) and the `hidden` FOUC guard in
+// galene.html are lifted by load-guard.js, once the page is known to work;
+// this file only reports that it ran (SozvonAppLoaded, at the very end).
 
 /**
  * The name of the group that we join.
@@ -9834,3 +9811,8 @@ async function start() {
 }
 
 start();
+
+// Sozvon: tells load-guard.js that this file ran to the end, which it needs
+// before it uncovers the page.  Last line on purpose: a top-level throw above
+// (say, a script this one depends on did not load) leaves it unset.
+self.SozvonAppLoaded = true;

@@ -408,7 +408,10 @@ textarea {
  * and loads before the large galene.css, so the overlay (#app-loading, in
  * galene.html) is painted over the page during the brief window before
  * galene.css applies and the raw DOM would otherwise flash as plain text.
- * galene.js removes the overlay on window 'load'.
+ * load-guard.js removes the overlay once the page is known to work, and in
+ * the meantime puts its slow-connection notes (.app-loading-note) in it --
+ * which is why they are styled here too: galene.css is the file whose
+ * absence they may be reporting.
  */
 html {
     background: var(--bg);
@@ -422,9 +425,33 @@ html {
     left: 0;
     z-index: 2147483647;
     display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
     align-items: center;
     justify-content: center;
+    padding: 1.5rem;
     background: var(--bg);
+}
+
+.app-loading-note {
+    max-width: 22rem;
+    text-align: center;
+    color: var(--text-2);
+    line-height: 1.45;
+}
+
+.app-loading-note p {
+    margin: 0 0 1rem;
+}
+
+.app-loading-note button {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    color: var(--accent-contrast);
+    font: inherit;
+    cursor: pointer;
 }
 
 .app-spinner {
