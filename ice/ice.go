@@ -23,6 +23,13 @@ type Server struct {
 	Username       string      `json:"username,omitempty"`
 	Credential     interface{} `json:"credential,omitempty"`
 	CredentialType string      `json:"credentialType,omitempty"`
+
+	// ClientsOnly offers the server to clients without using it for the
+	// server's own side of a connection.  A relay may be reachable from
+	// clients over a transport that is bad from where the SFU runs -- UDP
+	// from a foreign address into a Russian network is throttled, while
+	// the same UDP from clients inside it is fine.  (Sozvon)
+	ClientsOnly bool `json:"clientsOnly,omitempty"`
 }
 
 func getServer(server Server) (webrtc.ICEServer, error) {
@@ -69,6 +76,7 @@ var ICERelayOnly bool
 
 type configuration struct {
 	conf      webrtc.Configuration
+	client    webrtc.Configuration // what clients are told (Sozvon)
 	timestamp time.Time
 }
 
@@ -77,6 +85,7 @@ var conf atomic.Value
 func Update() *configuration {
 	now := time.Now()
 	var cf webrtc.Configuration
+	var clientServers []webrtc.ICEServer
 
 	found := false
 	if ICEFilename != "" {
@@ -102,7 +111,10 @@ func Update() *configuration {
 					log.Printf("parse ICE server: %v", err)
 					continue
 				}
-				cf.ICEServers = append(cf.ICEServers, ss)
+				clientServers = append(clientServers, ss)
+				if !s.ClientsOnly {
+					cf.ICEServers = append(cf.ICEServers, ss)
+				}
 			}
 		}
 	}
@@ -113,28 +125,44 @@ func Update() *configuration {
 	}
 
 	cf.ICEServers = append(cf.ICEServers, turnserver.ICEServers()...)
+	clientServers = append(clientServers, turnserver.ICEServers()...)
 
 	if ICERelayOnly {
 		cf.ICETransportPolicy = webrtc.ICETransportPolicyRelay
 	}
 
+	client := cf
+	client.ICEServers = clientServers
+
 	iceConf := configuration{
 		conf:      cf,
+		client:    client,
 		timestamp: now,
 	}
 	conf.Store(&iceConf)
 	return &iceConf
 }
 
-func ICEConfiguration() *webrtc.Configuration {
+func current() *configuration {
 	conf, ok := conf.Load().(*configuration)
 	if !ok || time.Since(conf.timestamp) > 5*time.Minute {
 		conf = Update()
 	} else if time.Since(conf.timestamp) > 2*time.Minute {
 		go Update()
 	}
+	return conf
+}
 
-	return &conf.conf
+// ICEConfiguration returns the configuration for the server's own side of
+// a connection.
+func ICEConfiguration() *webrtc.Configuration {
+	return &current().conf
+}
+
+// ClientICEConfiguration returns the configuration to hand to clients.  It
+// differs from ICEConfiguration by the servers marked clientsOnly.  (Sozvon)
+func ClientICEConfiguration() *webrtc.Configuration {
+	return &current().client
 }
 
 func RelayTest(timeout time.Duration) (time.Duration, error) {

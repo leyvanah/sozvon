@@ -94,3 +94,48 @@ func TestRelayTest(t *testing.T) {
 		t.Errorf("Relay test returned %v", err)
 	}
 }
+
+func TestClientsOnly(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "ice-servers-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`[
+	  {"urls": ["turn:relay.example:3479?transport=udp"],
+	   "username": "u", "credential": "c", "clientsOnly": true},
+	  {"urls": ["turns:relay.example:5349?transport=tcp"],
+	   "username": "u", "credential": "c"}
+	]`)
+	f.Close()
+
+	saved, savedRelay := ICEFilename, ICERelayOnly
+	defer func() {
+		ICEFilename, ICERelayOnly = saved, savedRelay
+		Update()
+	}()
+	ICEFilename = f.Name()
+	ICERelayOnly = true
+	Update()
+
+	urls := func(c *webrtc.Configuration) []string {
+		var l []string
+		for _, s := range c.ICEServers {
+			l = append(l, s.URLs...)
+		}
+		return l
+	}
+	server, client := ICEConfiguration(), ClientICEConfiguration()
+	if got := urls(server); !reflect.DeepEqual(got,
+		[]string{"turns:relay.example:5349?transport=tcp"}) {
+		t.Errorf("server uses %v, want the TLS relay only", got)
+	}
+	if got := urls(client); !reflect.DeepEqual(got, []string{
+		"turn:relay.example:3479?transport=udp",
+		"turns:relay.example:5349?transport=tcp"}) {
+		t.Errorf("clients are offered %v, want both relays", got)
+	}
+	if server.ICETransportPolicy != webrtc.ICETransportPolicyRelay ||
+		client.ICETransportPolicy != webrtc.ICETransportPolicyRelay {
+		t.Errorf("relay-only must hold on both sides")
+	}
+}
