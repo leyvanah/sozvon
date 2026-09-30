@@ -236,6 +236,8 @@
             'toast.noDevice': 'No camera or microphone was found.',
             'toast.permissionDenied': 'Camera or microphone access was denied.',
             'toast.micEnded': 'The microphone stopped — access was revoked or the device was disconnected. Turn it on again to reconnect.',
+            'toast.micReconnecting': 'The microphone dropped out — reconnecting it…',
+            'toast.micBack': 'The microphone is back.',
             'toast.enableHint': 'Use the camera or microphone buttons to start.',
             // End-to-end encryption
             'e2ee.secure': 'End-to-end encrypted — compare these emoji with the other person',
@@ -466,6 +468,8 @@
             'toast.noDevice': 'Камера или микрофон не найдены.',
             'toast.permissionDenied': 'Доступ к камере или микрофону запрещён.',
             'toast.micEnded': 'Микрофон отключился — доступ отозван или устройство отсоединено. Включите его снова, чтобы восстановить звук.',
+            'toast.micReconnecting': 'Микрофон отключился — подключаем снова…',
+            'toast.micBack': 'Микрофон снова работает.',
             'toast.enableHint': 'Включите камеру или микрофон кнопками на панели.',
             // Сквозное шифрование
             'e2ee.secure': 'Сквозное шифрование — сверьте эти эмодзи с собеседником',

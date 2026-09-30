@@ -2565,11 +2565,7 @@ async function setUpStream(c, stream) {
                 }
             }
         }
-        t.onended = e => {
-            stream.onaddtrack = null;
-            stream.onremovetrack = null;
-            c.close();
-        };
+        t.onended = e => upTrackEnded(c, t, stream);
 
         let encodings = [];
         let simulcast = c.label !== 'screenshare' && doSimulcast();
@@ -2664,6 +2660,134 @@ async function setUpStream(c, stream) {
             c.close();
         }
     };
+}
+
+/**
+ * Called when a track of an up stream ends on its own.  Our own teardown uses
+ * track.stop(), which does not fire 'ended', so this is always an involuntary
+ * loss: a device unplugged or reset, permission revoked, or the user pressing
+ * the browser's own "Stop sharing".
+ *
+ * @param {Stream} c
+ * @param {MediaStreamTrack} t
+ * @param {MediaStream} stream - the stream setUpStream was given
+ */
+function upTrackEnded(c, t, stream) {
+    if(c.label === 'camera' && t.kind === 'audio') {
+        // Losing the microphone used to close the whole camera stream, so
+        // the other side lost the picture along with the sound.  Keep the
+        // stream up and bring the microphone back. (Sozvon)
+        recoverMicrophone(c, t);
+        return;
+    }
+    stream.onaddtrack = null;
+    stream.onremovetrack = null;
+    c.close();
+}
+
+/**
+ * Reopens the microphone of a camera up stream after it dropped out, and
+ * swaps the new track in without renegotiating.  If it cannot be reopened,
+ * the stream carries on with video alone, or is closed if there is none.
+ * (Sozvon)
+ *
+ * @param {Stream} c
+ * @param {MediaStreamTrack} lost
+ */
+async function recoverMicrophone(c, lost) {
+    let sender = c.pc && c.pc.getSenders().find(s => s.track === lost);
+    if(!sender) {
+        c.close();
+        return;
+    }
+
+    // The streams that hold the track: the one being sent, and the filter's
+    // input when a filter sits in between.  The input is what gets stopped
+    // when the stream closes (see removeFilter), so the new track must be
+    // there too, or the microphone would stay open after hang-up.
+    let holders = () => {
+        let l = [c.stream];
+        let f = c.userdata.filter;
+        if(f && f.inputStream && f.inputStream !== c.stream)
+            l.push(f.inputStream);
+        return l.filter(s => s);
+    };
+    let swap = (from, to) => holders().forEach(s => {
+        if(s.getTracks().indexOf(from) < 0)
+            return;
+        s.removeTrack(from);
+        if(to)
+            s.addTrack(to);
+    });
+    // Still worth bringing back: the stream is live and still ours, and
+    // nobody turned the microphone off or replaced it meanwhile.
+    let wanted = () =>
+        !!c.sc && !!serverConnection && serverConnection.up[c.id] === c &&
+        sender.track === lost && !!c.stream &&
+        c.stream.getTracks().indexOf(lost) >= 0;
+
+    displayWarning(Sozvon.i18n.t('toast.micReconnecting'));
+
+    let settings = getSettings();
+    /** @type {MediaTrackConstraints} */
+    let audio = {};
+    if(settings.audio)
+        // a preference, not a requirement: if the chosen device is gone for
+        // good, the default one will do
+        audio.deviceId = settings.audio;
+    if(!settings.preprocessing)
+        audio.noiseSuppression = false;
+
+    let track = await /** @type {any} */ (window).SozvonMicRecovery.reopen({
+        open: async () => {
+            let s = await navigator.mediaDevices.getUserMedia({audio: audio});
+            s.getVideoTracks().forEach(v => v.stop());
+            return s.getAudioTracks()[0];
+        },
+        wanted: wanted,
+    });
+
+    if(!wanted()) {
+        if(track)
+            track.stop();
+        return;
+    }
+
+    if(track) {
+        track.enabled = !getSettings().localMute;
+        track.onended = e => upTrackEnded(c, track, c.stream);
+        try {
+            await sender.replaceTrack(track);
+        } catch(e) {
+            console.error(e);
+            track.stop();
+            track = null;
+        }
+    }
+
+    if(!track) {
+        if(!c.stream.getVideoTracks().some(v => v.readyState === 'live')) {
+            c.close();
+            displayError(Sozvon.i18n.t('toast.micEnded'));
+            return;
+        }
+        // Carry on with video alone.  Taking the dead track out of the
+        // stream makes the microphone button show "off", and pressing it
+        // republishes the stream with a fresh microphone.
+        try {
+            await sender.replaceTrack(null);
+        } catch(e) {
+            console.warn(e);
+        }
+        swap(lost, null);
+        displayError(Sozvon.i18n.t('toast.micEnded'));
+        setButtonsVisibility();
+        return;
+    }
+
+    swap(lost, track);
+    displayMessage(Sozvon.i18n.t('toast.micBack'));
+    setButtonsVisibility();
 }
 
 /**
@@ -2916,15 +3040,8 @@ async function addLocalMediaNow(localId, force) {
     syncDeviceSelect('audioselect', stream.getAudioTracks()[0], 'audio');
     syncDeviceSelect('videoselect', stream.getVideoTracks()[0], 'video');
 
-    // A track that ends on its own — permission revoked mid-call, or the
-    // device unplugged — fires 'ended'; our own teardown uses track.stop(),
-    // which does NOT.  So a fired 'ended' means an involuntary loss the user
-    // should be told about, rather than the mic silently going dead. (Sozvon)
-    stream.getAudioTracks().forEach(t => {
-        t.addEventListener('ended', () => {
-            displayError(Sozvon.i18n.t('toast.micEnded'));
-        });
-    });
+    // A microphone that ends on its own is reported, and brought back, by
+    // recoverMicrophone through the up stream's 'ended' handler. (Sozvon)
 
     let c;
 
