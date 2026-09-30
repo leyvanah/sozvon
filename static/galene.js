@@ -730,15 +730,124 @@ async function join() {
  * @this {ServerConnection}
  */
 function onPeerConnection() {
-    if(!getSettings().forceRelay)
+    let forceRelay = getSettings().forceRelay;
+    let dropUdp = udpRelayGivenUp() &&
+        turnFallbackApi().hasUdpRelay(this.rtcConfiguration);
+    if(!forceRelay && !dropUdp)
         return null;
     let old = this.rtcConfiguration;
     /** @type {RTCConfiguration} */
     let conf = {};
     for(let key in old)
         conf[key] = old[key];
-    conf.iceTransportPolicy = 'relay';
+    if(forceRelay)
+        conf.iceTransportPolicy = 'relay';
+    if(dropUdp)
+        conf = turnFallbackApi().withoutUdp(conf);
     return conf;
+}
+
+// --- Falling back from TURN over UDP (Sozvon) ------------------------------
+//
+// A relay over UDP carries a call much better than one over TLS, but some
+// networks drop or throttle UDP, sometimes only after ICE has chosen it.
+// turn-fallback.js watches the path every connection uses; when the UDP one
+// is broken, UDP is taken out of the ICE configuration, every connection is
+// restarted over what is left, and the decision is kept for a few hours.
+// With no UDP relay configured nothing here has any effect.
+
+/** @returns {any} */
+function turnFallbackApi() {
+    return /** @type {any} */ (window).SozvonTurnFallback;
+}
+
+/** UDP was given up during this page's life. */
+let udpGivenUp = false;
+
+/** @type {any} */
+let turnWatcher = null;
+
+/** @returns {Storage|null} */
+function fallbackStorage() {
+    try {
+        return window.localStorage;
+    } catch(e) {
+        return null;
+    }
+}
+
+/** @returns {boolean} */
+function udpRelayGivenUp() {
+    let F = turnFallbackApi();
+    if(!F)
+        return false;
+    let s = fallbackStorage();
+    return udpGivenUp || (!!s && F.remembered(s, Date.now()));
+}
+
+/**
+ * Take TURN over UDP out of every connection and restart ICE on each, so
+ * that they come back over TLS.
+ *
+ * @param {string} reason - 'failed', 'disconnected' or 'loss'
+ */
+function giveUpUdpRelay(reason) {
+    let F = turnFallbackApi();
+    if(!F || udpGivenUp || !serverConnection)
+        return;
+    udpGivenUp = true;
+    let s = fallbackStorage();
+    if(s)
+        F.remember(s, Date.now());
+    console.warn('TURN over UDP does not work here (' + reason +
+                 '), falling back to TCP/TLS');
+    reportQuality('transport', '', {udp: false, reason: reason});
+    /** @type {Stream[]} */
+    let streams = [];
+    for(let id in serverConnection.up)
+        streams.push(serverConnection.up[id]);
+    for(let id in serverConnection.down)
+        streams.push(serverConnection.down[id]);
+    for(let c of streams) {
+        if(!c.pc)
+            continue;
+        try {
+            c.pc.setConfiguration(F.withoutUdp(c.pc.getConfiguration()));
+            c.restartIce();
+        } catch(e) {
+            console.warn('UDP fallback', e);
+        }
+    }
+}
+
+/**
+ * Feed one poll of one connection to the watcher.
+ *
+ * @param {Stream} c
+ * @param {RTCStatsReport} report
+ */
+function watchTurnPath(c, report) {
+    let F = turnFallbackApi();
+    if(!F || !c.pc)
+        return;
+    let path = F.selectedPath(report.values());
+    let key = path ? path.type + '/' + path.relay : null;
+    if(key && key !== c.userdata.turnPath) {
+        c.userdata.turnPath = key;
+        reportQuality('path', c.id, {type: path.type, relay: path.relay});
+    }
+    if(udpGivenUp)
+        return;
+    if(!turnWatcher)
+        turnWatcher = new F.Watcher();
+    let q = c.userdata.quality;
+    let reason = turnWatcher.update(c.id, {
+        ice: c.pc.iceConnectionState,
+        path: path,
+        loss: q && q.last ? q.last.loss : null,
+    }, Date.now());
+    if(reason)
+        giveUpUdpRelay(reason);
 }
 
 /**
@@ -1937,9 +2046,15 @@ async function pollQuality() {
             console.warn('getStats failed', e);
         }
         feedQuality(c, pc.iceConnectionState, snap);
-        if(report)
+        if(report) {
             feedBitrate(c, report);
+            watchTurnPath(c, report);
+        }
     }));
+    if(turnWatcher)
+        for(let id of [...turnWatcher.streams.keys()])
+            if(!serverConnection.up[id] && !serverConnection.down[id])
+                turnWatcher.forget(id);
     reflectEveryoneQuality();
 }
 

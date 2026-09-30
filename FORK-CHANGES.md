@@ -942,6 +942,22 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     applies, and the "own link degraded" judgement. Only changes are sent;
     the server checks every field, drops free text, and rate-limits reports
     to a burst of 20 and one per 3 s. Nothing is logged without the flag.
+  * **Falling back from TURN over UDP** (`static/turn-fallback.js`). A relay
+    reached over UDP carries a call much better than one over TCP/TLS, where
+    one lost packet holds up everything behind it; but some networks drop or
+    throttle UDP, sometimes only once real volume starts, after ICE has
+    already chosen it, and a plain ICE restart picks the same path again.
+    The client watches the path each connection uses (`getStats()`: the
+    selected pair's local candidate and its `relayProtocol`). When a
+    connection on a UDP relay fails, stays disconnected for 6 s, or loses
+    15% or more of its packets for five polls in a row, UDP is taken out of
+    the ICE configuration (`setConfiguration`), every connection restarts
+    ICE over what is left, and the decision is kept in `localStorage` for six
+    hours, so the next call on the same network starts on TCP/TLS. With no
+    UDP relay configured nothing changes. A network that blocks UDP outright
+    needs none of this: ICE never selects the UDP relay. Both the client's
+    path and a fallback are reported to the connection log
+    (`client path relay via udp`, `gives up TURN over UDP (loss)`).
   * **Static files are compressed** (`webserver/compress.go`). Upstream serves
     them uncompressed through its own file handler; the client's first load was
     808 KB, of which ~500 KB was text. A room now loads in 160 KB. Compressing
