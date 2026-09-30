@@ -120,6 +120,17 @@ func TestQualityLine(t *testing.T) {
 		{"everyone", "", m("degraded", true),
 			who + " own link degraded: every remote stream is weak or worse"},
 		{"everyone", "", m("degraded", false), who + " own link recovered"},
+		{"path", "d1", m("type", "relay", "relay", "udp"),
+			who + " down=" + down + " client path relay via udp"},
+		{"path", "u1", m("type", "relay", "relay", nil),
+			who + " up=" + up + " client path relay via unknown"},
+		{"path", "u1", m("type", "host", "relay", nil),
+			who + " up=" + up + " client path host"},
+		{"transport", "", m("udp", false, "reason", "loss"),
+			who + " gives up TURN over UDP (loss), falling back to TCP/TLS"},
+		{"path", "u1", m("type", "evil"), ""},
+		{"transport", "", m("udp", false, "reason", "because"), ""},
+		{"transport", "", m("udp", true, "reason", "loss"), ""},
 
 		// malformed or foreign: nothing
 		{"level", "nope", m("level", "weak", "previous", "good"), ""},

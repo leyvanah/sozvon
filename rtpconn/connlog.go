@@ -195,6 +195,16 @@ var qualityLevels = map[string]bool{
 	"good": true, "weak": true, "bad": true, "lost": true,
 }
 
+var candidateTypes = map[string]bool{
+	"host": true, "srflx": true, "prflx": true, "relay": true,
+}
+
+var relayProtocols = map[string]bool{"udp": true, "tcp": true, "tls": true}
+
+var fallbackReasons = map[string]bool{
+	"failed": true, "disconnected": true, "loss": true,
+}
+
 var iceStates = map[string]bool{
 	"new": true, "checking": true, "connected": true, "completed": true,
 	"disconnected": true, "failed": true, "closed": true,
@@ -323,6 +333,38 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		}
 		return fmt.Sprintf("%v up=%v sends video at %v",
 			who, connTag(id), limit)
+	case "path":
+		// the path the client's side of a connection uses, which the
+		// server cannot see: how the client reaches its relay
+		dir, ok := streamKind(c, id)
+		if !ok {
+			return ""
+		}
+		typ, ok := word(v["type"], candidateTypes)
+		if !ok {
+			return ""
+		}
+		if typ != "relay" {
+			return fmt.Sprintf("%v %v=%v client path %v",
+				who, dir, connTag(id), typ)
+		}
+		relay, ok := word(v["relay"], relayProtocols)
+		if !ok {
+			relay = "unknown"
+		}
+		return fmt.Sprintf("%v %v=%v client path relay via %v",
+			who, dir, connTag(id), relay)
+	case "transport":
+		// the client gave up TURN over UDP (static/turn-fallback.js)
+		if udp, ok := v["udp"].(bool); !ok || udp {
+			return ""
+		}
+		reason, ok := word(v["reason"], fallbackReasons)
+		if !ok {
+			return ""
+		}
+		return fmt.Sprintf("%v gives up TURN over UDP (%v), "+
+			"falling back to TCP/TLS", who, reason)
 	case "everyone":
 		degraded, ok := v["degraded"].(bool)
 		if !ok {
