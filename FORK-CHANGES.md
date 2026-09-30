@@ -936,6 +936,12 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     about one person in one call go together, nothing leads back to a name.
     No addresses, usernames or group names; error texts, which carry
     addresses, are reduced to their kind.
+    The client reports its side too (`sozvon-quality` messages): each
+    settled change of a stream's quality level with the RTT, jitter and loss
+    that caused it, each bitrate cap a receiver asks for and a sender
+    applies, and the "own link degraded" judgement. Only changes are sent;
+    the server checks every field, drops free text, and rate-limits reports
+    to a burst of 20 and one per 3 s. Nothing is logged without the flag.
   * **Static files are compressed** (`webserver/compress.go`). Upstream serves
     them uncompressed through its own file handler; the client's first load was
     808 KB, of which ~500 KB was text. A room now loads in 160 KB. Compressing

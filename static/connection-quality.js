@@ -172,6 +172,14 @@
         /** @type {string|null} */
         this.pending = null;
         this.count = 0;
+        /**
+         * The numbers behind the latest poll, null when there were none (no
+         * stats, or the path was down).  Kept so that a change of level can
+         * say what caused it.
+         *
+         * @type {ReturnType<typeof assess>|null}
+         */
+        this.last = null;
     }
 
     /**
@@ -190,6 +198,7 @@
             // smooth.  Counters restart after an ICE restart, so forget them.
             this.level = 'lost';
             this.prev = null;
+            this.last = null;
             this.pending = null;
             this.count = 0;
             return {level: this.level, previous,
@@ -203,8 +212,10 @@
             // bad sample before it counts.
             raw = this.level === 'lost' ? null : 'lost';
             this.prev = null;
+            this.last = null;
         } else if(snap) {
-            raw = assess(this.prev, snap).level;
+            this.last = assess(this.prev, snap);
+            raw = this.last.level;
             this.prev = snap;
         }
 

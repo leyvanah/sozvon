@@ -173,3 +173,178 @@ func selectedPair(pc *webrtc.PeerConnection) string {
 	return fmt.Sprintf("%v/%v%v-%v/%v",
 		p.Local.Typ, p.Local.Protocol, via, p.Remote.Typ, p.Remote.Protocol)
 }
+
+// Quality reports.  (Sozvon)
+//
+// The client grades every stream it sends or receives (connection-quality.js)
+// and runs the receiver-driven bitrate caps (bitrate-control.js); the server
+// sees neither.  So the client reports each change -- a settled level, a cap
+// asked for, a cap applied -- and it is logged next to the ICE lines of the
+// same connection.  A client could send anything here, so every field is
+// checked, numbers are bounded and the rate is limited: at worst a hostile
+// client adds a few lines of well-formed nonsense to the log.
+
+// qualityBurst reports are accepted at once, then one every
+// qualityRefill.  A bad call changes level a few times a minute.
+const (
+	qualityBurst  = 20
+	qualityRefill = 3 * time.Second
+)
+
+var qualityLevels = map[string]bool{
+	"good": true, "weak": true, "bad": true, "lost": true,
+}
+
+var iceStates = map[string]bool{
+	"new": true, "checking": true, "connected": true, "completed": true,
+	"disconnected": true, "failed": true, "closed": true,
+}
+
+// qualityAllowed implements the rate limit, a token bucket kept in the
+// client.  It is only called from the client's own loop.
+func qualityAllowed(c *webClient, now time.Time) bool {
+	if c.qualityTime.IsZero() {
+		c.qualityTokens = qualityBurst
+	} else {
+		c.qualityTokens += float64(now.Sub(c.qualityTime)) /
+			float64(qualityRefill)
+		if c.qualityTokens > qualityBurst {
+			c.qualityTokens = qualityBurst
+		}
+	}
+	c.qualityTime = now
+	if c.qualityTokens < 1 {
+		return false
+	}
+	c.qualityTokens--
+	return true
+}
+
+// number returns v as a finite number within [0, max].
+func number(v interface{}, max float64) (float64, bool) {
+	f, ok := v.(float64)
+	if !ok || f != f || f < 0 || f > max {
+		return 0, false
+	}
+	return f, true
+}
+
+func word(v interface{}, allowed map[string]bool) (string, bool) {
+	s, ok := v.(string)
+	if !ok || !allowed[s] {
+		return "", false
+	}
+	return s, true
+}
+
+// streamKind says whether id is one of c's up or down connections.
+func streamKind(c *webClient, id string) (string, bool) {
+	if id == "" {
+		return "", false
+	}
+	if getUpConn(c, id) != nil {
+		return "up", true
+	}
+	if getDownConn(c, id) != nil {
+		return "down", true
+	}
+	return "", false
+}
+
+// kbps formats a bitrate in bits per second; null means no cap.
+func kbps(v interface{}) (string, bool) {
+	if v == nil {
+		return "no cap", true
+	}
+	f, ok := number(v, 1e10)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%d kbit/s", int64(f/1000)), true
+}
+
+// qualityLine turns a report into a log line, or "" if it is malformed.
+func qualityLine(c *webClient, kind, id string, value interface{}) string {
+	v, _ := value.(map[string]interface{})
+	if v == nil {
+		return ""
+	}
+	who := "c=" + connTag(c.id)
+	switch kind {
+	case "level":
+		dir, ok := streamKind(c, id)
+		if !ok {
+			return ""
+		}
+		level, ok1 := word(v["level"], qualityLevels)
+		previous, ok2 := word(v["previous"], qualityLevels)
+		if !ok1 || !ok2 {
+			return ""
+		}
+		why := ""
+		rtt, ok3 := number(v["rtt"], 3600)
+		jitter, ok4 := number(v["jitter"], 3600)
+		loss, ok5 := number(v["loss"], 1)
+		if ok3 && ok4 && ok5 {
+			why = fmt.Sprintf(": rtt %dms jitter %dms loss %.1f%%",
+				int64(rtt*1000), int64(jitter*1000), loss*100)
+		} else if ice, ok := word(v["ice"], iceStates); ok {
+			why = ": ice " + ice
+		}
+		return fmt.Sprintf("%v %v=%v quality %v (was %v)%v",
+			who, dir, connTag(id), level, previous, why)
+	case "ask":
+		dir, ok := streamKind(c, id)
+		if !ok || dir != "down" {
+			return ""
+		}
+		limit, ok := kbps(v["cap"])
+		if !ok {
+			return ""
+		}
+		if v["cap"] == nil {
+			return fmt.Sprintf("%v down=%v asks the sender to lift its cap",
+				who, connTag(id))
+		}
+		return fmt.Sprintf("%v down=%v asks the sender for %v",
+			who, connTag(id), limit)
+	case "send":
+		dir, ok := streamKind(c, id)
+		if !ok || dir != "up" {
+			return ""
+		}
+		limit, ok := kbps(v["cap"])
+		if !ok {
+			return ""
+		}
+		if v["cap"] == nil {
+			return fmt.Sprintf("%v up=%v sends video without a cap",
+				who, connTag(id))
+		}
+		return fmt.Sprintf("%v up=%v sends video at %v",
+			who, connTag(id), limit)
+	case "everyone":
+		degraded, ok := v["degraded"].(bool)
+		if !ok {
+			return ""
+		}
+		if degraded {
+			return who + " own link degraded: every remote stream is weak or worse"
+		}
+		return who + " own link recovered"
+	}
+	return ""
+}
+
+// gotQualityReport logs a client's quality report.  Malformed or excess
+// reports are dropped silently: this is a log, not a protocol a client may
+// get wrong.
+func gotQualityReport(c *webClient, m clientMessage) {
+	if !LogConnections || !qualityAllowed(c, time.Now()) {
+		return
+	}
+	line := qualityLine(c, m.Kind, m.Id, m.Value)
+	if line != "" {
+		connLogf("%v", line)
+	}
+}
