@@ -227,7 +227,7 @@ func addUpConn(c *webClient, id, label string, offer string) (*rtpUpConnection, 
 		sendICE(c, id, candidate)
 	})
 
-	conn.pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+	logICE(c, "up", id, conn.pc, func(state webrtc.ICEConnectionState) {
 		if state == webrtc.ICEConnectionStateFailed {
 			c.action(connectionFailedAction{id: id})
 		}
@@ -336,7 +336,7 @@ func addDownConn(c *webClient, remote conn.Up) (*rtpDownConnection, bool, error)
 		sendICE(c, down.id, candidate)
 	})
 
-	down.pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+	logICE(c, "down", down.id, down.pc, func(state webrtc.ICEConnectionState) {
 		if state == webrtc.ICEConnectionStateFailed {
 			c.action(connectionFailedAction{id: down.id})
 		}
@@ -909,10 +909,15 @@ func StartClient(conn *websocket.Conn, addr net.Addr) (err error) {
 
 	defer close(c.done)
 
+	sessionStart := time.Now()
+	connLogf("c=%v session start", connTag(c.id))
+
 	c.writeCh = make(chan interface{}, 100)
 	c.writerDone = make(chan struct{})
 	go clientWriter(conn, c.writeCh, c.writerDone)
 	defer func() {
+		connLogf("c=%v session end +%v: %v",
+			connTag(c.id), since(sessionStart), closeReason(err))
 		m, e := errorToWSCloseMessage(c.id, err)
 		if isWSNormalError(err) {
 			err = nil
@@ -993,6 +998,8 @@ func addnew(v string, l []string) []string {
 	return append(slices.Clip(l), v)
 }
 
+var errClientDead = errors.New("client is dead")
+
 func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 	read := make(chan interface{}, 1)
 	go clientReader(ws, read, c.done)
@@ -1050,7 +1057,7 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 			}
 		case <-ticker.C:
 			if time.Since(readTime) > 45*time.Second {
-				return errors.New("client is dead")
+				return errClientDead
 			}
 			// Some reverse proxies timeout connexions at 60
 			// seconds, make sure we generate some activity
@@ -1371,6 +1378,8 @@ func leaveGroup(c *webClient) {
 		return
 	}
 
+	connLogf("c=%v left", connTag(c.id))
+
 	if c.up != nil {
 		for id := range c.up {
 			delUpConn(c, id, c.id, true)
@@ -1565,6 +1574,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 		}
 		c.group = g
 		c.knocking = nil
+		connLogf("c=%v joined", connTag(c.id))
 	case "request":
 		requested, err := parseRequested(m.Request)
 		if err != nil {

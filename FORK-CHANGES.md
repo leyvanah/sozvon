@@ -912,6 +912,19 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
 
 ### Operations / self-hosting
 
+  * **Anonymous connection log**, `-log-connections` (`rtpconn/connlog.go`,
+    off by default). Upstream says nothing about why someone dropped out of a
+    call: a page reload closes the websocket with 1001, which counts as
+    normal and is not logged, and ICE failures are handled silently. With the
+    flag, every session start and end (with the reason: close code, the 45 s
+    timeout, a lost connection), join and leave, and ICE state of every up
+    and down connection is logged, with the time since it began; a connected
+    ICE state adds the selected pair as type and protocol, and for a relay
+    how the server reaches it (`relay/udp(via tls)`). A participant is a
+    six-hex tag, a hash of their client id salted per server run: lines
+    about one person in one call go together, nothing leads back to a name.
+    No addresses, usernames or group names; error texts, which carry
+    addresses, are reduced to their kind.
   * **Static files are compressed** (`webserver/compress.go`). Upstream serves
     them uncompressed through its own file handler; the client's first load was
     808 KB, of which ~500 KB was text. A room now loads in 160 KB. Compressing
