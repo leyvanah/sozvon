@@ -958,6 +958,15 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     needs none of this: ICE never selects the UDP relay. Both the client's
     path and a fallback are reported to the connection log
     (`client path relay via udp`, `gives up TURN over UDP (loss)`).
+  * **ICE servers for clients only** (`"clientsOnly": true` in
+    `data/ice-servers.json`, `ice/ice.go`). The server's own side of a
+    connection uses only the other entries; clients are offered all of them.
+    Measured on 2026-09-30: STUN over UDP to the Russian relay was clean from
+    a client in Russia (p95 9 ms) but held up for seconds from the Finnish
+    SFU (p95 1.4–4.6 s) while ICMP on the same path was clean. So the relay
+    over UDP is offered to clients only, and the SFU keeps reaching it over
+    TLS. The client-side fallback above cannot see the server's side, which
+    is why this has to be decided on the server.
   * **Static files are compressed** (`webserver/compress.go`). Upstream serves
     them uncompressed through its own file handler; the client's first load was
     808 KB, of which ~500 KB was text. A room now loads in 160 KB. Compressing

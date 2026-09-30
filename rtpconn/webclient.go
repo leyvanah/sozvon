@@ -1241,7 +1241,7 @@ func handleAction(c *webClient, a any) error {
 			Permissions:      perms,
 			Status:           status,
 			Data:             data,
-			RTCConfiguration: ice.ICEConfiguration(),
+			RTCConfiguration: ice.ClientICEConfiguration(),
 		})
 		if err != nil {
 			return err
@@ -1316,7 +1316,7 @@ func handleAction(c *webClient, a any) error {
 			Username:         &username,
 			Permissions:      perms,
 			Status:           &status,
-			RTCConfiguration: ice.ICEConfiguration(),
+			RTCConfiguration: ice.ClientICEConfiguration(),
 		})
 		if !slices.Contains(c.permissions, "present") {
 			up := getUpConns(c)

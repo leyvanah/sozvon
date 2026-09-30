@@ -431,6 +431,28 @@ that, then the `ice-servers.json` file should look like this:
 ]
 ```
 
+An entry marked `"clientsOnly": true` is offered to clients but not used
+by the server for its own side of a connection.  This is for a relay that
+clients reach well over a transport that is bad from where the server
+runs, for example TURN over UDP into a network that throttles UDP coming
+from abroad, while the server keeps reaching the same relay over TLS:
+
+```json
+[
+    {
+        "urls": ["turn:turn.example.org:3479?transport=udp"],
+        "credential": "secret",
+        "credentialType": "hmac-sha1",
+        "clientsOnly": true
+    },
+    {
+        "urls": ["turns:turn.example.org:5349?transport=tcp"],
+        "credential": "secret",
+        "credentialType": "hmac-sha1"
+    }
+]
+```
+
 For redundancy, you may set up multiple TURN servers, and ICE will use the
 first one that works.  If an `ice-servers.json` file is present and
 Galene's built-in TURN server is enabled, then the external server will be

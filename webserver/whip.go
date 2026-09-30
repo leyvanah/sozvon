@@ -115,7 +115,7 @@ func formatICEServer(server webrtc.ICEServer, u string) string {
 }
 
 func whipICEServers(w http.ResponseWriter) {
-	conf := ice.ICEConfiguration()
+	conf := ice.ClientICEConfiguration()
 	for _, server := range conf.ICEServers {
 		for _, u := range server.URLs {
 			v := formatICEServer(server, u)
