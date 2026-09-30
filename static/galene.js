@@ -1874,8 +1874,44 @@ function feedQuality(c, iceState, snap) {
         return;
     if(!c.userdata.quality)
         c.userdata.quality = new Q.Tracker();
-    c.userdata.quality.update(iceState, snap);
+    let r = c.userdata.quality.update(iceState, snap);
+    if(r.changed) {
+        let a = c.userdata.quality.last;
+        reportQuality('level', c.id, {
+            level: r.level, previous: r.previous, ice: iceState,
+            rtt: a ? a.rtt : null, jitter: a ? a.jitter : null,
+            loss: a ? a.loss : null,
+        });
+    }
     setQualityIndicator(c);
+}
+
+/**
+ * Tell the server about a change in call quality, for its connection log.
+ * The server writes it down only when started with -log-connections, and
+ * without anything that identifies the caller; see rtpconn/connlog.go.
+ * Only changes are sent -- a settled level, a cap asked for or applied --
+ * so this is a handful of messages in a bad call and none in a good one.
+ * (Sozvon)
+ *
+ * @param {string} kind - 'level', 'ask' (receiver asks for a cap) or
+ *     'send' (sender applies one)
+ * @param {string} id - the stream
+ * @param {Object<string,any>} value
+ */
+function reportQuality(kind, id, value) {
+    if(!serverConnection || !serverConnection.socket)
+        return;
+    try {
+        serverConnection.send({
+            type: 'sozvon-quality',
+            kind: kind,
+            id: id,
+            value: value,
+        });
+    } catch(e) {
+        // the socket is closing; the log can do without this line
+    }
 }
 
 async function pollQuality() {
@@ -1952,9 +1988,11 @@ function feedBitrate(c, report) {
     if(!c.userdata.bitrate)
         c.userdata.bitrate = new B.Controller(B.START_CAP);
     let r = c.userdata.bitrate.update(B.snapshot(report.values(), Date.now()));
-    if(r.changed)
+    if(r.changed) {
         console.info('bitrate: asking', c.username || c.source,
                      'to cap', c.id, 'at', r.cap, r.sample);
+        reportQuality('ask', c.id, {cap: r.cap});
+    }
     if(!r.send || !c.source || !serverConnection ||
        !serverConnection.users[c.source])
         return;
@@ -2059,6 +2097,7 @@ async function applySendCap(c) {
         return;
     c.userdata.sentThroughput = t;
     console.info('bitrate: sending', c.id, 'at', t === null ? 'full rate' : t);
+    reportQuality('send', c.id, {cap: t});
     await setSendParameters(c, t, s);
 }
 
@@ -2173,6 +2212,8 @@ function reflectEveryoneQuality() {
     if(everyone === qualityEveryone)
         return;
     qualityEveryone = everyone;
+    // our own link, judged from every remote one degrading at once
+    reportQuality('everyone', '', {degraded: everyone});
     for(let id in serverConnection.up)
         setQualityIndicator(serverConnection.up[id]);
 }

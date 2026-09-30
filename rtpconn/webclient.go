@@ -78,6 +78,10 @@ type webClient struct {
 	mu   sync.Mutex
 	down map[string]*rtpDownConnection
 	up   map[string]*rtpUpConnection
+
+	// rate limit on quality reports, see connlog.go (Sozvon)
+	qualityTokens float64
+	qualityTime   time.Time
 }
 
 func (c *webClient) Group() *group.Group {
@@ -2235,6 +2239,8 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 		}
 	case "pong":
 		// nothing
+	case "sozvon-quality":
+		gotQualityReport(c, m)
 	case "ping":
 		return c.write(clientMessage{
 			Type: "pong",
