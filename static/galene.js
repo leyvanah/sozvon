@@ -594,7 +594,7 @@ function reflectRejoinOption() {
     if(show) {
         let elt = document.getElementById('rejoin-username');
         if(elt)
-            elt.textContent = reconnectLastJoin.username || '';
+            elt.textContent = ownRealName || hidePseudonym(reconnectLastJoin.username);
     }
 }
 
@@ -716,6 +716,8 @@ async function join() {
             };
         }
     }
+
+    username = joinUsername(username, credentials);
 
     try {
         await serverConnection.join(group, username, credentials);
@@ -2288,7 +2290,7 @@ function qualityHint(c, level, everyone) {
         case 'lost': return t('quality.selfLost');
         }
     } else {
-        let who = c.username || t('quality.anonymous');
+        let who = shownName(c.source, c.username) || t('quality.anonymous');
         switch(level) {
         case 'weak': return t('quality.peerWeak', {who});
         case 'bad': return t('quality.peerBad', {who});
@@ -4119,7 +4121,7 @@ function setLabel(c, fallback) {
     let label = document.getElementById('label-' + c.localId);
     if(!label)
         return;
-    let l = c.username;
+    let l = c.up ? ownShownName(c.username) : shownName(c.source, c.username);
     if(l) {
         label.textContent = l;
         label.classList.remove('label-fallback');
@@ -4980,7 +4982,10 @@ document.getElementById('invite-dialog').onclose = function(e) {
         }
     }
     let template = {}
-    if(username)
+    if(username && groupStatus.e2ee && !groupStatus.operatorRoom)
+        // the name goes after '#' in the link, not to the server (Sozvon)
+        pendingInviteName = username;
+    else if(username)
         template.username = username;
     if(notBefore)
         template['not-before'] = notBefore;
@@ -5118,7 +5123,7 @@ function changeUser(id, userinfo) {
  * @param {user} userinfo
  */
 function setUserStatus(id, elt, userinfo) {
-    let name = userinfo.username ? userinfo.username : '(anon)';
+    let name = shownName(id, userinfo.username) || '(anon)';
 
     // Sozvon: structured row = round avatar (initial + presence dot) + name +
     // (when the user has audio) a per-user volume slider and mute toggle.
@@ -5577,6 +5582,8 @@ function gotUser(id, kind) {
         break;
     case 'delete':
         delUser(id);
+        if(guestNames)
+            guestNames.delete(id);
         if(e2eeActive())
             serverConnection.e2ee.delUser(id);
         forgetBitrateRequests(id);
@@ -5636,6 +5643,160 @@ function e2eeEnabled() {
     return e2eeActive() && serverConnection.e2ee.supported;
 }
 
+// --- Guests' names stay off the server (Sozvon) ----------------------------
+//
+// In a room with end-to-end encryption a guest joins under a pseudonym made
+// up by the browser; the name they typed goes to the other side only inside
+// the encrypted channel, once the handshake is done (guest-name.js).  A
+// pseudonym is never shown: where a name would go, the interface shows
+// nothing until the real one arrives, so every place that displays a name
+// goes through shownName().  Account holders -- operators with a password or
+// a remembered login -- keep their username: the server has to know it to
+// let them in.
+
+/** @returns {any} */
+function guestNameApi() {
+    return /** @type {any} */ (window).SozvonGuestName;
+}
+
+/**
+ * Names received over the encrypted channel during this call, by user id.
+ * Memory only.
+ *
+ * @type {any}
+ */
+let guestNames = null;
+
+/** @returns {any} */
+function guestNameBook() {
+    let G = guestNameApi();
+    if(!guestNames && G)
+        guestNames = new G.Book();
+    return guestNames;
+}
+
+/**
+ * The name this guest typed, while it is in the room under a pseudonym.
+ *
+ * @type {string|null}
+ */
+let ownRealName = null;
+
+/** @type {string|null} */
+let ownPseudonym = null;
+
+/** The peer our name was last sent to, over the current encrypted session. */
+let nameSentTo = null;
+
+/**
+ * What to show for a user's name.
+ *
+ * @param {string} id
+ * @param {string} username - as the server knows it
+ * @returns {string}
+ */
+function shownName(id, username) {
+    if(serverConnection && id && id === serverConnection.id)
+        return ownShownName(username);
+    let b = guestNameBook();
+    if(b)
+        return b.shown(id, username);
+    return username || '';
+}
+
+/**
+ * What to show for our own name.
+ *
+ * @param {string} [username] - as the server knows it
+ * @returns {string}
+ */
+function ownShownName(username) {
+    if(username === undefined)
+        username = serverConnection ? serverConnection.username : '';
+    let G = guestNameApi();
+    let pseudo = !!G && G.isPseudonym(username);
+    if(ownRealName && (!username || pseudo))
+        return ownRealName;
+    return pseudo ? '' : (username || '');
+}
+
+/**
+ * For a name that comes without a user id to look it up by -- a knock, the
+ * operator's overview: a pseudonym shows as nothing.
+ *
+ * @param {string} username
+ * @returns {string}
+ */
+function hidePseudonym(username) {
+    let G = guestNameApi();
+    return G && G.isPseudonym(username) ? '' : (username || '');
+}
+
+/**
+ * The username to join with: a pseudonym for a guest in a room with
+ * end-to-end encryption, the typed name otherwise.  Rejoining with the same
+ * name keeps the same pseudonym.
+ *
+ * @param {string|null} username
+ * @param {any} credentials
+ * @returns {string|null}
+ */
+function joinUsername(username, credentials) {
+    let G = guestNameApi();
+    let account = usingRememberToken ||
+        (typeof credentials === 'string' && credentials !== '') ||
+        (!!credentials && typeof credentials === 'object' &&
+         credentials.type === 'authServer');
+    if(!G || !username || !groupStatus.e2ee || groupStatus.operatorRoom ||
+       account) {
+        ownRealName = null;
+        ownPseudonym = null;
+        return username;
+    }
+    if(ownRealName !== username || !ownPseudonym)
+        ownPseudonym = G.makePseudonym();
+    ownRealName = username;
+    return ownPseudonym;
+}
+
+/**
+ * Send our name to the peer once the encrypted session is up.
+ */
+function sendOwnName() {
+    let G = guestNameApi();
+    let e2ee = serverConnection && serverConnection.e2ee;
+    if(!G || !ownRealName || !e2ee || e2ee.state !== 'established' ||
+       !e2ee.peer || nameSentTo === e2ee.peer)
+        return;
+    let peer = e2ee.peer;
+    e2ee.sendChat(G.KIND, G.pack(ownRealName)).then(function(ok) {
+        if(ok)
+            nameSentTo = peer;
+    }).catch(function(e) {
+        console.warn('sending our name:', e);
+    });
+}
+
+/**
+ * A peer's name arrived: show it wherever their name appears.
+ *
+ * @param {string} id
+ * @param {string} name
+ */
+function gotPeerName(id, name) {
+    let b = guestNameBook();
+    if(!b || !b.set(id, name))
+        return;
+    let u = serverConnection && serverConnection.users[id];
+    if(u)
+        changeUser(id, u);
+    for(let cid in serverConnection.down) {
+        let c = serverConnection.down[cid];
+        if(c.source === id)
+            setLabel(c);
+    }
+}
+
 /**
  * Restrict a video transceiver to VP8 (+rtx), the codec the E2EE worker
  * assumes when it leaves the keyframe header in clear.
@@ -5680,6 +5841,12 @@ function gotE2EESas(sas) {
 function gotE2EEState() {
     updateE2EEUI();
     enforceE2EEMediaPolicy();
+    // a new encrypted session, or none: send our name again when it is up
+    let e2ee = serverConnection && serverConnection.e2ee;
+    if(!e2ee || e2ee.state !== 'established')
+        nameSentTo = null;
+    else
+        sendOwnName();
 }
 
 /**
@@ -5884,7 +6051,7 @@ function displayKnockToast(id, username) {
 
     let label = document.createElement('span');
     label.textContent = Sozvon.i18n.t('toast.askingToJoin',
-        {who: username || Sozvon.i18n.t('toast.someone')});
+        {who: hidePseudonym(username) || Sozvon.i18n.t('toast.someone')});
     body.appendChild(label);
 
     let actions = document.createElement('span');
@@ -5977,7 +6144,7 @@ function gotKnock(id, username, present) {
     // is, with the same two buttons. (Sozvon)
     hostKnock('room:' + id,
               Sozvon.i18n.t('toast.askingToJoin',
-                            {who: username || Sozvon.i18n.t('toast.someone')}),
+                            {who: hidePseudonym(username) || Sozvon.i18n.t('toast.someone')}),
               [{id: 'admit', label: Sozvon.i18n.t('knock.admit'), primary: true},
                {id: 'deny', label: Sozvon.i18n.t('knock.deny')}],
               function(action) {
@@ -6019,11 +6186,11 @@ function gotKnock(id, username, present) {
  */
 function gotKnockRefused(id, username) {
     displayMessage(Sozvon.i18n.t('toast.knockRefused',
-        {who: username || Sozvon.i18n.t('toast.someone')}));
+        {who: hidePseudonym(username) || Sozvon.i18n.t('toast.someone')}));
 }
 
 function displayUsername() {
-    document.getElementById('userspan').textContent = serverConnection.username;
+    document.getElementById('userspan').textContent = ownShownName();
     let op = serverConnection.permissions.indexOf('op') >= 0;
     let present = serverConnection.permissions.indexOf('present') >= 0;
     let text = '';
@@ -6216,6 +6383,9 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         setButtonsVisibility();
         return;
     case 'leave':
+        if(guestNames)
+            guestNames.clear();
+        nameSentTo = null;
         closeSafariStream();
         this.close();
         setButtonsVisibility();
@@ -6418,10 +6588,10 @@ function gotFileTransfer(f) {
     if(f.up)
         p.textContent =
         `We have offered to send a file called "${f.name}" ` +
-        `to user ${f.username}.`;
+        `to user ${chatName(f.userid, f.username)}.`;
     else
         p.textContent =
-        `User ${f.username} offered to send us a file ` +
+        `User ${chatName(f.userid, f.username)} offered to send us a file ` +
         `called "${f.name}" of size ${f.size}.`
     let bno = null, byes = null;
     if(!f.up) {
@@ -6610,6 +6780,16 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
             serverConnection.e2ee.decryptChat(message).then(function(res) {
                 if(!res)
                     return;
+                let G = guestNameApi();
+                if(G) {
+                    let m = G.classify(res.kind, res.text);
+                    if(m.type === 'drop')
+                        return;
+                    if(m.type === 'name') {
+                        gotPeerName(id, m.name);
+                        return;
+                    }
+                }
                 let u = serverConnection.users[id];
                 // The sender goes in the peerId slot, where every other
                 // message puts it.  There is no message id: this one was
@@ -6704,10 +6884,16 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
         if(operatorRoom.active) {
             // A dashboard-created link: don't dump it into chat or share it,
             // the dashboard refreshes its own list.
+            if(pendingLinkName && message.token)
+                operatorLinkNames.set(message.token, pendingLinkName);
+            pendingLinkName = null;
             pollOperatorRoom();
             break;
         }
         let f = formatToken(message, false);
+        if(pendingInviteName && guestNameApi())
+            f[1] = guestNameApi().withNameInHash(f[1], pendingInviteName);
+        pendingInviteName = null;
         localMessage(f[0] + ': ' + f[1]);
         if('share' in navigator) {
             try {
@@ -6991,6 +7177,10 @@ function operatorLinkUrl(t) {
     url.pathname = '/' + childSlug(t.group) + '/';
     url.search = 'token=' + encodeURIComponent(t.token);
     url.hash = '';
+    let n = operatorLinkNames.get(t.token);
+    let G = guestNameApi();
+    if(n && n.name && G)
+        return G.withNameInHash(url.toString(), n.name);
     return url.toString();
 }
 
@@ -7092,7 +7282,8 @@ function renderOperatorRoom() {
  */
 function operatorRow(t, st) {
     let slug = t.group.slice((group + '/').length);
-    let label = t.username || slug;
+    let n = operatorLinkNames.get(t.token);
+    let label = t.username || (n && n.label) || slug;
 
     let row = document.createElement('div');
     row.className = 'operator-link';
@@ -7117,10 +7308,11 @@ function operatorRow(t, st) {
     if(knocking.length > 0) {
         badge.classList.add('knocking');
         badge.textContent =
-            Sozvon.i18n.t('operator.statusKnocking', {names: knocking.join(', ')});
+            Sozvon.i18n.t('operator.statusKnocking', {names: shownNames(knocking)});
     } else if(clients.length > 0) {
         badge.classList.add('incall');
-        let names = clients.map(c => c.username || '?').join(', ');
+        let names = clients.map(c => hidePseudonym(c.username) ||
+                                Sozvon.i18n.t('toast.someone')).join(', ');
         badge.textContent =
             Sozvon.i18n.t('operator.statusInCall', {names: names});
     } else {
@@ -7250,12 +7442,40 @@ function dismissOperatorKnockToast(childGroup) {
  * @param {Array<string>} names  usernames currently knocking in that room
  * @returns {Object}
  */
+/**
+ * The sender's name on a chat message: what shownName says, "(anon)" for
+ * someone with no name at all, and nothing for a pseudonym whose name has
+ * not arrived.  (Sozvon)
+ *
+ * @param {string} id
+ * @param {string} nick
+ * @returns {string}
+ */
+function chatName(id, nick) {
+    let n = shownName(id, nick);
+    if(n)
+        return n;
+    return nick ? '' : '(anon)';
+}
+
+/**
+ * Names for a list that has no user ids to look them up by: pseudonyms show
+ * as "someone".  (Sozvon)
+ *
+ * @param {Array<string>} names
+ * @returns {string}
+ */
+function shownNames(names) {
+    let someone = Sozvon.i18n.t('toast.someone');
+    return names.map(n => hidePseudonym(n) || someone).join(', ') || someone;
+}
+
 function operatorKnockToast(childGroup, names) {
     let body = document.createElement('div');
     body.classList.add('knock-toast-body');
 
     let label = document.createElement('span');
-    let who = names.join(', ') || Sozvon.i18n.t('toast.someone');
+    let who = shownNames(names);
     label.textContent = Sozvon.i18n.t('operator.knockToast',
         {who: who, room: childSlug(childGroup)});
     body.appendChild(label);
@@ -7379,6 +7599,28 @@ function makeSlug(label) {
     return randomSlugSuffix() + randomSlugSuffix();
 }
 
+/**
+ * Who each link created in this page is for, by token; memory only, so it
+ * is gone after a reload -- by design, since nothing may keep it. (Sozvon)
+ *
+ * @type {Map<string, {label: string, name: string}>}
+ */
+let operatorLinkNames = new Map();
+
+/**
+ * Set between asking for a link and receiving it.
+ *
+ * @type {{label: string, name: string}|null}
+ */
+let pendingLinkName = null;
+
+/**
+ * The name for an invite made from the call, to go after '#'. (Sozvon)
+ *
+ * @type {string|null}
+ */
+let pendingInviteName = null;
+
 function createOperatorLink() {
     let labelElt = /** @type{HTMLInputElement} */
         (document.getElementById('operator-label'));
@@ -7391,17 +7633,25 @@ function createOperatorLink() {
     let days = expElt ? parseInt(expElt.value) : 0;
     if(isNaN(days))
         days = 0;
+    // With end-to-end encryption the server must not learn who the link is
+    // for: the room gets a random name, the client's name goes after '#'
+    // in the link, and label and name are kept in this page's memory only
+    // (operatorLinkNames).  Otherwise, as before: the room is named after
+    // the label and the name goes into the token. (Sozvon)
+    let private_ = !!groupStatus.e2ee;
     // No label and no client name: makeSlug('') yields a purely random slug,
     // so the link still gets a unique name -- no need to force the operator
     // to type one.
-    let slug = makeSlug(label || clientName);
+    let slug = makeSlug(private_ ? '' : (label || clientName));
     let template = {
         group: group + '/' + slug,
         // days === 0 means a perpetual link (null expiry, never expires)
         expires: days > 0 ? new Date(Date.now() + days * units.d) : null,
         permissions: ['present', 'message'],
     };
-    if(clientName)
+    if(private_)
+        pendingLinkName = {label: label || clientName, name: clientName};
+    else if(clientName)
         template.username = clientName;
     makeToken(template);
     if(labelElt)
@@ -7511,6 +7761,10 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
         return;
     }
 
+    // what to show for the sender; nick itself stays the server's name,
+    // which the message menu acts upon (Sozvon)
+    let shown = chatName(peerId, nick);
+
     // Flag unread chat on the panel toggle when a live message from someone
     // else arrives while the panel isn't on screen.
     if(peerId && !history &&
@@ -7575,10 +7829,10 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
             let header = document.createElement('p');
             let user = document.createElement('span');
             let u = dest && serverConnection.users[dest];
-            let name = (u && u.username);
+            let name = u ? chatName(dest, u.username) : '';
             user.textContent = dest ?
-                `${nick || '(anon)'} \u2192 ${name || '(anon)'}` :
-                (nick || '(anon)');
+                `${shown} \u2192 ${name || '(anon)'}` :
+                shown;
             user.classList.add('message-user');
             header.appendChild(user);
             header.classList.add('message-header');
@@ -7604,7 +7858,7 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
         asterisk.textContent = '*';
         asterisk.classList.add('message-me-asterisk');
         let user = document.createElement('span');
-        user.textContent = nick || '(anon)';
+        user.textContent = shown;
         user.classList.add('message-me-user');
         body.classList.add('message-me-content');
         container.appendChild(asterisk);
@@ -8113,7 +8367,7 @@ function findUserId(user) {
 
     for(let id in serverConnection.users) {
         let u = serverConnection.users[id];
-        if(u && u.username === user)
+        if(u && (u.username === user || shownName(id, u.username) === user))
             return id;
     }
     return null;
@@ -9983,7 +10237,11 @@ async function start() {
         getSelectElement('simulcastselect').value = 'off';
 
     let parms = new URLSearchParams(window.location.search);
-    if(window.location.search)
+    // A name the inviter put after '#', which browsers never send to the
+    // server: offered as the guest's name below. (Sozvon)
+    let hashName = guestNameApi() ?
+        guestNameApi().nameFromHash(window.location.hash) : '';
+    if(window.location.search || window.location.hash)
         window.history.replaceState(null, '', window.location.pathname);
     setTitle(groupStatus.displayName || capitalise(group));
 
@@ -10024,6 +10282,12 @@ async function start() {
             if(uElt instanceof HTMLInputElement)
                 uElt.value = remembered.username || '';
         }
+    }
+
+    if(hashName) {
+        let uElt = document.getElementById('username');
+        if(uElt instanceof HTMLInputElement)
+            uElt.value = hashName;
     }
 
     // A pending invite token stashed on an earlier visit (e.g. before a
