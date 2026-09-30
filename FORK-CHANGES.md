@@ -357,6 +357,17 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     which says "and then, separately, this one" without drawing anything.
   * **Independent camera and microphone** buttons — toggling one no longer
     affects the other.
+  * **A microphone that drops out mid-call comes back on its own**
+    (`static/mic-recovery.js`). Upstream closes the whole camera stream when
+    any of its tracks ends, so a headset re-pairing or a driver reset took
+    the picture away along with the sound, and nothing returned until the
+    user pressed the microphone button. Now the stream stays up, the
+    microphone is reopened (five attempts over ~10 s, preferring the chosen
+    device and falling back to the default one), and the new track is
+    swapped in with `replaceTrack()`: the same connections throughout, no
+    renegotiation, E2EE untouched. If it cannot be reopened the call goes on
+    with video alone and the microphone button shows "off". Screen sharing
+    still ends with its track, which there means "stop sharing".
   * **State-reflecting mic/camera icons**: each colours by what is live right
     now — **blue + upright** when the device is on, **red + slashed** when off.
     The old neutral-grey in-between state is gone.
