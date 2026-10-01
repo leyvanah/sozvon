@@ -663,6 +663,25 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
   * A `cleartextMode` toggle in the media worker forwards frames unchanged for
     the allowed-but-unencrypted fallback, while the handshake window still drops
     unkeyed frames so secure media is never emitted in clear.
+  * **Guests' names stay off the server** (`static/guest-name.js`). In an
+    E2EE room a guest joins under a pseudonym the browser makes up
+    (`~` and ten random letters); the name they typed goes to the peer only
+    over the encrypted chat channel, as a message of kind `name` whose
+    plaintext also carries a marker -- the kind travels outside the
+    ciphertext, so a name relabelled as chat, or chat as a name, is dropped.
+    A pseudonym is never shown: tiles, the user list, chat, file offers,
+    knocks and the operator overview show nothing (or "someone") until the
+    real name arrives. Operators with a password or a remembered login keep
+    their username, which the server needs to let them in. Names live in
+    memory only, for the call.
+    Links follow suit. In an E2EE operator room a client's room gets a random
+    name instead of one derived from the label, and the client's name goes
+    after `#` in the link, which browsers never send; label and name are
+    kept in the operator page's memory, so after a reload the list shows the
+    room names only. The in-call invite does the same, and a guest page fills
+    the name in from `#` and clears it from the address. On the server, a
+    token minted in an E2EE group may name only one of the group's own users
+    (`rtpconn/guestname.go`); a guest's name from an older client is dropped.
 
 ### Pre-join device check
 
