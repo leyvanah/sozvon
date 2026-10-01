@@ -617,6 +617,7 @@ function drawMessage(o) {
         formatText: () => doc.createElement('span'),
         displayCaption: () => {},
         chatMessageMenu: () => {},
+        chatName: (id, nick) => nick || '(anon)',
     });
     vm.runInContext(liftFunction('galene.js', 'addToChatbox'), ctx);
     ctx.addToChatbox(
@@ -671,17 +672,19 @@ test('an encrypted message is not drawn as a system notice', () => {
  *
  * @returns {Promise<any[]>}
  */
-async function relayEncryptedChat(sender) {
+async function relayEncryptedChat(sender, decrypted, named) {
     const drawn = [];
     const ctx = vm.createContext({
         console: quiet,
         e2eeActive: () => true,
         addToChatbox: (...args) => drawn.push(args),
+        guestNameApi: () => guestName,
+        gotPeerName: (id, name) => { if(named) named.push([id, name]); },
         serverConnection: {
             id: 'mine',
             users: {[sender]: {username: 'them'}},
             e2ee: {
-                decryptChat: async () => ({kind: '', text: 'hello'}),
+                decryptChat: async () => (decrypted || {kind: '', text: 'hello'}),
             },
         },
     });
@@ -689,9 +692,32 @@ async function relayEncryptedChat(sender) {
     ctx.gotUserMessage(sender, '', 'them', new Date(), false, 'e2eechat',
                        null, {iv: 'x', ct: 'y'});
     await new Promise(resolve => setImmediate(resolve));
+    if(decrypted)
+        return drawn;
     assert.strictEqual(drawn.length, 1, 'the message was not drawn');
     return drawn[0];
 }
+
+const guestName = require('../guest-name.js');
+
+test('a name over the encrypted channel names the sender and is not drawn', async () => {
+    const named = [];
+    const drawn = await relayEncryptedChat(
+        'them', {kind: 'name', text: guestName.pack('Анна')}, named);
+    assert.deepStrictEqual(named, [['them', 'Анна']]);
+    assert.deepStrictEqual(drawn, [], 'a name message showed up in the chat');
+});
+
+test('a name relabelled as chat, or chat as a name, is dropped', async () => {
+    const named = [];
+    let drawn = await relayEncryptedChat(
+        'them', {kind: '', text: guestName.pack('Анна')}, named);
+    assert.deepStrictEqual(drawn, [], 'a relabelled name was drawn as chat');
+    drawn = await relayEncryptedChat(
+        'them', {kind: 'name', text: 'hello'}, named);
+    assert.deepStrictEqual(drawn, []);
+    assert.deepStrictEqual(named, [], 'chat relabelled as a name named someone');
+});
 
 test('a decrypted message carries its sender where every message carries it', async () => {
     const args = await relayEncryptedChat('them');

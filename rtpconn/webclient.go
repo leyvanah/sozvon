@@ -1909,6 +1909,8 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 				isDirectChild(tok.Group, c.group.Name())
 			tok.Link = isLink
 
+			tok.Username = tokenUsername(c.group, tok.Username)
+
 			if tok.Group != c.group.Name() && !isLink {
 				return terror("error", "wrong group in token")
 			}
