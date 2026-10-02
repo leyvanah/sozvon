@@ -180,3 +180,42 @@ test('storage that throws remembers nothing and breaks nothing', () => {
     f.remember(broken, 0);
     assert.ok(!f.remembered(broken, 0));
 });
+
+test('direct paths count as UDP when the server allows them', () => {
+    let direct = {iceServers: [{urls: [TLS]}], iceTransportPolicy: 'all'};
+    let relayOnly = {iceServers: [{urls: [TLS]}], iceTransportPolicy: 'relay'};
+    assert.ok(f.offersUdp(direct), 'direct UDP to the server is possible');
+    assert.ok(!f.offersUdp(relayOnly), 'relay-only over TLS offers no UDP');
+    assert.ok(f.offersUdp(conf()), 'a UDP relay is UDP');
+    assert.ok(f.offersUdp({iceServers: [{urls: [TLS]}]}),
+              'no policy means "all"');
+});
+
+test('giving up UDP also gives up direct paths: relay-only over TLS', () => {
+    let out = f.withoutUdp({iceServers: [{urls: [UDP, TLS]}],
+                            iceTransportPolicy: 'all'});
+    assert.strictEqual(out.iceTransportPolicy, 'relay');
+    assert.deepStrictEqual(out.iceServers, [{urls: [TLS]}]);
+    assert.ok(!f.offersUdp(out), 'nothing over UDP is left');
+});
+
+test('reads direct paths with their protocol', () => {
+    const direct = (type, protocol) => [
+        {id: 'L', type: 'local-candidate', candidateType: type,
+         protocol: protocol},
+        {id: 'P', type: 'candidate-pair', localCandidateId: 'L',
+         selected: true},
+    ];
+    assert.deepStrictEqual(f.selectedPath(direct('srflx', 'udp')),
+                           {type: 'srflx', relay: 'udp'});
+    assert.deepStrictEqual(f.selectedPath(direct('host', 'tcp')),
+                           {type: 'host', relay: 'tcp'});
+});
+
+test('a direct UDP path that breaks gives UDP up; a TCP one does not', () => {
+    let w = new f.Watcher();
+    w.update('a', {ice: 'connected', path: {type: 'srflx', relay: 'udp'}}, 0);
+    assert.strictEqual(w.update('a', {ice: 'failed', path: null}, 1), 'failed');
+    w.update('b', {ice: 'connected', path: {type: 'host', relay: 'tcp'}}, 0);
+    assert.strictEqual(w.update('b', {ice: 'failed', path: null}, 1), null);
+});
