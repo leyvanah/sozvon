@@ -981,6 +981,32 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     direct paths (no `-relay-only`): a direct path over UDP that breaks
     in the same ways gives UDP up too, and giving up also switches the
     policy to relay-only, so the browser ends up on the relay over TCP/TLS.
+  * **Signalling resume** (`rtpconn/resume.go`, `static/signalling-resume.js`,
+    `protocol.js`). Upstream ties a session to its websocket: when the
+    socket went silent for 45 s the server removed the participant, media
+    and all, and the client tore everything down at 50 s. The websocket and
+    the media travel on different paths, and on 2026-10-02 a participant
+    whose audio and video were flowing fine dropped out of a call this way.
+    A client that asks (`kind: "sozvon-resumable"` in its handshake) now gets
+    a secret; when its socket dies, or says nothing for 20 s, it opens a new
+    one and presents its id and the secret (`kind: "sozvon-resume"`), and the
+    session carries on with its peer connections untouched. Both sides
+    number what they send (handshakes and the resume messages aside) and
+    keep the last 512 messages or 2 MB; on resume each says how many it has
+    received and the other sends the rest, so whatever was stuck in the dead
+    socket arrives once, in order, and no message needs to change.
+    What keeps a session waiting is its **media**: while one of its peer
+    connections is ICE-connected the server waits up to two minutes for the
+    client to come back. With no live media a silent client is dropped after
+    25 s, and one whose socket is gone after 15 s -- sooner than upstream's
+    45 s, so someone who has really gone does not linger as a phantom.
+    Resumable clients are pinged after 10 s of silence and ping the server
+    after 8 s, which keeps those limits safe for a healthy idle client. A
+    normal close (leaving, reloading, a kick) ends the session at once, as
+    before; clients that do not opt in keep upstream's rules. The connection
+    log records each step (`signalling lost`, `media alive: keeping the
+    session`, `signalling resumed over a new connection, N message(s)
+    replayed`, `timeout (no signalling, media gone)`).
   * **ICE servers for clients only** (`"clientsOnly": true` in
     `data/ice-servers.json`, `ice/ice.go`). The server's own side of a
     connection uses only the other entries; clients are offered all of them.

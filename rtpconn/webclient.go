@@ -1096,6 +1096,10 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 				}
 				continue
 			}
+			if keptAlive {
+				connLogf("c=%v signalling heard again after %v",
+					connTag(c.id), since(readTime))
+			}
 			readTime = time.Now()
 			keptAlive = false
 			if countedType(r.m.Type) {
@@ -1109,7 +1113,6 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 			actions := c.actions.Get()
 			for _, a := range actions {
 				if a, ok := a.(resumeAction); ok {
-					silent := since(readTime)
 					res, err := resumeSession(c, a, received)
 					if err != nil {
 						return err
@@ -1119,9 +1122,9 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 					readTime = time.Now()
 					detached = false
 					keptAlive = false
-					connLogf("c=%v signalling resumed after %v, "+
-						"%d message(s) replayed",
-						connTag(c.id), silent, res.replayed)
+					connLogf("c=%v signalling resumed over a new "+
+						"connection, %d message(s) replayed",
+						connTag(c.id), res.replayed)
 					continue
 				}
 				err := handleAction(c, a)
