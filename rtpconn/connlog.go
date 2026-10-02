@@ -92,6 +92,16 @@ func closeReason(err error) string {
 	if errors.Is(err, errClientDead) {
 		return "timeout (nothing received for 45s)"
 	}
+	if errors.Is(err, errNoSignalling) {
+		return "timeout (no signalling, media gone)"
+	}
+	if errors.Is(err, errResumeExpired) {
+		return fmt.Sprintf("timeout (signalling not back within %v)",
+			resumeGrace)
+	}
+	if errors.Is(err, errResumeGap) {
+		return "resume failed (messages lost)"
+	}
 	var ne net.Error
 	if errors.As(err, &ne) && ne.Timeout() {
 		return "timeout"
