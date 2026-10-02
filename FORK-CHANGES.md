@@ -976,7 +976,11 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     UDP relay configured nothing changes. A network that blocks UDP outright
     needs none of this: ICE never selects the UDP relay. Both the client's
     path and a fallback are reported to the connection log
-    (`client path relay via udp`, `gives up TURN over UDP (loss)`).
+    (`client path relay via udp`, `gives up UDP (loss)`).
+    The same covers **direct UDP to the server**, when the server allows
+    direct paths (no `-relay-only`): a direct path over UDP that breaks
+    in the same ways gives UDP up too, and giving up also switches the
+    policy to relay-only, so the browser ends up on the relay over TCP/TLS.
   * **ICE servers for clients only** (`"clientsOnly": true` in
     `data/ice-servers.json`, `ice/ice.go`). The server's own side of a
     connection uses only the other entries; clients are offered all of them.

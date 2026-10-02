@@ -30,13 +30,14 @@
 // again.
 //
 // So the client watches the path each connection actually uses.  If a
-// connection that goes through a UDP relay fails, stays disconnected, or
-// loses a large share of its packets for a while, UDP is dropped from the
-// ICE configuration for this browser, every connection is restarted over
-// what is left (TLS), and the decision is remembered for a few hours so that
-// the next call on the same network starts on the path that works.  With no
-// UDP relay configured, none of this does anything: the call runs exactly as
-// before.
+// connection that goes over UDP -- through a relay, or straight to the server
+// when the server allows direct paths -- fails, stays disconnected, or loses
+// a large share of its packets for a while, UDP is given up for this browser:
+// it is dropped from the ICE configuration, the policy becomes relay-only, so
+// what is left is the relay over TCP/TLS, every connection is restarted over
+// it, and the decision is remembered for a few hours so that the next call on
+// the same network starts on the path that works.  With no UDP offered at
+// all -- relay-only and no UDP relay -- none of this does anything.
 //
 // This file holds the decisions; galene.js does the restarting.
 
@@ -91,7 +92,20 @@
     }
 
     /**
-     * A copy of conf without TURN over UDP.  Servers left with no URL are
+     * Whether a configuration lets a connection go over UDP: a TURN relay
+     * over UDP, or direct paths to the server (any policy but relay-only).
+     *
+     * @param {RTCConfiguration} conf
+     * @returns {boolean}
+     */
+    function offersUdp(conf) {
+        return hasUdpRelay(conf) ||
+            !!conf && conf.iceTransportPolicy !== 'relay';
+    }
+
+    /**
+     * A copy of conf without UDP: no TURN over UDP, and relay-only, so that
+     * no direct UDP path is tried either.  Servers left with no URL are
      * dropped; everything else is kept as it was.
      *
      * @param {RTCConfiguration} conf
@@ -102,6 +116,7 @@
         let out = {};
         for(let key in conf)
             out[key] = conf[key];
+        out.iceTransportPolicy = 'relay';
         out.iceServers = ((conf && conf.iceServers) || []).map(s => {
             let urls = urlsOf(s).filter(u => !isUdpRelay(u));
             if(urls.length === 0)
@@ -115,7 +130,8 @@
 
     /**
      * The candidate pair a connection currently uses, as the local
-     * candidate's type and, for a relay, how the browser reaches it.
+     * candidate's type and how the browser reaches the other end: for a
+     * relay, the protocol to the relay; otherwise the candidate's own.
      *
      * @param {Iterable<any>} stats - the values of an RTCStatsReport
      * @returns {{type: string, relay: string|null}|null}
@@ -138,10 +154,10 @@
         let local = byId.get(pair.localCandidateId);
         if(!local || !local.candidateType)
             return null;
-        let relay = null;
-        if(local.candidateType === 'relay')
-            relay = (local.relayProtocol || '').toLowerCase() || null;
-        return {type: local.candidateType, relay: relay};
+        let relay = local.candidateType === 'relay' ?
+            local.relayProtocol : local.protocol;
+        return {type: local.candidateType,
+                relay: (relay || '').toLowerCase() || null};
     }
 
     /**
@@ -176,8 +192,7 @@
         // the stats may no longer say which pair it was
         if(o.path && (o.ice === 'connected' || o.ice === 'completed'))
             s.path = o.path;
-        let onUdp = !!s.path && s.path.type === 'relay' &&
-            s.path.relay === 'udp';
+        let onUdp = !!s.path && s.path.relay === 'udp';
 
         if(o.ice === 'disconnected') {
             if(s.disconnectedSince === null)
@@ -239,7 +254,7 @@
 
     const api = {
         DISCONNECTED_FOR, LOSS, LOSS_POLLS, REMEMBER, STORAGE_KEY,
-        isUdpRelay, hasUdpRelay, withoutUdp, selectedPath, Watcher,
+        isUdpRelay, hasUdpRelay, offersUdp, withoutUdp, selectedPath, Watcher,
         remembered, remember,
     };
 

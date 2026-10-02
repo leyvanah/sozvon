@@ -345,6 +345,11 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 			return ""
 		}
 		if typ != "relay" {
+			// a direct path; its protocol, when the client says
+			if proto, ok := word(v["relay"], relayProtocols); ok {
+				return fmt.Sprintf("%v %v=%v client path %v/%v",
+					who, dir, connTag(id), typ, proto)
+			}
 			return fmt.Sprintf("%v %v=%v client path %v",
 				who, dir, connTag(id), typ)
 		}
@@ -363,8 +368,8 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		if !ok {
 			return ""
 		}
-		return fmt.Sprintf("%v gives up TURN over UDP (%v), "+
-			"falling back to TCP/TLS", who, reason)
+		return fmt.Sprintf("%v gives up UDP (%v), "+
+			"falling back to the relay over TCP/TLS", who, reason)
 	case "everyone":
 		degraded, ok := v["degraded"].(bool)
 		if !ok {

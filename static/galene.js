@@ -734,7 +734,7 @@ async function join() {
 function onPeerConnection() {
     let forceRelay = getSettings().forceRelay;
     let dropUdp = udpRelayGivenUp() &&
-        turnFallbackApi().hasUdpRelay(this.rtcConfiguration);
+        turnFallbackApi().offersUdp(this.rtcConfiguration);
     if(!forceRelay && !dropUdp)
         return null;
     let old = this.rtcConfiguration;

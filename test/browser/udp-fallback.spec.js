@@ -44,6 +44,9 @@ async function join(context, name) {
                     e.extra = Math.round((r.packetsReceived - e.base) *
                                          window.__loss / (1 - window.__loss));
                     out.set(k, {...r, packetsLost: (r.packetsLost || 0) + e.extra});
+                } else if (r.type === 'remote-inbound-rtp') {
+                    // what the other end reports about what we send
+                    out.set(k, {...r, fractionLost: window.__loss});
                 } else {
                     out.set(k, r);
                 }
@@ -114,10 +117,16 @@ test('a broken UDP relay falls back to TCP and the call goes on',
     test.skip(!offered, 'the server offers no TURN relay over UDP, or ' +
               'does not force relaying: run it with -relay-only -turn');
 
-    // Everyone starts on the UDP relay.
+    // Everyone starts with UDP to the relay in use.  Not necessarily on every
+    // connection: on a down connection the server's ICE agent nominates the
+    // first pair that works, which is sometimes the one over TCP.
+    // Wait for both to settle; if ICE put B on TCP everywhere, there is
+    // nothing to fall back from, and the run says so instead of failing.
     for (const p of [A, B])
-        await expect.poll(() => paths(p), {timeout: 20_000})
-            .toEqual(['relay/udp', 'relay/udp']);
+        await expect.poll(async () => (await paths(p)).every(x => x),
+                          {timeout: 20_000}).toBe(true);
+    test.skip(!(await paths(B)).includes('relay/udp'),
+              'ICE chose the relay over TCP for every connection of B');
     const before = await conns(B);
 
     // B's network starts throttling UDP.
@@ -131,10 +140,61 @@ test('a broken UDP relay falls back to TCP and the call goes on',
     await growing(B);
     await growing(A);
     expect(await B.evaluate(() => udpRelayGivenUp())).toBe(true);
-    // A was not affected and stays on UDP.
-    expect(await paths(A)).toEqual(['relay/udp', 'relay/udp']);
+    // A was not affected: it did not give UDP up.
+    expect(await A.evaluate(() => udpRelayGivenUp())).toBe(false);
 
     // The decision is remembered: B's next call starts on TCP.
+    await B.close();
+    const B2 = await join(ctxB, 'bob2');
+    await expect.poll(() => paths(B2), {timeout: 20_000})
+        .toEqual(['relay/tcp', 'relay/tcp']);
+    await growing(B2);
+
+    expect(A.errors).toEqual([]);
+    expect(B2.errors).toEqual([]);
+});
+
+test('a broken direct UDP path falls back to the relay over TCP',
+     async ({browser}) => {
+    // Needs a server that allows direct paths (no -relay-only) and offers a
+    // relay over TCP, e.g.:  sozvon -turn <lan-ip>:1194 ...
+    const ctxA = await browser.newContext();
+    const ctxB = await browser.newContext();
+    for (const c of [ctxA, ctxB])
+        await c.grantPermissions(['camera', 'microphone']);
+
+    const A = await join(ctxA, 'alice');
+    const B = await join(ctxB, 'bob');
+    await expect.poll(async () => await B.locator('#peers video').count(),
+                      {timeout: 30_000}).toBe(2);
+
+    const direct = await A.evaluate(() =>
+        serverConnection.rtcConfiguration.iceTransportPolicy !== 'relay');
+    test.skip(!direct, 'the server forces relaying: run it without -relay-only');
+
+    // Everyone starts on a direct UDP path to the server.
+    const isDirectUdp = p => /^(host|srflx|prflx)\/udp$/.test(p);
+    for (const p of [A, B])
+        await expect.poll(async () => (await paths(p)).every(isDirectUdp),
+                          {timeout: 20_000}).toBe(true);
+    const before = await conns(B);
+
+    await B.evaluate(() => { window.__loss = 0.3; });
+
+    // B gives UDP up altogether and carries on over the relay's TCP.
+    await expect.poll(() => paths(B), {timeout: 40_000})
+        .toEqual(['relay/tcp', 'relay/tcp']);
+    await B.evaluate(() => { window.__loss = 0; });
+    expect(await conns(B)).toEqual(before);
+    await growing(B);
+    await growing(A);
+    expect(await B.evaluate(() =>
+        serverConnection.down[Object.keys(serverConnection.down)[0]]
+            .pc.getConfiguration().iceTransportPolicy)).toBe('relay');
+    // A was not affected: it did not give UDP up.
+    expect(await A.evaluate(() => udpRelayGivenUp())).toBe(false);
+
+    // The next call from B starts on the relay.
     await B.close();
     const B2 = await join(ctxB, 'bob2');
     await expect.poll(() => paths(B2), {timeout: 20_000})
