@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Generate everything that carries the SOZVON mark from the one master.
 
-The mark lives in static/sozvon-mark.svg as a single filled outline.  Four
+The mark lives in static/sozvon-mark.svg as a single filled outline.  Five
 other files need the same geometry, in three different dialects, and keeping
 them in step by hand is how a logo ends up half-updated:
 
     static/theme/favicon.svg              the icon every page points at
     desktop/src/renderer/mark.svg         the app bar's lockup
+    onboarding/mark.svg                   the apps' first-run screens
     desktop/assets/icon.svg               source for the Windows .ico
     android/.../drawable/ic_sozvon.xml      the launcher icon's foreground
 
@@ -161,6 +162,18 @@ def bar_mark(d):
 """
 
 
+def onboarding_mark(d):
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<!-- SOZVON mark for the first-run onboarding.  {GENERATED}
+     The onboarding is shown from the device, before any server is known, so
+     it cannot reach the server's copy.  Painted as a CSS mask, so it takes
+     currentColor and needs no second cut for the light theme. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 218 590" width="218" height="590">
+  <path fill="#000" fill-rule="evenodd" d="{d}"/>
+</svg>
+"""
+
+
 def android_icon(d):
     # An adaptive icon is a 108dp square of which only the middle 72dp is
     # certain to be shown -- the launcher may mask, rotate or parallax the
@@ -199,6 +212,7 @@ def main():
     targets = {
         ROOT / "static" / "theme" / "favicon.svg": favicon(d),
         ROOT / "desktop" / "src" / "renderer" / "mark.svg": bar_mark(d),
+        ROOT / "onboarding" / "mark.svg": onboarding_mark(d),
         ROOT / "desktop" / "assets" / "icon.svg": desktop_icon(d),
         ROOT / "desktop" / "assets" / "icon-small.svg": desktop_icon_small(d),
         ROOT / "android" / "app" / "src" / "main" / "res" / "drawable"
