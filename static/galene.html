@@ -464,6 +464,45 @@
                             data-i18n="operator.create">Create link</button>
                   </form>
                   </div>
+                  <!-- Sozvon: the operator changes their own password here,
+                       where they already are, rather than on a bare page in
+                       a new tab.  Shown only where the server may rewrite the
+                       group file (status canChangePassword); see
+                       password-change.js. -->
+                  <div id="operator-account" class="operator-section operator-section-account invisible">
+                    <p class="operator-section-title" data-i18n="operator.accountTitle">
+                      Account
+                    </p>
+                    <button type="button" id="operator-password-toggle"
+                            class="operator-advanced-toggle"
+                            aria-expanded="false" aria-controls="operator-password-form">
+                      <span class="operator-caret" aria-hidden="true"></span>
+                      <span data-i18n="operator.changePassword">Change password</span>
+                    </button>
+                    <form id="operator-password-form" class="operator-password invisible">
+                      <!-- for password managers: whose password this is -->
+                      <input id="operator-password-user" type="text" class="invisible"
+                             autocomplete="username" readonly tabindex="-1" aria-hidden="true"/>
+                      <div class="operator-field">
+                        <label for="operator-password-current" data-i18n="operator.currentPassword">Current password</label>
+                        <input id="operator-password-current" type="password" class="form-control"
+                               autocomplete="current-password" required/>
+                      </div>
+                      <div class="operator-field">
+                        <label for="operator-password-new" data-i18n="operator.newPassword">New password</label>
+                        <input id="operator-password-new" type="password" class="form-control"
+                               autocomplete="new-password" required/>
+                      </div>
+                      <div class="operator-field">
+                        <label for="operator-password-again" data-i18n="operator.newPasswordAgain">Repeat the new password</label>
+                        <input id="operator-password-again" type="password" class="form-control"
+                               autocomplete="new-password" required/>
+                      </div>
+                      <p id="operator-password-message" class="operator-password-message" role="status"></p>
+                      <button type="submit" id="operator-password-save" class="btn btn-blue"
+                              data-i18n="operator.savePassword">Save password</button>
+                    </form>
+                  </div>
                   <div class="operator-section operator-section-last">
                     <p class="operator-section-title" data-i18n="operator.linksTitle">
                       Links
@@ -749,6 +788,7 @@
     <script src="/turn-fallback.js" defer></script>
     <script src="/bitrate-control.js" defer></script>
     <script src="/mic-recovery.js" defer></script>
+    <script src="/password-change.js" defer></script>
     <script src="/e2ee.js" defer></script>
     <script src="/settings.js" defer></script>
     <script src="/filter.js" defer></script>

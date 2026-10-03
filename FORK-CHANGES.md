@@ -606,6 +606,21 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     site root when there is a hub; the clients open that address after a deploy
     (the Android app already opened the origin; the Electron launcher now takes
     an empty room as "open the server itself").
+  * **The operator changes their own password on the panel**
+    (`static/password-change.js`, an "Account" section under the link form).
+    Upstream already has the server side: the `.users/<user>/.password` API
+    takes the user's own current password, re-hashes the new one with bcrypt
+    and rewrites the group file. It offers that as a bare page in a new tab,
+    behind a small link in the settings drawer that the operator panel does
+    not show. The panel now has the form in place: current password, new one
+    twice, refused before sending when the two differ, when it is shorter
+    than 8 characters or longer than bcrypt's 72 bytes, or when it is the
+    current one. Credentials go out as UTF-8 (`btoa` alone throws on
+    Cyrillic). The section only appears where the server may rewrite group
+    files, which needs `"writableGroups": true` in `data/config.json`, so
+    an operator is never offered a form that can only fail. The other
+    groups that define the same user are left alone: a password is per
+    group, and changing it here changes it for this hub and its rooms.
 
   Sample hub configuration (`groups/<hub>.json`):
 

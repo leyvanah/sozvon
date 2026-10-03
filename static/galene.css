@@ -4016,6 +4016,7 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
             "header  header"
             "devices links"
             "create  links"
+            "account links"
             ".       links";
         /* The list spans the rows beside it, and a spanning item's height is
            shared out over the rows it crosses -- so a long list stretched the
@@ -4024,17 +4025,18 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
            fourth row is flexible, and track sizing skips growing content-sized
            rows for an item whose span includes a flexible track: the list's
            extra height lands here instead of above it. (Sozvon) */
-        grid-template-rows: auto auto auto 1fr;
+        grid-template-rows: auto auto auto auto 1fr;
         column-gap: clamp(2rem, 5vw, 4rem);
         align-content: start;
     }
     .operator-header { grid-area: header; }
     .operator-section-devices { grid-area: devices; }
     .operator-section-create { grid-area: create; }
+    .operator-section-account { grid-area: account; }
     .operator-section-last { grid-area: links; }
-    /* The list runs beside both sections rather than after them, so the last
-       thing in the left column no longer needs to hold space under itself. */
-    .operator-section-create { margin-bottom: 0; }
+    /* The list runs beside the left column rather than after it, so the last
+       thing in that column no longer needs to hold space under itself. */
+    .operator-section-account { margin-bottom: 0; }
 }
 .operator-section-title {
     margin: 0 0 1rem;
@@ -4104,6 +4106,29 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     flex: 1 1 12em;
 }
 .operator-field-expiry { flex: 0 1 9em; }
+/* The password form opens under its toggle, one field to a line. (Sozvon) */
+.operator-password {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75em;
+    margin-top: 0.75em;
+}
+.operator-password.invisible { display: none; }
+.operator-password .operator-field { flex: none; }
+.operator-password .btn {
+    align-self: flex-start;
+    padding: 9px 16px;
+    font-size: var(--fs-md);
+    border-radius: var(--radius-sm);
+}
+.operator-password-message {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-md);
+}
+.operator-password-message:empty { display: none; }
+.operator-password-message.error { color: var(--danger); }
 .operator-field label {
     color: var(--text-2);
     font-size: var(--fs-sm);
@@ -4239,6 +4264,7 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     .operator-box { margin: 1.5rem auto; }
     .operator-field, .operator-field-expiry { flex: 1 1 100%; }
     .operator-create .btn { width: 100%; }
+    .operator-password .btn { align-self: stretch; }
 }
 
 /* --- Empty stage ----------------------------------------------------------
