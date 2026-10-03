@@ -485,18 +485,45 @@
                              autocomplete="username" readonly tabindex="-1" aria-hidden="true"/>
                       <div class="operator-field">
                         <label for="operator-password-current" data-i18n="operator.currentPassword">Current password</label>
-                        <input id="operator-password-current" type="password" class="form-control"
-                               autocomplete="current-password" required/>
+                        <div class="password-reveal">
+                          <input id="operator-password-current" type="password" class="form-control"
+                                 autocomplete="current-password" required/>
+                          <button type="button" class="password-reveal-btn"
+                                  aria-controls="operator-password-current" aria-pressed="false"
+                                  title="Show password" aria-label="Show password"
+                                  data-i18n-title="operator.showPassword"
+                                  data-i18n-aria="operator.showPassword">
+                            <i class="fas fa-eye" aria-hidden="true"></i>
+                          </button>
+                        </div>
                       </div>
                       <div class="operator-field">
                         <label for="operator-password-new" data-i18n="operator.newPassword">New password</label>
-                        <input id="operator-password-new" type="password" class="form-control"
-                               autocomplete="new-password" required/>
+                        <div class="password-reveal">
+                          <input id="operator-password-new" type="password" class="form-control"
+                                 autocomplete="new-password" required/>
+                          <button type="button" class="password-reveal-btn"
+                                  aria-controls="operator-password-new" aria-pressed="false"
+                                  title="Show password" aria-label="Show password"
+                                  data-i18n-title="operator.showPassword"
+                                  data-i18n-aria="operator.showPassword">
+                            <i class="fas fa-eye" aria-hidden="true"></i>
+                          </button>
+                        </div>
                       </div>
                       <div class="operator-field">
                         <label for="operator-password-again" data-i18n="operator.newPasswordAgain">Repeat the new password</label>
-                        <input id="operator-password-again" type="password" class="form-control"
-                               autocomplete="new-password" required/>
+                        <div class="password-reveal">
+                          <input id="operator-password-again" type="password" class="form-control"
+                                 autocomplete="new-password" required/>
+                          <button type="button" class="password-reveal-btn"
+                                  aria-controls="operator-password-again" aria-pressed="false"
+                                  title="Show password" aria-label="Show password"
+                                  data-i18n-title="operator.showPassword"
+                                  data-i18n-aria="operator.showPassword">
+                            <i class="fas fa-eye" aria-hidden="true"></i>
+                          </button>
+                        </div>
                       </div>
                       <p id="operator-password-message" class="operator-password-message" role="status"></p>
                       <button type="submit" id="operator-password-save" class="btn btn-blue"

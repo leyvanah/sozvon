@@ -4129,6 +4129,38 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
 }
 .operator-password-message:empty { display: none; }
 .operator-password-message.error { color: var(--danger); }
+/* An eye at the right end of a password field shows what is typed, so a
+   long generated password can be checked before it is saved.  (Sozvon) */
+.password-reveal {
+    position: relative;
+    display: block;
+}
+.password-reveal > .form-control {
+    width: 100%;
+    padding-right: 2.75em;
+}
+.password-reveal-btn {
+    position: absolute;
+    top: 50%;
+    right: 0.25em;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25em;
+    height: 2.25em;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    cursor: pointer;
+}
+.password-reveal-btn:hover { color: var(--text); }
+.password-reveal-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
 .operator-field label {
     color: var(--text-2);
     font-size: var(--fs-sm);
