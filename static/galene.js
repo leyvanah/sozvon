@@ -7096,6 +7096,80 @@ let operatorRoom = {
     knockToasts: {},
 };
 
+/**
+ * Offer the password change on the operator panel where the server may make
+ * it -- it rewrites the group file, which needs writableGroups -- and to a
+ * user it knows by name.  (Sozvon)
+ */
+function reflectOperatorAccount() {
+    let user = serverConnection && serverConnection.username;
+    let can = !!groupStatus.canChangePassword && !!user;
+    setVisibility('operator-account', can);
+    if(can)
+        getInputElement('operator-password-user').value = user;
+}
+
+/**
+ * Change the operator's own password from the panel's form.  (Sozvon)
+ */
+async function changeOperatorPassword() {
+    let P = /** @type {any} */ (window).SozvonPasswordChange;
+    let current = getInputElement('operator-password-current');
+    let next = getInputElement('operator-password-new');
+    let again = getInputElement('operator-password-again');
+    let message = document.getElementById('operator-password-message');
+    let save = /** @type {HTMLButtonElement} */
+        (document.getElementById('operator-password-save'));
+    function say(key, isError, params) {
+        message.textContent = Sozvon.i18n.t(key, params);
+        message.classList.toggle('error', isError);
+    }
+
+    let problem = P.check(current.value, next.value, again.value);
+    if(problem) {
+        say({
+            empty: 'operator.passwordEmpty',
+            mismatch: 'operator.passwordMismatch',
+            short: 'operator.passwordShort',
+            long: 'operator.passwordLong',
+            same: 'operator.passwordSame',
+        }[problem], true, {n: P.MIN_LENGTH});
+        return;
+    }
+
+    save.disabled = true;
+    let result;
+    try {
+        result = await P.change(window.fetch.bind(window), group,
+                                serverConnection.username,
+                                current.value, next.value);
+    } catch(e) {
+        console.error('Password change failed:', e);
+        result = 'error';
+    } finally {
+        save.disabled = false;
+    }
+    switch(result) {
+    case 'ok':
+        current.value = '';
+        next.value = '';
+        again.value = '';
+        say('operator.passwordChanged', false);
+        break;
+    case 'wrong':
+        current.value = '';
+        current.focus();
+        say('operator.passwordWrong', true);
+        break;
+    case 'banned':
+        say('operator.passwordBanned', true);
+        break;
+    default:
+        say('operator.passwordFailed', true);
+        break;
+    }
+}
+
 function enterOperatorRoom() {
     if(operatorRoom.active) {
         renderOperatorRoom();
@@ -7116,6 +7190,7 @@ function enterOperatorRoom() {
     // first is served at "/") and tabs are where you tell them apart — and
     // gotJoined already puts it there via setTitle. (Sozvon)
     setVisibility('operator-room', true);
+    reflectOperatorAccount();
     mintOperatorSession();
     renderOperatorRoom();
     pollOperatorRoom();
@@ -9488,6 +9563,20 @@ document.getElementById('disconnectbutton').onclick = function(e) {
     let logout = document.getElementById('operator-logout');
     if(logout)
         logout.onclick = operatorLogout;
+    let pwToggle = document.getElementById('operator-password-toggle');
+    let pwForm = document.getElementById('operator-password-form');
+    if(pwToggle && pwForm) {
+        pwToggle.onclick = function() {
+            let hidden = pwForm.classList.toggle('invisible');
+            pwToggle.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+            if(!hidden)
+                getInputElement('operator-password-current').focus();
+        };
+        pwForm.onsubmit = function(e) {
+            e.preventDefault();
+            changeOperatorPassword();
+        };
+    }
 }
 
 // Sozvon: the round "Leave" button in the bottom control dock reuses the exact
