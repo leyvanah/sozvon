@@ -115,8 +115,37 @@ async function join(browser, name, port) {
     return page;
 }
 
+// Chat sent during the freeze, unique to this run: the server keeps a
+// room's chat history for hours and hands it to everyone who joins, so a
+// fixed text would also count the copies left by earlier runs -- which is
+// how this test reported messages arriving three and four times
+// (sozvon-tasks#58) when each had arrived once.
+const RUN = Date.now().toString(36);
+const FROZEN = `from alice, frozen ${RUN}`;
+const MEANWHILE = `from bob, meanwhile ${RUN}`;
+
+/**
+ * Wait until the room is empty.  A participant left behind by an earlier
+ * test lingers until the server drops it, and its leaving mid-freeze turns
+ * simulcast off for the two left in the call: both re-publish, which needs
+ * the very signalling that is frozen, so alice's media goes and the server
+ * rightly drops her.
+ */
+async function emptyRoom(request) {
+    await expect.poll(async () => {
+        const groups = await (await request.get('/public-groups.json')).json();
+        const g = groups.find(g => g.name === ROOM);
+        return g ? g.clientCount : 0;
+    }, {timeout: 150_000, intervals: [2000],
+        message: `room "${ROOM}" never emptied`}).toBe(0);
+}
+
 /** Alice through the proxy, Bob direct, each seeing the other. */
 async function call(browser) {
+    const ctx = await browser.newContext({
+        baseURL: `http://localhost:${UPSTREAM}`});
+    await emptyRoom(ctx.request);
+    await ctx.close();
     const A = await join(browser, 'alice', PROXY_PORT);
     const B = await join(browser, 'bob', UPSTREAM);
     for (const p of [A, B])
@@ -168,8 +197,8 @@ test('a signalling stall with live media drops no one', async ({browser}) => {
 
         p.freeze();
         const t0 = Date.now();
-        await A.evaluate(() => serverConnection.chat('', '', 'from alice, frozen'));
-        await B.evaluate(() => serverConnection.chat('', '', 'from bob, meanwhile'));
+        await A.evaluate(m => serverConnection.chat('', '', m), FROZEN);
+        await B.evaluate(m => serverConnection.chat('', '', m), MEANWHILE);
         const trace = [];
         while (Date.now() - t0 < 60_000) {
             await new Promise(r => setTimeout(r, 3000));
@@ -202,13 +231,13 @@ test('a signalling stall with live media drops no one', async ({browser}) => {
 
         // what was said during the freeze arrives, once
         await expect.poll(async () => await B.locator('#box').textContent(),
-            {timeout: 10_000}).toContain('from alice, frozen');
+            {timeout: 10_000}).toContain(FROZEN);
         await expect.poll(async () => await A.locator('#box').textContent(),
-            {timeout: 10_000}).toContain('from bob, meanwhile');
+            {timeout: 10_000}).toContain(MEANWHILE);
         const count = async (P, s) => (await P.locator('#box').textContent())
             .split(s).length - 1;
-        expect(await count(B, 'from alice, frozen')).toBe(1);
-        expect(await count(A, 'from bob, meanwhile')).toBe(1);
+        expect(await count(B, FROZEN)).toBe(1);
+        expect(await count(A, MEANWHILE)).toBe(1);
 
         // and the call goes on
         await A.evaluate(() => serverConnection.chat('', '', 'after'));
