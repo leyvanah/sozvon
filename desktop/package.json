@@ -5,12 +5,14 @@
   "main": "src/main.js",
   "scripts": {
     "sync-installer": "node scripts/sync-installer.js",
-    "prestart": "npm run sync-installer",
+    "sync-onboarding": "node scripts/sync-onboarding.js",
+    "sync": "npm run sync-installer && npm run sync-onboarding",
+    "prestart": "npm run sync",
     "start": "electron .",
     "icon": "node scripts/build-icon.js",
-    "prepackage": "npm run sync-installer",
+    "prepackage": "npm run sync",
     "package": "electron-builder --dir",
-    "predist": "npm run sync-installer",
+    "predist": "npm run sync",
     "dist": "electron-builder"
   },
   "author": "imaprocessus",

@@ -52,6 +52,12 @@ class DeployActivity : AppCompatActivity() {
         const val EXTRA_SERVER_URL = "org.sozvon.app.DEPLOY_SERVER_URL"
         /** Result: Sozvon is no longer installed at this address. */
         const val EXTRA_REMOVED_URL = "org.sozvon.app.REMOVED_URL"
+        /** Opened from the first-run onboarding, which shows the result on
+         *  its own last screen -- with a first guest link -- instead of ours. */
+        const val EXTRA_ONBOARDING = "org.sozvon.app.DEPLOY_ONBOARDING"
+        /** Result, for the onboarding: what the installer reported, as JSON.
+         *  Carries the operator password; in memory only, never stored. */
+        const val EXTRA_RESULT_JSON = "org.sozvon.app.DEPLOY_RESULT_JSON"
 
         /** A server that does not exist yet. */
         const val MODE_INSTALL = "install"
@@ -724,6 +730,11 @@ class DeployActivity : AppCompatActivity() {
             if (origin.isNotEmpty()) {
                 ServerStore.rememberDeploy(this, origin, host, d)
             }
+        }
+        if (mode == MODE_INSTALL && intent.getBooleanExtra(EXTRA_ONBOARDING, false)) {
+            setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT_JSON, res.toString()))
+            finish()
+            return
         }
         show(viewDone)
     }

@@ -67,6 +67,19 @@ if (ourOwnPage) contextBridge.exposeInMainWorld('sozvon', {
     ipcRenderer.on('deploy:hostkey', (_e, info) => fn(info));
   },
   answerHostKey: (accepted) => ipcRenderer.send('deploy:hostkey-answer', accepted),
+
+  // The first-run onboarding (renderer/onboarding/, copied from the
+  // repository's onboarding/).  The deploy wizard, opened from it, hands its
+  // result back here instead of showing its own last screen.
+  openOnboarding: () => ipcRenderer.invoke('onboarding:open'),
+  onboardingDeployed: (result) => ipcRenderer.invoke('onboarding:deployed', result),
+  onboardingDeployCancelled: () => ipcRenderer.invoke('onboarding:deploy-cancelled'),
+});
+
+// The onboarding's half of the bridge, in the shape its host.js expects:
+// one call(method, args) that resolves with the app's answer.
+if (ourOwnPage) contextBridge.exposeInMainWorld('sozvonOnboarding', {
+  call: (method, args) => ipcRenderer.invoke('onboarding:call', { method, args }),
 });
 
 // The same bridge the Android app exposes (window.SozvonApp): the web client

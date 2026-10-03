@@ -9,6 +9,7 @@
     <string name="error_load">Could not reach the server</string>
     <string name="change_server">Change server</string>
     <string name="reset_login">Reset login data</string>
+    <string name="onboarding_again">Take the introduction again</string>
     <string name="reset_login_done">Login data cleared</string>
 
     <!-- Saved servers on the address screen -->

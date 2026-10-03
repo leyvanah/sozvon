@@ -173,6 +173,8 @@
 
   document.getElementById('deploy-link')
     .addEventListener('click', () => window.sozvon.openDeploy());
+  document.getElementById('onboarding-link')
+    .addEventListener('click', () => window.sozvon.openOnboarding());
 
   $join.addEventListener('click', join);
   $group.addEventListener('keydown', e => { if (e.key === 'Enter') join(); });

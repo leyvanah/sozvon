@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, session, ipcMain, Menu, shell, nativeImage, nativeTheme } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, ipcMain, Menu, shell, nativeImage, nativeTheme, clipboard, systemPreferences } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
@@ -33,6 +33,10 @@ const DEFAULT_CONFIG = {
   // Whether the "it is still running down here" balloon has been shown.  It
   // is an explanation, and an explanation repeated is a nag.
   trayHintShown: false,
+  // Whether the first-run onboarding has been finished or skipped.  Written
+  // by this process only (it is not in SETTABLE_CONFIG): a page that could
+  // clear it could put the onboarding back in front of somebody at will.
+  onboardingDone: false,
   // Every server this client has been to: {url, name, hub, lastGroup, rooms[]}.
   // serverUrl/lastGroup/recentGroups are kept in step with the most recent
   // one, so a config written by an older build still opens, and one written
@@ -823,7 +827,7 @@ function createWindow() {
     showLauncher(description || `Ошибка загрузки (${code})`);
   });
 
-  showLauncher();
+  showStart();
 
   // Debug aid: SOZVON_SHOT=<dir> saves what each layer is actually painting, a
   // couple of seconds in.  There is no other way to look at the two layers
@@ -866,6 +870,39 @@ function showLauncher(error) {
   if (!contentView) return;
   const file = path.join(__dirname, 'renderer', 'launcher.html');
   contentView.webContents.loadFile(file, error ? { query: { error: String(error) } } : undefined);
+}
+
+/**
+ * The first page of a launch: the onboarding for somebody who has never
+ * connected anywhere, the launcher for everybody else.  An existing user
+ * upgrading the app has saved servers, and so never sees it.
+ */
+function showStart() {
+  if (!config.onboardingDone && !(config.servers || []).some(s => s && s.url))
+    showOnboarding();
+  else
+    showLauncher();
+}
+
+/**
+ * The onboarding page, copied from the repository's onboarding/ by
+ * scripts/sync-onboarding.js.  What it cannot know for itself goes in the
+ * query: the language, and whether it is coming back from the deploy wizard.
+ * The theme needs no passing -- prefers-color-scheme follows nativeTheme,
+ * which already carries the user's choice.
+ */
+function showOnboarding(resume) {
+  if (!contentView) return;
+  const file = path.join(__dirname, 'renderer', 'onboarding', 'index.html');
+  if (!fs.existsSync(file)) {
+    // A checkout run without npm start, which is what generates the copy.
+    console.error('onboarding missing; run npm run sync-onboarding');
+    showLauncher();
+    return;
+  }
+  const query = { lang: app.getLocale() };
+  if (resume) query.resume = resume;
+  contentView.webContents.loadFile(file, { query });
 }
 
 /** Drop the saved web login (a token in the page's own storage) and reload. */
@@ -1346,5 +1383,178 @@ handleOurs('deploy:start', async (_e, opts) => {
     };
   } finally {
     d.disconnect();
+  }
+});
+
+// ------------------------------------------------------------ onboarding ---
+
+// What the deploy wizard handed back while the onboarding was not on screen:
+// the wizard takes its place, and the answer waits here for the next load.
+// Memory only -- it carries the operator password -- and taken exactly once.
+let pendingDeploy = null;
+
+handleOurs('onboarding:open', () => showOnboarding());
+
+handleOurs('onboarding:deployed', (_e, result) => {
+  pendingDeploy = { result };
+  showOnboarding('deploy');
+});
+
+handleOurs('onboarding:deploy-cancelled', () => {
+  pendingDeploy = { cancelled: true };
+  showOnboarding('deploy');
+});
+
+/**
+ * Whether there is a Sozvon server at an origin.  Asked through the content
+ * view's own session, so the answer goes through the same certificate check
+ * the server's page would meet, pins included -- a certificate that fails
+ * here would fail there too, only with less said about why.
+ */
+async function checkServer(url) {
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return { status: 'unreachable' };
+  }
+  const ses = contentView.webContents.session;
+  const get = async (p) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 8000);
+    try {
+      return await ses.fetch(origin + p, { signal: ctl.signal, cache: 'no-store', redirect: 'manual' });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    const r = await get('/healthz');
+    if (r.ok && (await r.text()).trim() === 'ok') return { status: 'ok' };
+    // No /healthz: an upstream Galène, or something else entirely.  Worth
+    // saying, but not worth refusing -- it may well still work.
+    const front = await get('/');
+    return { status: front.ok ? 'other' : 'unreachable' };
+  } catch (e) {
+    if (/CERT|SSL/i.test(String(e && (e.message || e)))) {
+      const host = new URL(origin).hostname;
+      return { status: (config.pinnedCerts || {})[host] ? 'cert-changed' : 'cert' };
+    }
+    return { status: 'unreachable' };
+  }
+}
+
+/**
+ * Camera and microphone as Windows sees them.  There is no permission dialog
+ * on Windows for the onboarding to prepare anybody for; the one thing worth a
+ * screen is the privacy setting having switched them off for desktop apps.
+ */
+function mediaState() {
+  if (process.platform !== 'win32' || !systemPreferences.getMediaAccessStatus)
+    return { state: 'n/a' };
+  const camera = systemPreferences.getMediaAccessStatus('camera');
+  const mic = systemPreferences.getMediaAccessStatus('microphone');
+  if (camera === 'denied' || mic === 'denied') return { state: 'blocked', camera, mic };
+  return { state: 'n/a', camera, mic };
+}
+
+/**
+ * Make the first guest link on a server the onboarding just installed.  The
+ * server takes a websocket only from a page of its own, so the minter runs in
+ * a hidden window opened at the server's /healthz -- through the content
+ * view's session, so its certificate pins apply.  See onboarding/minter.js.
+ */
+async function mintLink(a) {
+  const minter = path.join(__dirname, 'renderer', 'onboarding', 'minter.js');
+  let win = null;
+  try {
+    const origin = new URL(a.origin).origin;
+    win = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        session: contentView.webContents.session,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    await win.loadURL(origin + '/healthz');
+    const params = {
+      group: String(a.group || ''),
+      username: String(a.username || ''),
+      password: String(a.password || ''),
+      slug: String(a.slug || ''),
+    };
+    const src = fs.readFileSync(minter, 'utf8') +
+      '\n;sozvonMint(' + JSON.stringify(params) + ');';
+    const r = await win.webContents.executeJavaScript(src, true);
+    return r && typeof r === 'object' ? r : { ok: false, error: 'no answer' };
+  } catch (e) {
+    return { ok: false, error: String(e && (e.message || e)) };
+  } finally {
+    if (win && !win.isDestroyed()) win.destroy();
+  }
+}
+
+const ONBOARDING_PRIVACY = {
+  camera: 'ms-settings:privacy-webcam',
+  mic: 'ms-settings:privacy-microphone',
+};
+
+handleOurs('onboarding:call', async (_e, { method, args } = {}) => {
+  const a = args || {};
+  switch (method) {
+    case 'checkServer':
+      return checkServer(String(a.url || ''));
+    case 'media':
+      return mediaState();
+    case 'openSettings':
+      await shell.openExternal(ONBOARDING_PRIVACY[a.which] || ONBOARDING_PRIVACY.camera);
+      return { ok: true };
+    case 'paste':
+      return { text: clipboard.readText() };
+    case 'copy':
+    case 'share':
+      // No share sheet worth the name on Windows: sharing is copying.
+      clipboard.writeText(String(a.text || ''));
+      return { ok: true };
+    case 'deploy':
+      // The wizard takes this page's place; its answer comes back through
+      // onboarding:deployed / onboarding:deploy-cancelled.
+      contentView.webContents.loadFile(path.join(__dirname, 'renderer', 'deploy.html'),
+        { query: { onboarding: '1' } });
+      return { pending: true };
+    case 'takeDeployResult': {
+      const r = pendingDeploy || { cancelled: true };
+      pendingDeploy = null;
+      return r;
+    }
+    case 'mint':
+      return mintLink(a);
+    case 'finish': {
+      // Where the person meant to go.  The server joins the list the same
+      // way the launcher would have put it there.
+      let origin;
+      let url;
+      try {
+        origin = new URL(a.origin).origin;
+        url = new URL(a.url);
+      } catch {
+        return { error: 'bad address' };
+      }
+      if (url.protocol !== 'https:' || url.origin !== origin) return { error: 'bad address' };
+      config.onboardingDone = true;
+      rememberServer(origin, String(a.room || ''));
+      saveConfig(config);
+      contentView.webContents.loadURL(url.href);
+      return { ok: true };
+    }
+    case 'skip':
+      config.onboardingDone = true;
+      saveConfig(config);
+      showLauncher();
+      return { ok: true };
+    default:
+      return { error: 'unknown method ' + method };
   }
 });
