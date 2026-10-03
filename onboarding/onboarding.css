@@ -29,6 +29,7 @@
   --danger: #E06A6A;
   --warn: #D6B85A;
   --ok: #6BBE8A;
+  --mark-filter: invert(1);
   --radius: 10px;
   --radius-lg: 14px;
   --font: "Inter", "Segoe UI Variable Text", "Segoe UI", Roboto, -apple-system, sans-serif;
@@ -53,6 +54,7 @@
   --danger: #B5524F;
   --warn: #8A6D1F;
   --ok: #2E7D50;
+  --mark-filter: none;
 }
 
 @media (prefers-color-scheme: light) {
@@ -73,6 +75,7 @@
     --danger: #B5524F;
     --warn: #8A6D1F;
     --ok: #2E7D50;
+    --mark-filter: none;
   }
 }
 
@@ -249,12 +252,13 @@ h1 {
   place-items: center;
   position: relative;
 }
+/* An image rather than a CSS mask: a mask is fetched in CORS mode, which a
+   page shown from file:///android_asset is not allowed to do.  The drawing is
+   black, so the dark theme turns it white. */
 .mark {
   width: 46px;
   height: 124px;
-  background: currentColor;
-  -webkit-mask: url("mark.svg") center / contain no-repeat;
-  mask: url("mark.svg") center / contain no-repeat;
+  filter: var(--mark-filter);
   position: relative;
   z-index: 1;
 }
@@ -322,7 +326,7 @@ h1 {
 }
 .option .glyph svg { width: 22px; height: 22px; }
 .option b { display: block; font-size: 15px; font-weight: 500; }
-.option span { display: block; font-size: 13px; color: var(--text-3); line-height: 1.4; margin-top: 2px; }
+.option .desc { display: block; font-size: 13px; color: var(--text-3); line-height: 1.4; margin-top: 2px; }
 .option .chev { width: 18px; height: 18px; color: var(--text-3); }
 
 /* ----------------------------------------------------------- fields --- */

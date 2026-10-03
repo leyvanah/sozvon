@@ -378,7 +378,7 @@
           h('div', { class: 'hero' },
             h('span', { class: 'ring', 'aria-hidden': 'true' }),
             h('span', { class: 'ring', 'aria-hidden': 'true' }),
-            h('span', { class: 'mark', role: 'img', 'aria-label': 'SOZVON' })),
+            h('img', { class: 'mark', src: 'mark.svg', alt: 'SOZVON' })),
           h('p', { class: 'wordmark', 'aria-hidden': 'true' }, 'Sozvon'),
           heading(t('welcome.title')),
           h('p', { class: 'lead' }, t('welcome.text')),
@@ -399,7 +399,7 @@
         },
       },
       h('span', { class: 'glyph' }, icon(glyph)),
-      h('span', null, h('b', null, t(`choose.${path}.title`)), h('span', null, t(`choose.${path}.text`))),
+      h('span', null, h('b', null, t(`choose.${path}.title`)), h('span', { class: 'desc' }, t(`choose.${path}.text`))),
       h('span', { class: 'chev' }, icon('chevron')));
 
       return {
@@ -489,7 +489,7 @@
         },
       },
       h('span', { class: 'glyph' }, icon(glyph)),
-      h('span', null, h('b', null, t(`role.${role}.title`)), h('span', null, t(`role.${role}.text`))),
+      h('span', null, h('b', null, t(`role.${role}.title`)), h('span', { class: 'desc' }, t(`role.${role}.text`))),
       h('span', { class: 'chev' }, icon('chevron')));
 
       return {
