@@ -1,0 +1,12 @@
+{
+  "name": "sozvon-browser-tests",
+  "private": true,
+  "description": "Browser tests: two real clients, a real server built from this tree.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  },
+  "type": "module"
+}
