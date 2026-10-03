@@ -530,6 +530,9 @@ h1 {
 .secondary:hover { color: var(--text); background: var(--hover); }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The heading takes focus only so a screen reader announces the step; it is
+   not a control, and a ring around it reads as one. */
+h1:focus, h1:focus-visible { outline: none; }
 
 .sr-only {
   position: absolute;

@@ -58,6 +58,8 @@ test('a bare host is taken as https', () => {
   const r = Flow.parseInvite('meet.example.com');
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.url, 'https://meet.example.com/');
+  assert.strictEqual(Flow.parseServer('localhost:8443').origin, 'https://localhost:8443');
+  assert.strictEqual(Flow.parseServer('203.0.113.7').origin, 'https://203.0.113.7');
 });
 
 test('what is not an https address is turned away with a reason', () => {

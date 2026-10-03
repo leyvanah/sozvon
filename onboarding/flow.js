@@ -29,10 +29,11 @@
     const s = String(text || '');
     const m = s.match(/https?:\/\/[^\s<>"'«»]+/i);
     if (m) return m[0].replace(/[.,;:!?)\]]+$/, '');
-    // A bare host ("meet.example.com", "meet.example.com/group/x/"): no
-    // scheme, but a dot in the first segment and nothing else on the line.
+    // A bare host ("meet.example.com", "203.0.113.7:8443/group/x/"): no
+    // scheme, but a dot in the host (or localhost) and nothing else on the
+    // line.  A VPS owner is as likely to type the IP as a name.
     const t = s.trim();
-    if (/^[a-z0-9.-]+\.[a-z0-9-]{2,}(:\d+)?(\/\S*)?$/i.test(t))
+    if (/^(localhost|[a-z0-9-]+(\.[a-z0-9-]+)+)(:\d+)?(\/\S*)?$/i.test(t))
       return 'https://' + t;
     return null;
   }
