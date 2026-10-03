@@ -7110,6 +7110,49 @@ function reflectOperatorAccount() {
 }
 
 /**
+ * Show or hide what is typed in a password field, from the eye button next
+ * to it -- the only way to check a long generated password before saving
+ * it.  (Sozvon)
+ *
+ * @param {HTMLButtonElement} button
+ * @param {boolean} show
+ */
+function setPasswordShown(button, show) {
+    let input = document.getElementById(button.getAttribute('aria-controls'));
+    if(!(input instanceof HTMLInputElement))
+        return;
+    input.type = show ? 'text' : 'password';
+    button.setAttribute('aria-pressed', show ? 'true' : 'false');
+    let key = show ? 'operator.hidePassword' : 'operator.showPassword';
+    // the data attributes too, or a change of language puts the old text back
+    button.setAttribute('data-i18n-title', key);
+    button.setAttribute('data-i18n-aria', key);
+    button.title = Sozvon.i18n.t(key);
+    button.setAttribute('aria-label', button.title);
+    let icon = button.querySelector('i');
+    if(icon) {
+        icon.classList.toggle('fa-eye', !show);
+        icon.classList.toggle('fa-eye-slash', show);
+    }
+}
+
+/** Hide every password shown in the form again. */
+function hideOperatorPasswords() {
+    document.querySelectorAll('#operator-password-form .password-reveal-btn')
+        .forEach(b => setPasswordShown(/** @type {HTMLButtonElement} */ (b), false));
+}
+
+document.addEventListener('click', function(e) {
+    let target = /** @type {Element} */ (e.target);
+    let button = target && target.closest &&
+        target.closest('.password-reveal-btn');
+    if(!(button instanceof HTMLButtonElement))
+        return;
+    e.preventDefault();
+    setPasswordShown(button, button.getAttribute('aria-pressed') !== 'true');
+});
+
+/**
  * Change the operator's own password from the panel's form.  (Sozvon)
  */
 async function changeOperatorPassword() {
@@ -7154,6 +7197,7 @@ async function changeOperatorPassword() {
         current.value = '';
         next.value = '';
         again.value = '';
+        hideOperatorPasswords();
         say('operator.passwordChanged', false);
         break;
     case 'wrong':
@@ -9569,6 +9613,8 @@ document.getElementById('disconnectbutton').onclick = function(e) {
         pwToggle.onclick = function() {
             let hidden = pwForm.classList.toggle('invisible');
             pwToggle.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+            if(hidden)
+                hideOperatorPasswords();
             if(!hidden)
                 getInputElement('operator-password-current').focus();
         };
