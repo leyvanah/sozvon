@@ -1,0 +1,8 @@
+{
+  "displayName": "Lobby, two seats",
+  "description": "Local browser test for a knock at a full room (sozvon-tasks#2).",
+  "lobby": true,
+  "max-clients": 2,
+  "users": { "op": { "password": "op", "permissions": "op" } },
+  "wildcard-user": { "password": { "type": "wildcard" }, "permissions": "present" }
+}
