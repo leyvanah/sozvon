@@ -56,6 +56,14 @@ let reconnectTimer = null;
 /** The join parameters of the dropped connection, replayed to rejoin. */
 let reconnectLastJoin = null;
 /**
+ * The name the server gave us on that join, for the "join as" card: a join
+ * with an operator's token sends no name of its own, so the join parameters
+ * alone would offer to "join as" nobody.  (Sozvon)
+ *
+ * @type {string|null}
+ */
+let reconnectName = null;
+/**
  * What we were sending when the connection dropped, so that the rejoin can
  * send it again without the user having to find the buttons.  The camera
  * entry says which of its tracks were live; a screen share cannot be restarted
@@ -96,6 +104,15 @@ let storingRememberToken = null;
 
 /** True while the current join is an auto-login from a stored remember-token. */
 let usingRememberToken = false;
+
+/**
+ * The link this page was opened with -- its token, and the client's name
+ * after '#' -- set aside because an operator's own token covers the room;
+ * tried if that one is refused.  (Sozvon)
+ *
+ * @type {{token: string, name: string}|null}
+ */
+let linkTokenFallback = null;
 
 /**
  * Set while a maketoken request is in flight to mint the operator's session
@@ -594,7 +611,8 @@ function reflectRejoinOption() {
     if(show) {
         let elt = document.getElementById('rejoin-username');
         if(elt)
-            elt.textContent = ownRealName || hidePseudonym(reconnectLastJoin.username);
+            elt.textContent = ownRealName || reconnectName ||
+                hidePseudonym(reconnectLastJoin.username);
     }
 }
 
@@ -947,7 +965,12 @@ async function reconnectNow() {
         stopReconnect();
         return;
     }
-    if(reconnectAttempt > RECONNECT_MAX_ATTEMPTS) {
+    // The operator room never gives up: it sends no media, so trying again
+    // every half minute costs nothing, and it is the page an operator keeps
+    // open for days -- across a laptop's sleep, which outlasts any number of
+    // attempts and used to leave it on the login card until a reload.
+    // (Sozvon)
+    if(reconnectAttempt > RECONNECT_MAX_ATTEMPTS && !groupStatus.operatorRoom) {
         wantConnected = false;
         stopReconnect();
         setConnected(false);
@@ -964,6 +987,30 @@ async function reconnectNow() {
         scheduleReconnect();
     }
 }
+
+/**
+ * Make the pending reconnect attempt now, with the backoff reset: the network
+ * is back, or the user is looking at the page again -- typically both, right
+ * after a laptop wakes, when the next attempt may still be half a minute
+ * away (and timers in a background tab run later still).  An attempt already
+ * in flight has no pending timer and is left alone.  (Sozvon)
+ */
+function reconnectSoon() {
+    if(!reconnecting || !reconnectTimer)
+        return;
+    if(typeof navigator !== 'undefined' && navigator.onLine === false)
+        return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    reconnectAttempt = 0;
+    reconnectNow();
+}
+
+window.addEventListener('online', reconnectSoon);
+document.addEventListener('visibilitychange', function() {
+    if(document.visibilityState === 'visible')
+        reconnectSoon();
+});
 
 /** Rejoin the group after a reconnect, using the saved credentials. (Sozvon) */
 async function rejoinAfterReconnect() {
@@ -6305,6 +6352,18 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         // refused there too (the room filled up meanwhile); do not leave it
         // saying "you have been let in". (Sozvon)
         setVisibility('lobby-waiting', false);
+        if(linkTokenFallback && !full) {
+            // The operator's own token was refused here: open the link the
+            // way it was meant to be opened, on the same socket.  A remembered
+            // token is kept -- it may still be good at the hub. (Sozvon)
+            token = linkTokenFallback.token;
+            getInputElement('username').value = linkTokenFallback.name;
+            linkTokenFallback = null;
+            usingRememberToken = false;
+            probingState = null;
+            join();
+            return;
+        }
         if(probingState === 'probing' && error === 'need-username') {
             probingState = 'need-username';
             setVisibility('passwordform', false);
@@ -6422,11 +6481,13 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         if(serverConnection.e2ee)
             serverConnection.e2ee.setRequire(groupStatus.requireE2ee);
         usingRememberToken = false;
+        linkTokenFallback = null;
         // Sozvon: we are connected and in the group.  Remember the intent to stay
         // connected and the join parameters so an unexpected drop reconnects,
         // and clear any reconnect cycle that has just succeeded.
         wantConnected = true;
         reconnectLastJoin = serverConnection.lastJoin || reconnectLastJoin;
+        reconnectName = hidePseudonym(serverConnection.username) || null;
         let wasReconnecting = reconnecting;
         if(reconnecting)
             displayMessage(Sozvon.i18n.t('toast.reconnected'));
@@ -7108,6 +7169,7 @@ function operatorLogout() {
         revokeToken(remembered.token);
     clearRememberToken(rememberKey || group);
     reconnectLastJoin = null;
+    reconnectName = null;
     usingRememberToken = false;
     token = null;
     wantConnected = false;
@@ -10258,6 +10320,16 @@ async function start() {
         try {
             window.sessionStorage.setItem('sozvon.pendingToken:' + group, token);
         } catch(e) { /* ignore */ }
+        // An operator signed in on this device who opens a client's link --
+        // to check it, or to wait for the client there -- is still the
+        // operator: come in with the operator's own token, which covers the
+        // hub's rooms, rather than be asked for a name as the client would.
+        // The link stays as a fallback for an operator token the server no
+        // longer takes (see gotJoined 'fail'). (Sozvon)
+        if(loadOperatorSession(group) || loadRememberToken(group)) {
+            linkTokenFallback = {token: token, name: hashName || ''};
+            token = null;
+        }
     }
 
     // An operator's session token (covers this hub and its child rooms)
@@ -10284,7 +10356,9 @@ async function start() {
         }
     }
 
-    if(hashName) {
+    // The client's name is for the client: an operator opening the link
+    // comes in under their own.
+    if(hashName && !linkTokenFallback) {
         let uElt = document.getElementById('username');
         if(uElt instanceof HTMLInputElement)
             uElt.value = hashName;
