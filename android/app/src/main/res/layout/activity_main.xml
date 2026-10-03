@@ -109,6 +109,20 @@
                 android:textColor="@color/sozvon_accent"
                 android:textSize="14sp"/>
 
+            <!-- The first-run onboarding, again, for whoever skipped it or
+                 wants the VPS guide. -->
+            <TextView
+                android:id="@+id/onboarding_again"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="?attr/selectableItemBackground"
+                android:gravity="center"
+                android:padding="8dp"
+                android:text="@string/onboarding_again"
+                android:textColor="@color/sozvon_text2"
+                android:textSize="14sp"/>
+
             <!-- Doubles the server screen as app settings: clears the saved
                  web login (the remember-me token) for this device. -->
             <TextView

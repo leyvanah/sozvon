@@ -7,6 +7,7 @@
     <string name="error_load">Не удалось подключиться к серверу</string>
     <string name="change_server">Сменить сервер</string>
     <string name="reset_login">Сбросить данные входа</string>
+    <string name="onboarding_again">Пройти знакомство с приложением снова</string>
     <string name="reset_login_done">Данные входа очищены</string>
 
     <!-- Сохранённые серверы на экране адреса -->

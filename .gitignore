@@ -64,6 +64,10 @@ CLAUDE.md
 # android/app/build.gradle.kts); a tracked copy would drift.
 /android/app/src/main/assets/install.sh
 
+# Generated before each Android build from onboarding/ (see
+# android/app/build.gradle.kts, task syncOnboarding); shared with the desktop.
+/android/app/src/main/assets/onboarding/
+
 # Server release fetched before each Android build (see
 # android/app/build.gradle.kts, task fetchServerRelease); 17 MB of binaries
 # per release do not belong in the history.

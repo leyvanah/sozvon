@@ -88,6 +88,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Back from the first-run onboarding (see OnboardingActivity). */
+    private val onboardingLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        when (result.resultCode) {
+            RESULT_OK -> {
+                val url = result.data?.getStringExtra(OnboardingActivity.EXTRA_OPEN_URL)
+                if (url.isNullOrBlank()) {
+                    showEntry()
+                } else {
+                    ServerStore.remember(this, url, Uri.parse(url).host.orEmpty())
+                    urlEdit.setText(url)
+                    openServer(url)
+                }
+            }
+            OnboardingActivity.RESULT_SKIPPED -> showEntry()
+            // Back on the onboarding's first screen: leave, as Back would
+            // have from any first screen.  It greets them again next time.
+            else -> if (ServerStore.list(this).isEmpty()) finish() else showEntry()
+        }
+    }
+
     private lateinit var webView: WebView
     private lateinit var entry: View
     private lateinit var urlEdit: EditText
@@ -154,6 +176,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.deploy_cta).setOnClickListener {
             deployLauncher.launch(Intent(this, DeployActivity::class.java))
         }
+        findViewById<TextView>(R.id.onboarding_again).setOnClickListener {
+            onboardingLauncher.launch(Intent(this, OnboardingActivity::class.java))
+        }
         findViewById<TextView>(R.id.reset_login).setOnClickListener {
             resetLoginData(false)
             Toast.makeText(this, R.string.reset_login_done, Toast.LENGTH_SHORT)
@@ -203,10 +228,16 @@ class MainActivity : AppCompatActivity() {
 
         if (!handleDeepLink(intent)) {
             val saved = ServerStore.mostRecent(this)?.url
-            if (saved != null &&
-                !intent.getBooleanExtra(EXTRA_CHANGE_SERVER, false)
-            ) {
+            val changeServer = intent.getBooleanExtra(EXTRA_CHANGE_SERVER, false)
+            if (saved != null && !changeServer) {
                 openServer(saved)
+            } else if (!changeServer && savedInstanceState == null &&
+                OnboardingActivity.shouldShow(this)
+            ) {
+                // Somebody who has never connected anywhere: the onboarding
+                // rather than a bare address field.
+                showEntry()
+                onboardingLauncher.launch(Intent(this, OnboardingActivity::class.java))
             } else {
                 urlEdit.setText(saved ?: "")
                 showEntry()
