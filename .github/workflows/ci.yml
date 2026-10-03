@@ -133,7 +133,8 @@ jobs:
                    src/tray.js src/knocks.js src/knock-preload.js \
                    src/renderer/launcher.js src/renderer/deploy.js \
                    src/renderer/knock.js \
-                   scripts/test-deploy.js scripts/sync-installer.js; do
+                   scripts/test-deploy.js scripts/sync-installer.js \
+                   scripts/sync-onboarding.js; do
               node --check "$f"
           done
       # Which page the app answers, and how far it lets one go.  Electron is

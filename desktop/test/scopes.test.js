@@ -260,6 +260,8 @@ const OURS_ONLY = [
   'config:get', 'config:set', 'group:open', 'servers:remove',
   'servers:rename', 'deploy:open', 'deploy:start',
   'bar:open-hub', 'bar:reload', 'bar:state',
+  'onboarding:open', 'onboarding:deployed', 'onboarding:deploy-cancelled',
+  'onboarding:call',
 ];
 
 test('the app\'s own channels are refused to a server page', async () => {
@@ -527,4 +529,65 @@ test('the window the app builds does not follow a page anywhere', () => {
   // held to the same rule.
   const redirected = wired.events.get('will-redirect');
   assert.ok(redirected && redirected.length, 'redirects are not checked');
+});
+
+// ---- the first-run onboarding ----------------------------------------------
+
+const OUR_ONBOARDING = pathToFileURL(
+  path.join(rendererDir, 'onboarding', 'index.html')).href;
+
+test('the onboarding is one of our pages, and a server page is not given its bridge', () => {
+  const ours = runPreload(OUR_ONBOARDING);
+  assert.strictEqual(typeof ours.sozvonOnboarding, 'object');
+  assert.strictEqual(typeof ours.sozvonOnboarding.call, 'function');
+  assert.strictEqual(runPreload(A_SERVER_PAGE).sozvonOnboarding, undefined,
+    'a server page was handed the onboarding bridge');
+});
+
+test('the onboarding greets only somebody who has never connected anywhere', () => {
+  const app = loadMain();
+  app.read(`var started = []; showOnboarding = () => started.push('onboarding');
+            showLauncher = () => started.push('launcher');`);
+  app.read('showStart()');
+  app.read('config.servers = []; showStart()');
+  app.read('config.onboardingDone = true; showStart()');
+  assert.deepStrictEqual([...app.read('started')], ['launcher', 'onboarding', 'launcher']);
+});
+
+test('a page cannot clear the onboarding flag', async () => {
+  const app = loadMain();
+  app.read('config.onboardingDone = true');
+  await app.invokes.get('config:set')(from(OUR_LAUNCHER), {onboardingDone: false});
+  assert.strictEqual(app.read('config.onboardingDone'), true);
+});
+
+test('finishing the onboarding opens only an https address on the server it names', async () => {
+  const app = loadMain();
+  const wired = app.buildWindow();
+  const call = (args) => app.invokes.get('onboarding:call')(from(OUR_ONBOARDING),
+    {method: 'finish', args});
+
+  let r = await call({url: 'http://new.example/group/a/', origin: 'http://new.example', room: 'a'});
+  assert.ok(r.error, 'an http address was opened');
+  r = await call({url: 'https://elsewhere.example/', origin: 'https://new.example', room: ''});
+  assert.ok(r.error, 'an address on another server was opened');
+  assert.strictEqual(app.read('config.onboardingDone'), false);
+
+  r = await call({url: 'https://new.example/k7m2/?token=x', origin: 'https://new.example', room: ''});
+  assert.deepStrictEqual({...r}, {ok: true});
+  assert.strictEqual(app.read('config.onboardingDone'), true);
+  assert.strictEqual(app.read('config.servers[0].url'), 'https://new.example');
+  assert.strictEqual(wired.loaded[wired.loaded.length - 1], 'https://new.example/k7m2/?token=x');
+  assert.ok(app.written.some(w => JSON.parse(w.data).onboardingDone === true),
+    'the flag was not saved');
+});
+
+test('the deploy result waits for the onboarding and is handed over once', async () => {
+  const app = loadMain();
+  app.buildWindow();
+  const call = (method) => app.invokes.get('onboarding:call')(from(OUR_ONBOARDING), {method});
+  await app.invokes.get('onboarding:deployed')(from(OUR_DEPLOY), {admin_password: 'pw'});
+  assert.strictEqual((await call('takeDeployResult')).result.admin_password, 'pw');
+  assert.strictEqual((await call('takeDeployResult')).cancelled, true,
+    'the password was kept after it was taken');
 });
