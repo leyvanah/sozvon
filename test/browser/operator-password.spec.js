@@ -62,6 +62,23 @@ test('an operator changes their own password from the panel',
     test.skip(!(await page.evaluate(() => !!groupStatus.canChangePassword)),
               'writableGroups is off on this server');
 
+    // The eye shows what is typed, and hides it again.
+    await page.click('#operator-password-toggle');
+    const field = page.locator('#operator-password-new');
+    const eye = page.locator('[aria-controls="operator-password-new"]');
+    await field.fill('видно-ли-это');
+    await expect(field).toHaveAttribute('type', 'password');
+    await eye.click();
+    await expect(field).toHaveAttribute('type', 'text');
+    await expect(eye).toHaveAttribute('aria-pressed', 'true');
+    await expect(eye).toHaveAttribute('title', 'Скрыть пароль');
+    await expect(field).toHaveValue('видно-ли-это');
+    await eye.click();
+    await expect(field).toHaveAttribute('type', 'password');
+    await expect(eye).toHaveAttribute('title', 'Показать пароль');
+    // shown again for the real change below, to check it is hidden after
+    await eye.click();
+
     // Checked before anything is sent.
     await change(page, FIRST, 'короткий'.slice(0, 5));
     await expect(message(page)).toHaveText(/не короче 8 символов/);
@@ -77,6 +94,10 @@ test('an operator changes their own password from the panel',
     await change(page, FIRST, SECOND);
     await expect(message(page)).toHaveText(/Пароль изменён/);
     await expect(page.locator('#operator-password-current')).toHaveValue('');
+    // nothing is left on show once it is saved
+    for (const id of ['current', 'new', 'again'])
+        await expect(page.locator(`#operator-password-${id}`))
+            .toHaveAttribute('type', 'password');
 
     // The group file keeps everything it had, with the password hashed.
     const after = JSON.parse(fs.readFileSync(FILE, 'utf8'));
