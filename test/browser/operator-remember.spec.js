@@ -32,6 +32,9 @@ async function open(context, path) {
 async function operatorAtHub(browser) {
     const ctx = await browser.newContext();
     const page = await open(ctx, `/group/${HUB}/`);
+    // The status arrives after the page has loaded; asked before it, the
+    // room looks like no operator room at all and the test skips itself.
+    await page.waitForFunction(() => !!groupStatus.name, null, {timeout: 20_000});
     test.skip(!(await page.evaluate(() => !!groupStatus.operatorRoom)),
               `no operator room "${HUB}" on this server`);
     await page.fill('#username', 'op');
@@ -153,3 +156,73 @@ test('a remembered operator opening a client link comes in as the operator',
     await expect(guest.locator('#username')).toHaveValue('Анна Петрова');
     expect(guest.errors).toEqual([]);
 });
+
+// The night of 2026-10-03: the tab slept past the 12 hours an operator's
+// session token lives, woke, and rejoined with that token -- refused,
+// "not authorised", and refused again on "join as nick", until a reload.
+// A rejoin must use credentials that are still good: the remembered token
+// when the session token has expired, and the remembered token again when
+// the server refuses the session token for any other reason.
+for (const how of ['expired', 'revoked']) {
+    test(`a rejoin after a long sleep survives a session token ${how}`,
+         async ({browser}) => {
+        const state = await rememberedOperator(browser);
+        const ctx = await browser.newContext({storageState: state});
+        const page = await open(ctx, `/group/${HUB}/`);
+        await expect(page.locator('#operator-room')).toBeVisible({timeout: 20_000});
+        // As in production: a reload, so the session token is what got us in.
+        await page.reload();
+        await expect(page.locator('#operator-room')).toBeVisible({timeout: 20_000});
+        const session = await page.evaluate(() =>
+            JSON.parse(sessionStorage.getItem('sozvon.operatorSession')));
+        expect(session && session.token).toBeTruthy();
+        expect(await page.evaluate(() =>
+            reconnectLastJoin.credentials.token)).toBe(session.token);
+
+        if (how === 'expired') {
+            // what twelve hours do on this side
+            await page.evaluate(() => {
+                const s = JSON.parse(sessionStorage.getItem('sozvon.operatorSession'));
+                s.expires = new Date(Date.now() - 1000).toISOString();
+                sessionStorage.setItem('sozvon.operatorSession', JSON.stringify(s));
+            });
+        } else {
+            // refused by the server although not expired here
+            await page.evaluate(t => revokeToken(t), session.token);
+            await page.waitForTimeout(1000);
+        }
+
+        // Asleep long enough for the server to end the session, so that
+        // waking is a fresh join rather than a resume.
+        await ctx.setOffline(true);
+        await page.evaluate(() => serverConnection.socket.close());
+        await page.waitForTimeout(35_000);
+        await ctx.setOffline(false);
+
+        // Back in for real: a resume in progress keeps the group and the
+        // permissions of the session it is trying to save, so those alone
+        // say nothing.
+        await expect.poll(() => page.evaluate(() =>
+            !!serverConnection && !!serverConnection.socket &&
+            serverConnection.socket.readyState === 1 &&
+            !serverConnection.resuming && !reconnecting &&
+            !!serverConnection.group &&
+            serverConnection.permissions.indexOf('op') >= 0),
+            {timeout: 90_000, intervals: [1000]}).toBe(true);
+        expect(page.logs.some(l => /Could not resume|could not resume|Socket close/.test(l)),
+               'the session was rejoined, not resumed').toBe(true);
+        await expect(page.locator('#operator-room')).toBeVisible();
+        await expect(page.locator('#rejoin-container')).toBeHidden();
+        // Back in without the dead token.  (The server still takes the
+        // "expired" one -- its clock has not moved -- so this is what tells
+        // the fix from luck in that case.)
+        expect(await page.evaluate(() => reconnectLastJoin.credentials.token))
+            .not.toBe(session.token);
+        // and a new session token is minted for the next twelve hours
+        await expect.poll(() => page.evaluate(() => {
+            const s = JSON.parse(sessionStorage.getItem('sozvon.operatorSession'));
+            return s ? s.token : null;
+        }), {timeout: 10_000}).not.toBe(session.token);
+        expect(page.errors).toEqual([]);
+    });
+}

@@ -1013,7 +1013,59 @@ document.addEventListener('visibilitychange', function() {
 });
 
 /** Rejoin the group after a reconnect, using the saved credentials. (Sozvon) */
+/**
+ * The join to replay after a reconnect, with credentials that are still good.
+ * A join made with a token replays that token, and an operator's session
+ * token lives 12 hours: a tab that slept through the night came back with a
+ * token the server had let expire, and was refused until a reload, which
+ * looks for credentials afresh.  So look again here too: the current session
+ * token, else the device's remembered one, else what the join had.  (Sozvon)
+ *
+ * @param {any} join
+ * @returns {any}
+ */
+function freshRejoin(join) {
+    let c = join && join.credentials;
+    if(!c || c.type !== 'token')
+        return join;
+    let session = loadOperatorSession(join.group);
+    if(session)
+        return Object.assign({}, join,
+            {credentials: {type: 'token', token: session.token}});
+    let remembered = loadRememberToken(join.group);
+    if(remembered)
+        return Object.assign({}, join, {
+            username: remembered.username || join.username,
+            credentials: {type: 'token', token: remembered.token},
+        });
+    return join;
+}
+
+/**
+ * The same join with the device's remembered token, if there is one and it is
+ * not the token just refused; null otherwise.  A session token can be refused
+ * before the time it says it expires (revoked, or a clock out of step), and
+ * the remembered token, which lives for a month, should get its turn before
+ * the operator is sent to the login card.  (Sozvon)
+ *
+ * @param {any} join
+ * @returns {any}
+ */
+function rememberedRejoin(join) {
+    let c = join && join.credentials;
+    if(!c || c.type !== 'token')
+        return null;
+    let remembered = loadRememberToken(join.group);
+    if(!remembered || remembered.token === c.token)
+        return null;
+    return Object.assign({}, join, {
+        username: remembered.username || join.username,
+        credentials: {type: 'token', token: remembered.token},
+    });
+}
+
 async function rejoinAfterReconnect() {
+    reconnectLastJoin = freshRejoin(reconnectLastJoin);
     try {
         await serverConnection.join(
             reconnectLastJoin.group, reconnectLastJoin.username,
@@ -6343,6 +6395,26 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
             console.warn('Rejoin refused, will retry:', message);
             this.close();
             return;
+        }
+        if(reconnecting && !full) {
+            // Sozvon: the token this rejoin replayed was refused; try the
+            // device's remembered one before giving up, and drop a session
+            // token the server no longer takes so that a new one is minted.
+            let alt = rememberedRejoin(reconnectLastJoin);
+            if(alt) {
+                let session = loadOperatorSession(group);
+                if(session &&
+                   session.token === reconnectLastJoin.credentials.token) {
+                    try {
+                        window.sessionStorage.removeItem('sozvon.operatorSession');
+                    } catch(e) { /* ignore */ }
+                }
+                console.warn('Rejoin refused, trying the remembered token:',
+                             message);
+                reconnectLastJoin = alt;
+                rejoinAfterReconnect();
+                return;
+            }
         }
         // Sozvon: the server refused the (re)join — stop any reconnect cycle.
         wantConnected = false;

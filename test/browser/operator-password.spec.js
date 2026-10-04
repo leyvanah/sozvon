@@ -29,6 +29,9 @@ async function login(browser, password) {
         try { localStorage.setItem('sozvon-lang', 'ru'); } catch(e) {}
     });
     await page.goto(`/group/${HUB}/`);
+    // The status arrives after the page has loaded; asked before it, the
+    // room looks like no operator room at all and the test skips itself.
+    await page.waitForFunction(() => !!groupStatus.name, null, {timeout: 20_000});
     test.skip(!(await page.evaluate(() => !!groupStatus.operatorRoom)),
               `no operator room "${HUB}" on this server`);
     await page.fill('#username', 'op');
