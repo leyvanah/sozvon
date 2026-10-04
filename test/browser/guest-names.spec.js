@@ -113,6 +113,7 @@ test('an operator link carries the client\'s name after #, never to the server',
     const HUB = process.env.SOZVON_HUB_ROOM || 'operator-e2ee';
     const ctx = await browser.newContext();
     const page = await open(ctx, `/group/${HUB}/`);
+    await page.waitForFunction(() => !!groupStatus.name, null, {timeout: 20_000});
     test.skip(!(await page.evaluate(() => !!groupStatus.operatorRoom &&
                                            !!groupStatus.e2ee)),
               `no E2EE operator room "${HUB}" on this server`);
