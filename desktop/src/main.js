@@ -6,9 +6,21 @@ const crypto = require('crypto');
 const { createTray } = require('./tray');
 const { createKnocks } = require('./knocks');
 
-const ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.ico');
-const ICON_PNG_PATH = path.join(__dirname, '..', 'assets', 'icon.png');
-if (fs.existsSync(ICON_PATH)) app.setAppUserModelId('ai.sozvon.desktop');
+// nativeImage reads an .ico only on Windows; anywhere else it hands back an
+// empty image, and a tray made from that is present but invisible -- with
+// "minimise to tray" on, the window it hides cannot be got back.  So Windows
+// keeps its .ico and the others get PNGs (see scripts/build-icon.js).  The
+// macOS one is a "Template" image, which the menu bar paints in its own
+// colour; the @2x copy beside it is picked up by name.
+const ASSETS_DIR = path.join(__dirname, '..', 'assets');
+const ICON_PATH = path.join(ASSETS_DIR,
+  process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const TRAY_ICON_PATH = path.join(ASSETS_DIR,
+  process.platform === 'win32' ? 'icon.ico'
+  : process.platform === 'darwin' ? 'trayTemplate.png'
+  : 'tray.png');
+if (process.platform === 'win32' && fs.existsSync(ICON_PATH))
+  app.setAppUserModelId('ai.sozvon.desktop');
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 const DEFAULT_CONFIG = {
@@ -643,6 +655,9 @@ function createWindow() {
     // minimise/maximise/close drawn over its right end in our colours.
     titleBarStyle: 'hidden',
     titleBarOverlay: overlayColors(),
+    // macOS draws its traffic lights at the left instead, over our bar; this
+    // centres them in it, and titlebar.html moves the bar's content clear.
+    trafficLightPosition: { x: 14, y: Math.round((TITLEBAR_H - 16) / 2) },
     webPreferences: {
       preload: path.join(__dirname, 'titlebar-preload.js'),
       contextIsolation: true,
@@ -650,7 +665,8 @@ function createWindow() {
       sandbox: false
     }
   });
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'titlebar.html'));
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'titlebar.html'),
+    { query: { platform: process.platform } });
 
   // A renderer that throws does it silently: nothing reaches the terminal,
   // and a bar whose script died looks exactly like a bar whose buttons are
@@ -925,7 +941,14 @@ async function resetLogin() {
  * browser error page that knows nothing about us.
  */
 function buildMenu() {
+  // On macOS the first menu is the application's own, whatever it is called,
+  // and copy, paste and select-all reach a text field only through an Edit
+  // menu: without one, Cmd+V does nothing in the password field.  Windows
+  // and Linux have neither convention and keep the menu as it was.
+  const mac = process.platform === 'darwin'
+    ? [{ role: 'appMenu' }, { role: 'editMenu' }] : [];
   return Menu.buildFromTemplate([
+    ...mac,
     {
       label: 'Сервер',
       submenu: [
@@ -998,7 +1021,7 @@ if (!gotTheLock) {
     });
 
     tray = createTray({
-      iconPath: ICON_PATH,
+      iconPath: TRAY_ICON_PATH,
       getConfig: () => config,
       setConfig: (patch) => {
         config = { ...config, ...patch };
@@ -1048,10 +1071,48 @@ if (!gotTheLock) {
     if (process.argv.includes('--hidden') && config.minimizeToTray !== false)
       mainWindow.hide();
 
+    // macOS: a click on the Dock icon.  The window is usually not gone but
+    // hidden in the tray, and then this is the way back to it.
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      else showWindow();
     });
+
+    if (process.env.SOZVON_SMOKE_TEST) smokeTest();
   });
+}
+
+/**
+ * Release check, run only when SOZVON_SMOKE_TEST is set: the release workflow
+ * starts every packaged build this way on its own platform and reads the
+ * verdict from stdout.  Packaging can fail in ways no build step notices -- a
+ * file left out, an icon the platform cannot read, a sandbox that will not
+ * start -- and the first person to find out would otherwise be whoever
+ * downloaded it.  The value is how many seconds to stay up after passing, so
+ * the workflow can take a screenshot of the window.
+ */
+function smokeTest() {
+  const fail = (why) => {
+    console.log('SOZVON_SMOKE_FAIL ' + why);
+    app.exit(1);
+  };
+  const timer = setTimeout(() => fail('window did not finish loading in 60 s'), 60000);
+  const loaded = (wc) => new Promise((resolve) => {
+    if (!wc.isLoading()) resolve();
+    else wc.once('did-finish-load', resolve);
+  });
+  Promise.all([mainWindow, contentView].filter(Boolean)
+    .map((v) => loaded(v.webContents)))
+    .then(() => {
+      clearTimeout(timer);
+      if (nativeImage.createFromPath(TRAY_ICON_PATH).isEmpty())
+        return fail('tray icon is empty: ' + TRAY_ICON_PATH);
+      if (!tray) return fail('no tray');
+      console.log('SOZVON_SMOKE_OK ' + process.platform + ' ' + process.arch +
+        ' ' + app.getVersion());
+      const hold = parseInt(process.env.SOZVON_SMOKE_TEST, 10) || 0;
+      setTimeout(() => app.exit(0), hold * 1000);
+    }, (e) => fail(String(e)));
 }
 
 app.on('before-quit', () => { quitting = true; });

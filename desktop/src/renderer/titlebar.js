@@ -11,6 +11,11 @@
 (function() {
     'use strict';
 
+    // Set before anything else, so the first paint already leaves room for
+    // macOS's traffic lights; main.js passes the platform in the query.
+    if(new URLSearchParams(location.search).get('platform') === 'darwin')
+        document.body.classList.add('is-mac');
+
     const bar = window.sozvonBar;
     if(!bar)
         return;
