@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="SOZVON — видеозвонки на своём сервере. Лобби, персональные ссылки и сквозное шифрование для двоих. Форк Galène, открытый код, MIT." data-en-content="SOZVON — video calls on your own server. A lobby, personal links and end-to-end encryption for two. A Galène fork, open source, MIT.">
+  <title  data-en="Documentation — SOZVON">Документация — SOZVON</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="site.css">
+  <script defer src="i18n.js"></script>
+  <script defer src="site.js"></script>
+</head>
+<body class="docs-page">
+<a class="skip-link" href="#main" data-en="Skip to content">К содержимому</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html" aria-label="SOZVON — главная" data-en-label="SOZVON — home"><span class="brand-word">SOZVON</span><img class="brand-mark" src="assets/sozvon-mark.svg" alt="" width="13" height="34"></a>
+    <nav class="navigation" id="navigation" aria-label="Основная навигация" data-en-label="Main navigation">
+      <a href="index.html#features" data-en="Features">Возможности</a>
+      <a href="index.html#install" data-en="Install">Установить</a>
+      <a href="docs.html" aria-current="page" data-en="Docs">Документация</a>
+      <a href="https://github.com/leyvanah/sozvon">GitHub</a>
+    </nav>
+    <div class="preferences">
+      <div class="language-switch" role="group" aria-label="Язык / Language"><button type="button" data-lang-option="ru" aria-pressed="true">RU</button><button type="button" data-lang-option="en" aria-pressed="false">EN</button></div>
+      <div class="theme-switch" role="group" aria-label="Оформление" data-en-label="Appearance">
+        <button type="button" data-theme-option="system" aria-label="Системная тема" data-en-label="System theme"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="10" rx="1"/><path d="M7 17h6M10 14v3"/></svg></button>
+        <button type="button" data-theme-option="light" aria-label="Светлая тема" data-en-label="Light theme"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 1v2m0 14v2M1 10h2m14 0h2M3.6 3.6 5 5m10 10 1.4 1.4M3.6 16.4 5 15M15 5l1.4-1.4"/></svg></button>
+        <button type="button" data-theme-option="dark" aria-label="Тёмная тема" data-en-label="Dark theme"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.8 12.5A7 7 0 0 1 7.5 3.2a7 7 0 1 0 9.3 9.3Z"/></svg></button>
+      </div>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="navigation" aria-label="Меню" data-en-label="Menu"><span></span><span></span></button>
+    </div>
+  </div>
+</header><main id="main"><div class="doc-hero wrap"><h1  data-en="Documentation">Документация</h1><p  data-en="Installing SOZVON, configuring rooms and managing the server.">Установка, настройка комнат и администрирование SOZVON.</p></div>
+    <div class="wrap docs-layout">
+
+        <nav class="toc" aria-label="Содержание" data-en-label="Contents">
+            <div class="toc-title" data-en="Contents">Содержание</div>
+            <a href="#first-call" data-en="First call">Первый звонок</a><a href="#install" data-en="Installation">Установка</a>
+            <a href="#install-tls" data-en="TLS &amp; domain">TLS и домен</a>
+            <a href="#rooms" data-en="Rooms &amp; links">Комнаты и ссылки</a>
+            <a href="#clients" data-en="Clients">Клиенты</a>
+            <a href="#e2ee" data-en="End-to-end encryption">Сквозное шифрование</a>
+            <a href="#admin" data-en="Administration">Администрирование</a>
+            <a href="#network" data-en="Networking &amp; TURN">Сеть и TURN</a>
+            <a href="#faq" data-en="FAQ">Частые вопросы</a>
+        </nav>
+
+        <article class="doc"><h2 id="first-call" data-en="From installation to your first call">От установки до первого звонка</h2><ol class="quick-start">
+<li  data-en="&lt;strong&gt;Install the server.&lt;/strong&gt; On Debian or Ubuntu, run &lt;a href=&quot;#install&quot;&gt;the command below&lt;/a&gt; and wait for it to finish."><strong>Установите сервер.</strong> На Debian или Ubuntu выполните <a href="#install">команду ниже</a>. Дождитесь завершения установки.</li>
+<li  data-en="&lt;strong&gt;Open the dashboard.&lt;/strong&gt; The script displays the server address and operator credentials. Use them to sign in."><strong>Откройте панель.</strong> Скрипт покажет адрес сервера и данные для входа оператора. Используйте их, чтобы войти.</li>
+<li  data-en="&lt;strong&gt;Invite your caller.&lt;/strong&gt; Create a room for them in the dashboard and send them the personal link."><strong>Пригласите собеседника.</strong> Создайте для него комнату в панели и отправьте персональную ссылку.</li>
+<li  data-en="&lt;strong&gt;Start your conversation.&lt;/strong&gt; Your caller opens the link in their browser; you enter their room from the dashboard. Check your camera and microphone before the call."><strong>Начните разговор.</strong> Собеседник открывает ссылку в браузере, а вы входите в его комнату из панели. Перед звонком проверьте камеру и микрофон.</li>
+</ol>
+
+            <h2 id="install" data-en="Installation">Установка</h2>
+
+            <h3 data-en="Install script (Debian / Ubuntu)">Установочный скрипт (Debian / Ubuntu)</h3>
+            <p data-en="On a server with a fresh Debian or Ubuntu installation, run the command below. The script creates a service account and sets up a TLS certificate, the firewall, a systemd service and an operator account.">На сервере со свежей установкой Debian или Ubuntu выполните команду ниже. Скрипт создаст служебную учётную запись, настроит TLS-сертификат, файрвол, службу systemd и учётную запись оператора.</p>
+            <div class="codeblock"><button type="button" class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/leyvanah/sozvon/main/contrib/install.sh | sudo sh" data-en="Copy">Копировать</button><pre><code>curl -fsSL https://raw.githubusercontent.com/leyvanah/sozvon/main/contrib/install.sh | sudo sh</code></pre></div>
+            <p data-en="When installation finishes, the script displays the server address and operator password. Run it again to update. If the new version fails to start, it restores the previous one.">Когда установка завершится, скрипт покажет адрес сервера и пароль оператора. Для обновления запустите скрипт ещё раз. Если новая версия не запустится, он восстановит предыдущую.</p>
+            <p data-en="By default, the script creates an &lt;strong&gt;operator room&lt;/strong&gt;: a dashboard for individual rooms and personal links. To create a regular room with a waiting room instead, use &lt;code&gt;--operator-room no&lt;/code&gt;.">По умолчанию создаётся <strong>операторская комната</strong> — панель для управления отдельными комнатами и персональными ссылками. Если вам нужна обычная комната с ожиданием перед входом, используйте параметр <code>--operator-room no</code>.</p>
+            <p data-en="If you have saved the script as &lt;code&gt;install.sh&lt;/code&gt;, run &lt;code&gt;sh install.sh --help&lt;/code&gt; to see its options. You can specify a domain, room and operator names, ports and a download mirror, or uninstall the server.">Список параметров установщика доступен по команде <code>sh install.sh --help</code>, если скрипт сохранён в файл <code>install.sh</code>. Можно указать домен, имена комнаты и оператора, порты и зеркало для скачивания, а также удалить сервер.</p>
+
+            <h3 data-en="Manual installation">Ручная установка</h3>
+            <p data-en="The SOZVON server is a single Go executable. Its archive also contains the web client and supporting files. The example below uses version 0.3.0; server archives: &lt;a href=&quot;https://github.com/leyvanah/sozvon/releases/download/v0.3.0/sozvon_v0.3.0_linux_amd64.tar.gz&quot;&gt;Linux&lt;/a&gt;, &lt;a href=&quot;https://github.com/leyvanah/sozvon/releases/download/v0.3.0/sozvon_v0.3.0_windows_amd64.zip&quot;&gt;Windows&lt;/a&gt;, &lt;a href=&quot;https://github.com/leyvanah/sozvon/releases/download/v0.3.0/sozvon_v0.3.0_darwin_amd64.tar.gz&quot;&gt;macOS&lt;/a&gt;. Other versions and architectures are available in &lt;a href=&quot;https://github.com/leyvanah/sozvon/releases&quot;&gt;releases&lt;/a&gt;. Here is how to unpack and run it on Linux:">Сервер SOZVON — один исполняемый файл на Go. В архив также входят веб-клиент и вспомогательные файлы. Ниже пример для версии 0.3.0; серверные архивы: <a href="https://github.com/leyvanah/sozvon/releases/download/v0.3.0/sozvon_v0.3.0_linux_amd64.tar.gz">Linux</a>, <a href="https://github.com/leyvanah/sozvon/releases/download/v0.3.0/sozvon_v0.3.0_windows_amd64.zip">Windows</a>, <a href="https://github.com/leyvanah/sozvon/releases/download/v0.3.0/sozvon_v0.3.0_darwin_amd64.tar.gz">macOS</a>. Другие версии и архитектуры доступны в <a href="https://github.com/leyvanah/sozvon/releases">релизах</a>. Пример распаковки и запуска на Linux:</p>
+            <div class="codeblock"><button type="button" class="copy" data-copy="tar xzf sozvon_v0.3.0_linux_amd64.tar.gz
+cd sozvon
+./sozvon -http :8443" data-en="Copy">Копировать</button><pre><code>tar xzf sozvon_v0.3.0_linux_amd64.tar.gz
+cd sozvon
+./sozvon -http :8443</code></pre></div>
+            <p data-en="The archive contains the &lt;code&gt;sozvon&lt;/code&gt; server, the &lt;code&gt;galenectl&lt;/code&gt; administration tool, the web client in &lt;code&gt;static/&lt;/code&gt;, systemd and fail2ban configuration examples in &lt;code&gt;contrib/&lt;/code&gt;, and documentation. To verify the archive, save &lt;a href=&quot;https://github.com/leyvanah/sozvon/releases/download/v0.3.0/SHA256SUMS&quot;&gt;SHA256SUMS&lt;/a&gt; from the same release in the same folder and run &lt;code&gt;sha256sum -c SHA256SUMS --ignore-missing&lt;/code&gt;.">В архиве находятся сервер <code>sozvon</code>, утилита администрирования <code>galenectl</code>, веб-клиент в <code>static/</code>, примеры настройки systemd и fail2ban в <code>contrib/</code> и документация. Для проверки архива сохраните рядом файл <a href="https://github.com/leyvanah/sozvon/releases/download/v0.3.0/SHA256SUMS">SHA256SUMS</a> из того же релиза и выполните <code>sha256sum -c SHA256SUMS --ignore-missing</code>.</p>
+            <p data-en="To build from source, run:">Для сборки из исходников выполните:</p>
+            <div class="codeblock"><button type="button" class="copy" data-copy="git clone https://github.com/leyvanah/sozvon
+cd sozvon
+CGO_ENABLED=0 go build -ldflags='-s -w' -o sozvon ." data-en="Copy">Копировать</button><pre><code>git clone https://github.com/leyvanah/sozvon
+cd sozvon
+CGO_ENABLED=0 go build -ldflags='-s -w' -o sozvon .</code></pre></div>
+            <p data-en="On Windows: &lt;code&gt;set CGO_ENABLED=0&lt;/code&gt;, then &lt;code&gt;go build -ldflags=&quot;-s -w&quot;&lt;/code&gt;. Cross-compile with &lt;code&gt;GOOS&lt;/code&gt; and &lt;code&gt;GOARCH&lt;/code&gt;: &lt;code&gt;CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags='-s -w'&lt;/code&gt;.">На Windows: <code>set CGO_ENABLED=0</code>, затем <code>go build -ldflags="-s -w"</code>. Кросс-компиляция — через <code>GOOS</code> и <code>GOARCH</code>: <code>CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags='-s -w'</code>.</p>
+
+            <h2 id="install-tls" data-en="TLS &amp; domain">TLS и домен</h2>
+
+            <p data-en="SOZVON can obtain and renew TLS certificates for your domain. Example:">SOZVON может получать и обновлять TLS-сертификаты для вашего домена самостоятельно. Пример запуска:</p>
+            <div class="codeblock"><button type="button" class="copy" data-copy="./sozvon -http :443 -letsencrypt meet.example.com" data-en="Copy">Копировать</button><pre><code>./sozvon -http :443 -letsencrypt meet.example.com</code></pre></div>
+            <p data-en="Your domain must point to the server, and ports 443 and 80 must be reachable from the internet. Certificates are stored in &lt;code&gt;data/acme/&lt;/code&gt;.">Домен должен указывать на сервер, а порты 443 и 80 — быть доступны из интернета. Сертификаты сохраняются в <code>data/acme/</code>.</p>
+            <p data-en="If you already have a certificate, place &lt;code&gt;cert.pem&lt;/code&gt; and &lt;code&gt;key.pem&lt;/code&gt; in &lt;code&gt;data/&lt;/code&gt; and run the server without &lt;code&gt;-letsencrypt&lt;/code&gt;. If a reverse proxy handles TLS, &lt;code&gt;-insecure&lt;/code&gt; lets SOZVON serve HTTP behind it. An example systemd service is in &lt;code&gt;contrib/systemd/sozvon.service&lt;/code&gt;.">Если у вас уже есть сертификат, поместите <code>cert.pem</code> и <code>key.pem</code> в <code>data/</code> и запускайте сервер без <code>-letsencrypt</code>. Если TLS обрабатывает обратный прокси, параметр <code>-insecure</code> позволяет запустить SOZVON за ним по HTTP. Пример службы systemd находится в <code>contrib/systemd/sozvon.service</code>.</p>
+
+            <p data-en="The installer supports three modes, selected with &lt;code&gt;--tls&lt;/code&gt;:">Установщик поддерживает три режима. Выберите нужный с помощью параметра <code>--tls</code>:</p>
+            <div class="table-scroll">
+            <table class="tbl">
+                <thead>
+                    <tr>
+                        <th data-en="Mode">Режим</th>
+                        <th data-en="What it does">Что делает</th>
+                        <th data-en="Use it when">Когда подходит</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code data-en="letsencrypt-sslip (default)">letsencrypt-sslip (по умолчанию)</code></td>
+                        <td data-en="Creates a hostname from the IP address using sslip.io and obtains a Let’s Encrypt certificate">Формирует доменное имя на основе IP-адреса через sslip.io и получает сертификат Let’s Encrypt</td>
+                        <td data-en="When you do not have a domain and need browser access">Если своего домена нет, а нужен доступ через браузер</td>
+                    </tr>
+                    <tr>
+                        <td><code data-en="letsencrypt-domain">letsencrypt-domain</code></td>
+                        <td data-en="Uses a domain name that points to your server: --domain meet.example.com">Использует доменное имя, которое указывает на ваш сервер: --domain meet.example.com</td>
+                        <td data-en="When your domain points to the server">Если у вас есть домен, настроенный на сервер</td>
+                    </tr>
+                    <tr>
+                        <td><code data-en="self-signed">self-signed</code></td>
+                        <td data-en="Creates a self-signed certificate and displays its fingerprint">Создаёт самоподписанный сертификат и показывает его отпечаток</td>
+                        <td data-en="When DNS or the certificate authority is unavailable. Use the app to connect: browsers do not trust this certificate">Если DNS или центр сертификации недоступны. Для подключения используйте приложение: браузер не доверяет такому сертификату</td>
+                    </tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h2 id="rooms" data-en="Rooms &amp; links">Комнаты и ссылки</h2>
+<p data-en="&lt;strong&gt;A regular room&lt;/strong&gt; has an address such as &lt;code&gt;/group/name/&lt;/code&gt;. Access can be password-protected. With the waiting room (lobby) enabled, a guest enters their name and waits for the operator to admit them. An invitation link containing a token bypasses the waiting room."><strong>Обычная комната</strong> доступна по адресу вида <code>/group/name/</code>. Вход можно защитить паролем. Если включена комната ожидания (лобби), гость вводит имя и ждёт, пока оператор впустит его в звонок. Пригласительная ссылка с токеном позволяет пройти без ожидания.</p>
+<p data-en="&lt;strong&gt;An operator room&lt;/strong&gt; is a dashboard where you create a separate room for each caller. Send them a personal link; you can revoke access when needed. The dashboard shows room status and join requests. Operator-room personal links and regular-room invitations are different access mechanisms."><strong>Операторская комната</strong> — панель, в которой вы создаёте отдельную комнату для каждого собеседника. Отправьте ему персональную ссылку; при необходимости доступ по ней можно отозвать. В панели видно состояние комнат и заявки на вход. Персональные ссылки операторской комнаты и приглашения для обычных комнат — разные способы доступа.</p>
+<p data-en="Room settings are stored in &lt;code&gt;groups/&lt;/code&gt;, server configuration in &lt;code&gt;data/&lt;/code&gt;, and web client files in &lt;code&gt;static/&lt;/code&gt;. Call recordings are stored separately in &lt;code&gt;recordings/&lt;/code&gt; by default.">Настройки комнат хранятся в каталоге <code>groups/</code>, конфигурация сервера — в <code>data/</code>, файлы веб-клиента — в <code>static/</code>. Записи звонков по умолчанию сохраняются отдельно, в <code>recordings/</code>.</p>
+<p data-en="You can also configure rooms with &lt;code&gt;galenectl&lt;/code&gt; or edit JSON files in &lt;code&gt;groups/&lt;/code&gt;. Rooms are called groups in the configuration. Most settings are covered by the Galène documentation: &lt;a href=&quot;https://raw.githubusercontent.com/leyvanah/sozvon/main/galene.md&quot;&gt;galene.md&lt;/a&gt;.">Для настройки комнат также можно использовать утилиту <code>galenectl</code> или редактировать JSON-файлы в <code>groups/</code>. В конфигурации комнаты называются группами. Большинство настроек описано в документации Galène: <a href="https://raw.githubusercontent.com/leyvanah/sozvon/main/galene.md">galene.md</a>.</p>
+<h2 id="clients" data-en="Clients">Клиенты</h2>
+
+            <p data-en="&lt;strong&gt;Browser.&lt;/strong&gt; Open a room link; no app installation is needed. Before joining, you can check your camera and microphone and choose devices."><strong>Браузер.</strong> Откройте ссылку на комнату — устанавливать приложение не нужно. Перед входом можно проверить камеру и микрофон и выбрать устройства.</p>
+            <p data-en="&lt;strong&gt;Android.&lt;/strong&gt; The app saves your server list and keeps the screen awake during calls. It uses the same web interface and requests camera and microphone access. Download the APK from the &lt;a href=&quot;index.html#download&quot;&gt;apps section&lt;/a&gt;. If a SOZVON server is already running, you can also download it directly: add &lt;code&gt;/sozvon.apk&lt;/code&gt; to the server address, for example &lt;code&gt;https://meet.example.com/sozvon.apk&lt;/code&gt;. Releases use the same signing key, so updates can be installed over an existing version. &lt;a href=&quot;https://github.com/ImranR98/Obtainium&quot;&gt;Obtainium&lt;/a&gt; can track updates."><strong>Android.</strong> Приложение сохраняет список серверов и не даёт экрану гаснуть во время звонка. Оно использует тот же веб-интерфейс и запрашивает доступ к камере и микрофону. Скачайте APK в <a href="index.html#download">разделе приложений</a>. Если сервер SOZVON уже развёрнут, APK можно скачать и с него: добавьте <code>/sozvon.apk</code> к адресу сервера, например <code>https://meet.example.com/sozvon.apk</code>. Версии подписываются одним ключом, поэтому приложение можно обновить поверх установленного. Следить за обновлениями помогает <a href="https://github.com/ImranR98/Obtainium">Obtainium</a>.</p>
+            <p data-en="&lt;strong&gt;Desktop.&lt;/strong&gt; The Electron app uses the same web interface and includes a server setup wizard. Installers will be available in &lt;a href=&quot;https://github.com/leyvanah/sozvon/releases&quot;&gt;releases&lt;/a&gt;. You can also build the app yourself; see the repository’s &lt;a href=&quot;https://github.com/leyvanah/sozvon/tree/main/desktop&quot;&gt;desktop directory&lt;/a&gt; for instructions. You can use a browser for calls as well."><strong>Компьютер.</strong> Приложение на Electron использует тот же веб-интерфейс и включает мастер установки сервера. Установщики будут доступны в <a href="https://github.com/leyvanah/sozvon/releases">релизах</a>. При желании приложение можно собрать самостоятельно; инструкции находятся в <a href="https://github.com/leyvanah/sozvon/tree/main/desktop">разделе desktop</a> репозитория. Для звонка также можно пользоваться браузером.</p>
+            <p data-en="To deploy a server from the app, enter the VPS address and root password to connect over SSH, then choose a TLS mode. The server needs a fresh Debian or Ubuntu installation. The wizard runs the same &lt;code&gt;contrib/install.sh&lt;/code&gt; script used for terminal installation.">Чтобы развернуть сервер из приложения, укажите адрес VPS и пароль root для подключения по SSH, затем выберите режим TLS. На сервере должна быть свежая установка Debian или Ubuntu. Мастер запускает тот же установочный скрипт <code>contrib/install.sh</code>, что и при установке через терминал.</p>
+
+            <h2 id="e2ee" data-en="End-to-end encryption">Сквозное шифрование</h2>
+
+            <p data-en="End-to-end encryption (E2E) is enabled per room. Audio and video are encrypted in the two participants’ browsers; the server forwards encrypted data. Ephemeral ECDH is used for key agreement and AES-256-GCM for frame encryption. Before talking, compare the five emoji on your screens out loud to verify your keys.">Сквозное шифрование (E2E) включается в настройках комнаты. Аудио и видео шифруются в браузерах двух участников, а сервер пересылает зашифрованные данные. Для согласования ключей используется эфемерный ECDH, для шифрования кадров — AES-256-GCM. Перед разговором сверьте вслух пять эмодзи на экране: так вы проверите подлинность ключей.</p>
+            <p data-en="&lt;code&gt;require-e2ee&lt;/code&gt; makes end-to-end encryption mandatory: if it cannot be established, the connection is blocked.">Параметр <code>require-e2ee</code> делает сквозное шифрование обязательным: если его нельзя установить, соединение блокируется.</p>
+            <div class="callout warn">
+                <p data-en="The mode supports only two participants. The implementation has not been independently audited. See &lt;a href=&quot;https://github.com/leyvanah/sozvon/blob/main/SECURITY.md&quot;&gt;SECURITY.md&lt;/a&gt; for its limitations.">Режим поддерживает только двух участников. Реализация не проходила независимого аудита. Ограничения описаны в <a href="https://github.com/leyvanah/sozvon/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+            </div>
+
+            <h2 id="admin" data-en="Administration">Администрирование</h2>
+
+            <p data-en="Use &lt;code&gt;galenectl&lt;/code&gt; to create rooms and users and set passwords and permissions. Example commands:">Утилита <code>galenectl</code> позволяет создавать комнаты и пользователей, назначать пароли и права доступа. Пример команд:</p>
+            <div class="codeblock"><button type="button" class="copy" data-copy="galenectl create-group -group city-watch
+galenectl create-user -group city-watch -user vimes -permissions op
+galenectl set-password -group city-watch -user vimes
+galenectl list-groups
+galenectl list-users -l -group city-watch" data-en="Copy">Копировать</button><pre><code>galenectl create-group -group city-watch
+galenectl create-user -group city-watch -user vimes -permissions op
+galenectl set-password -group city-watch -user vimes
+galenectl list-groups
+galenectl list-users -l -group city-watch</code></pre></div>
+            <p data-en="The &lt;code&gt;galenectl -insecure&lt;/code&gt; option disables server TLS certificate verification; it is unnecessary with a valid trusted certificate. The administration API is documented in &lt;a href=&quot;https://raw.githubusercontent.com/leyvanah/sozvon/main/galene-api.md&quot;&gt;galene-api.md&lt;/a&gt;, and the client protocol in &lt;a href=&quot;https://raw.githubusercontent.com/leyvanah/sozvon/main/galene-protocol.md&quot;&gt;galene-protocol.md&lt;/a&gt;.">Параметр <code>-insecure</code> у <code>galenectl</code> отключает проверку TLS-сертификата сервера; он не нужен при действительном доверенном сертификате. Административный API описан в <a href="https://raw.githubusercontent.com/leyvanah/sozvon/main/galene-api.md">galene-api.md</a>, протокол клиента — в <a href="https://raw.githubusercontent.com/leyvanah/sozvon/main/galene-protocol.md">galene-protocol.md</a>.</p>
+            <p data-en="To protect against password guessing, after failed sign-in attempts the server increases the delay before the next attempt, then temporarily blocks the IP address. This protection is shared across WebSocket, &lt;code&gt;/recordings/&lt;/code&gt; and the administration API. A fail2ban filter and jail configuration are included for firewall-level blocking. Use &lt;code&gt;/healthz&lt;/code&gt; to check server availability: a running server responds with &lt;code&gt;200 ok&lt;/code&gt;.">Для защиты от подбора пароля после неудачных попыток входа сервер увеличивает задержку перед следующей попыткой, а затем временно блокирует IP-адрес. Эта защита действует совместно для WebSocket, <code>/recordings/</code> и API администрирования. В комплект входят фильтр и конфигурация jail для fail2ban, чтобы блокировать адреса на уровне файрвола. Для проверки доступности сервера используйте <code>/healthz</code>: работающий сервер отвечает <code>200 ok</code>.</p>
+
+            <h2 id="network" data-en="Networking &amp; TURN">Сеть и TURN</h2>
+
+            <p data-en="SOZVON can run on a server directly reachable from the internet. Allow the web server’s TCP port (8443 by default, set with &lt;code&gt;-http&lt;/code&gt;) and the TURN TCP and UDP ports (1194 by default) in the firewall. For media traffic, allow inbound and outbound UDP on high ports or specify a range with &lt;code&gt;-udp-range&lt;/code&gt;.">SOZVON можно разместить на сервере с прямым доступом из интернета. В файрволе нужны TCP-порт веб-сервера (по умолчанию 8443, меняется параметром <code>-http</code>) и TCP- и UDP-порты TURN (по умолчанию 1194). Для передачи медиа разрешите входящий и исходящий UDP в верхнем диапазоне портов или задайте нужный диапазон параметром <code>-udp-range</code>.</p>
+            <p data-en="Configure the built-in TURN server with &lt;code&gt;-turn&lt;/code&gt;. Set &lt;code&gt;:1194&lt;/code&gt; to listen on all network addresses; &lt;code&gt;auto&lt;/code&gt; is the default; an empty string disables the built-in server. External TURN servers are listed in &lt;code&gt;data/ice-servers.json&lt;/code&gt;. TURN over TLS uses &lt;code&gt;-turn-tls&lt;/code&gt; and port 5349.">Встроенный TURN-сервер настраивается параметром <code>-turn</code>. Значение <code>:1194</code> включает его на всех сетевых адресах, <code>auto</code> используется по умолчанию, а пустая строка отключает встроенный сервер. Внешние TURN-серверы указываются в <code>data/ice-servers.json</code>. Для TURN через TLS используется параметр <code>-turn-tls</code> и порт 5349.</p>
+            <p data-en="If NAT or firewall restrictions prevent a connection, run an external TURN server reachable by both participants and list it in &lt;code&gt;data/ice-servers.json&lt;/code&gt;. With a reverse proxy, set &lt;code&gt;proxyURL&lt;/code&gt; in &lt;code&gt;data/config.json&lt;/code&gt; and forward WebSocket connections at &lt;code&gt;/ws&lt;/code&gt;. See &lt;a href=&quot;https://raw.githubusercontent.com/leyvanah/sozvon/main/galene-install.md&quot;&gt;galene-install.md&lt;/a&gt; for details.">Если NAT или файрвол мешают соединению, разместите внешний TURN-сервер там, где он доступен обоим участникам, и укажите его в <code>data/ice-servers.json</code>. При использовании обратного прокси задайте <code>proxyURL</code> в <code>data/config.json</code> и настройте передачу WebSocket-соединений по пути <code>/ws</code>. Подробности — в <a href="https://raw.githubusercontent.com/leyvanah/sozvon/main/galene-install.md">galene-install.md</a>.</p>
+
+            <h2 id="faq" data-en="FAQ">Частые вопросы</h2>
+
+            <h3 data-en="What is this, and who made it?">Что это и кто автор?</h3>
+            <p data-en="SOZVON is a fork of the lightweight &lt;a href=&quot;https://galene.org&quot;&gt;Galène&lt;/a&gt; WebRTC SFU by Juliusz Chroboczek. Media routing, codecs and RTP are based on Galène. SOZVON changes the web client and adds specific server features. The project is MIT licensed.">SOZVON — форк лёгкого WebRTC SFU <a href="https://galene.org">Galène</a> Юлиуша Хробоцека. Маршрутизация медиа, кодеки и RTP основаны на Galène. Изменения SOZVON относятся к веб-клиенту и отдельным серверным возможностям. Проект распространяется по лицензии MIT.</p>
+
+            <h3 data-en="GitHub is blocked — what now?">GitHub заблокирован — что делать?</h3>
+            <p data-en="The installer supports a download mirror: pass its address with &lt;code&gt;--mirror&lt;/code&gt;. Download the Android app directly from a running server at &lt;code&gt;/sozvon.apk&lt;/code&gt; and install it from the file.">Для скачивания сервера установщик поддерживает зеркало: укажите его адрес параметром <code>--mirror</code>. Android-приложение можно скачать прямо с уже работающего сервера по адресу <code>/sozvon.apk</code> и установить из файла.</p>
+
+            <h3 data-en="Do I need accounts?">Нужны ли аккаунты?</h3>
+            <p data-en="Guests do not need to register. They enter a name and gain access to the room through an invitation or the operator’s approval. SOZVON has no telemetry.">Гостям не нужно регистрироваться. Для входа достаточно указать имя и получить доступ к комнате — по приглашению или с разрешения оператора. В SOZVON нет телеметрии.</p>
+
+            <h3 data-en="How do I upgrade?">Как обновляться?</h3>
+            <p data-en="Run the installation script again. It downloads the new version and restores the previous one if the upgraded server fails to start. The Android app uses the same signing key and updates in place.">Повторно запустите установочный скрипт. Он загрузит новую версию и вернёт предыдущую, если обновлённый сервер не запустится. Android-приложение подписывается одним ключом и обновляется поверх установленной версии.</p>
+
+            <h3 data-en="Where do I report vulnerabilities?">Куда сообщать об уязвимостях?</h3>
+            <p data-en="Report vulnerabilities privately using the instructions in &lt;a href=&quot;https://github.com/leyvanah/sozvon/blob/main/SECURITY.md&quot;&gt;SECURITY.md&lt;/a&gt;, without disclosing details in a public issue. Use GitHub for other bugs and suggestions. &lt;a href=&quot;https://github.com/leyvanah/sozvon/blob/main/CONTRIBUTING.md&quot;&gt;CONTRIBUTING.md&lt;/a&gt; explains how to report a bug or contribute a fix.">Об уязвимостях сообщайте приватно по инструкции в <a href="https://github.com/leyvanah/sozvon/blob/main/SECURITY.md">SECURITY.md</a>, не публикуя подробности в открытом issue. Для обычных ошибок и предложений используйте GitHub. В <a href="https://github.com/leyvanah/sozvon/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> описано, как подготовить сообщение об ошибке или предложить исправление.</p>
+</article>
+</div></main><footer class="site-footer"><div class="wrap footer-inner">
+  <a class="brand" href="index.html" aria-label="SOZVON — главная" data-en-label="SOZVON — home"><span class="brand-word">SOZVON</span><img class="brand-mark" src="assets/sozvon-mark.svg" alt="" width="13" height="34"></a>
+  <p><span  data-en="A fork of">Форк</span> <a href="https://galene.org">Galène</a>. <span  data-en="Open source, MIT.">Открытый код, MIT.</span></p>
+  <a href="https://github.com/leyvanah/sozvon">GitHub</a>
+</div></footer><div id="announcement" class="sr-only" role="status" aria-live="polite"></div></body></html>
