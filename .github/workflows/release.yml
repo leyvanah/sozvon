@@ -10,15 +10,114 @@ on:
       version:
         description: 'Version to stamp into the dry-run build'
         required: false
-        default: 'v0.0.0-dryrun'
+        # Not 0.0.0: the APK's versionCode is computed from this, and Android
+        # refuses a versionCode of 0, so that default failed every dry run.
+        default: 'v0.0.1-dryrun'
 
 permissions:
   contents: write
 
 jobs:
+  # The desktop app's Windows installer.  A job of its own because
+  # electron-builder makes an NSIS installer only on Windows; the release job
+  # below waits for it and publishes it with everything else, so there is
+  # still exactly one place that creates the release and one SHA256SUMS.
+  windows-installer:
+    name: Build the Windows installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # The installer carries the release's version, not whatever
+      # desktop/package.json last said: an app that reports a different
+      # version from the release it was downloaded from is a support case
+      # nobody can reproduce.  Semver has no leading "v".
+      - name: Determine version
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+              version="${GITHUB_REF_NAME}"
+          else
+              version="${{ inputs.version }}"
+          fi
+          echo "version=${version#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: desktop
+
+      # Counted before they are run, as in CI: `node --test` on a mask that
+      # matches nothing passes with nothing checked.
+      - name: Test
+        working-directory: desktop
+        run: |
+          n=0
+          for f in test/*.test.js; do
+              [ -f "$f" ] && n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+              echo "no tests in desktop/test/ -- this step would have passed vacuously" >&2
+              exit 1
+          fi
+          node --test 'test/*.test.js'
+
+      # --publish never: electron-builder publishes to GitHub on its own when
+      # it sees a tag and a token, which would race the release job for the
+      # same release.  It only builds here.
+      #
+      # Unsigned: there is no code-signing certificate yet, so Windows
+      # SmartScreen warns on first run.  Auto-discovery is off so that the
+      # build cannot pick up some certificate the runner happens to have.
+      #
+      # A fixed asset name, like sozvon.apk's, so that
+      # releases/latest/download/sozvon-setup.exe is a permanent link the
+      # website and the README can point at.
+      - name: Build the installer
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -eu
+          rm -rf dist
+          npm run dist -- --win nsis --x64 --publish never \
+              -c.extraMetadata.version="$VERSION" \
+              -c.nsis.artifactName=sozvon-setup.exe
+          ls -l dist
+
+          # The build must have produced the one installer, and a real one --
+          # not a stub left by a step that quietly did nothing.
+          exe=dist/sozvon-setup.exe
+          if [ ! -f "$exe" ]; then
+              echo "electron-builder did not produce $exe" >&2
+              exit 1
+          fi
+          size=$(stat -c %s "$exe")
+          if [ "$size" -lt 50000000 ]; then
+              echo "$exe is only $size bytes; an Electron installer is ~100 MB" >&2
+              exit 1
+          fi
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: desktop/dist/sozvon-setup.exe
+          if-no-files-found: error
+
   release:
     name: Build and publish
     runs-on: ubuntu-latest
+    needs: windows-installer
     steps:
       - uses: actions/checkout@v4
 
@@ -180,10 +279,24 @@ jobs:
           # can be sent, that contrib/install.sh fetches by exactly this name,
           # and that the GitHub-release app stores follow.
           cp "$apk" dist/sozvon.apk
-          # Re-made now that the APK is in dist/ as well; the copy embedded in
-          # the APK covers only the server archives, which is all the
-          # installer looks up there.
+
+      # After the APK, not before: the APK embeds dist/ (see above), and the
+      # Windows installer has no business inside it.
+      - name: Add the Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: dist
+
+      # Re-made now that the APK and the Windows installer are in dist/ as
+      # well; the copy embedded in the APK covers only the server archives,
+      # which is all the installer looks up there.
+      - name: Checksum everything
+        run: |
+          set -eu
+          test -f dist/sozvon-setup.exe
           (cd dist && rm -f SHA256SUMS && sha256sum * > SHA256SUMS)
+          cat dist/SHA256SUMS
           ls -l dist
 
       - name: Upload artefacts to the workflow run
@@ -212,6 +325,13 @@ jobs:
             echo 'ask you to allow installing from this source. The server the'
             echo 'installer sets up offers the same app for download on its login'
             echo 'page.'
+            echo
+            echo '`sozvon-setup.exe` is the Windows app. It is not code-signed yet,'
+            echo 'so on first run Windows SmartScreen says it "protected your PC":'
+            echo 'choose "More info", then "Run anyway". Check the file against'
+            echo '`SHA256SUMS` first if that makes you hesitate -- it should.'
+            echo
+            echo 'The `windows_amd64` archive is the server, not the app.'
             echo
             echo 'To install on a fresh Debian or Ubuntu VPS, see `contrib/install.sh`.'
           } > release-notes.md

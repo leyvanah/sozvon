@@ -164,9 +164,16 @@ GitHub releases — [Obtainium](https://github.com/ImranR98/Obtainium),
 [Komi Store](https://github.com/kurikomi-labs/komi-store) — can therefore
 track `leyvanah/sozvon` and keep the app current on their own.
 
-The desktop app is not packaged yet: build it from
-[desktop/](desktop/README.md), or use a browser, which needs nothing
-installed.
+The Windows app is attached to every release as well:
+
+<https://github.com/leyvanah/sozvon/releases/latest/download/sozvon-setup.exe>
+
+Run it and it installs for your user, with no administrator rights needed. It
+is not code-signed yet, so Windows SmartScreen will say it "protected your
+PC" the first time: choose "More info", then "Run anyway". The release's
+`SHA256SUMS` covers the installer too. (The `windows_amd64` archive next to it
+is the server, not the app.) There is no macOS or Linux build of the app yet;
+a browser needs nothing installed.
 
 ## Running as a service with automatic TLS
 
