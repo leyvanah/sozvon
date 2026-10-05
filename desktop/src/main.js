@@ -1077,7 +1077,42 @@ if (!gotTheLock) {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
       else showWindow();
     });
+
+    if (process.env.SOZVON_SMOKE_TEST) smokeTest();
   });
+}
+
+/**
+ * Release check, run only when SOZVON_SMOKE_TEST is set: the release workflow
+ * starts every packaged build this way on its own platform and reads the
+ * verdict from stdout.  Packaging can fail in ways no build step notices -- a
+ * file left out, an icon the platform cannot read, a sandbox that will not
+ * start -- and the first person to find out would otherwise be whoever
+ * downloaded it.  The value is how many seconds to stay up after passing, so
+ * the workflow can take a screenshot of the window.
+ */
+function smokeTest() {
+  const fail = (why) => {
+    console.log('SOZVON_SMOKE_FAIL ' + why);
+    app.exit(1);
+  };
+  const timer = setTimeout(() => fail('window did not finish loading in 60 s'), 60000);
+  const loaded = (wc) => new Promise((resolve) => {
+    if (!wc.isLoading()) resolve();
+    else wc.once('did-finish-load', resolve);
+  });
+  Promise.all([mainWindow, contentView].filter(Boolean)
+    .map((v) => loaded(v.webContents)))
+    .then(() => {
+      clearTimeout(timer);
+      if (nativeImage.createFromPath(TRAY_ICON_PATH).isEmpty())
+        return fail('tray icon is empty: ' + TRAY_ICON_PATH);
+      if (!tray) return fail('no tray');
+      console.log('SOZVON_SMOKE_OK ' + process.platform + ' ' + process.arch +
+        ' ' + app.getVersion());
+      const hold = parseInt(process.env.SOZVON_SMOKE_TEST, 10) || 0;
+      setTimeout(() => app.exit(0), hold * 1000);
+    }, (e) => fail(String(e)));
 }
 
 app.on('before-quit', () => { quitting = true; });
