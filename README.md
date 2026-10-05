@@ -55,7 +55,8 @@ The upstream documentation in this repository still applies:
   * **Operator room** — a dedicated group becomes an operator dashboard that
     issues personal, revocable invite links per client, each opening into its
     own gated child room with a live idle/knocking/in-call status.
-  * **End-to-end encryption** — opt-in per group. Two participants encrypt
+  * **End-to-end encryption** — per group, and turned on by
+    default by the installer. Two participants encrypt
     media in the browser (ephemeral ECDH, authenticated by a 5-emoji
     ZRTP-style Short Authentication String the humans compare aloud;
     AES-256-GCM per frame), so the server only ever forwards ciphertext. An
@@ -105,8 +106,8 @@ TURN — Sozvon keeps the same layout (`data/`, `groups/`, `static/`).
 ## Installing on a server
 
 On a fresh Debian or Ubuntu VPS, one command sets everything up — service
-account, TLS certificate, firewall rules, a systemd unit and an operator
-account:
+account, TLS certificate, a systemd unit and an operator account, and opens
+the ports in ufw if ufw is active (otherwise it lists the ports to open):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/leyvanah/sozvon/main/contrib/install.sh | sudo sh
