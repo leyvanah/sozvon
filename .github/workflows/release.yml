@@ -102,9 +102,9 @@ jobs:
       # run, and macOS Gatekeeper refuses to open the app until it is allowed
       # in System Settings.  Auto-discovery is off so that the build cannot
       # pick up some certificate the runner happens to have.  The macOS app is
-      # still ad-hoc signed (mac.identity "-" in package.json): Apple silicon
-      # runs no unsigned code at all, and an app without even that signature
-      # is reported as "damaged" rather than merely unverified.
+      # still ad-hoc signed (desktop/build/after-pack.js): Apple silicon runs
+      # no unsigned code at all, and an app without even that signature is
+      # reported as "damaged" rather than merely unverified.
       - name: Build the installer
         working-directory: desktop
         env:
@@ -218,7 +218,14 @@ jobs:
           SMOKE_SHOT="$PWD/out/shot-linux-deb.png" \
               xvfb-run -a -s '-screen 0 1280x800x24' scripts/smoke.sh sozvon-desktop
 
-          # The AppImage, as downloaded and made executable.
+          # The AppImage, as downloaded and made executable -- on the kind of
+          # system it is offered for.  Ubuntu 23.10 and later forbid
+          # unprivileged user namespaces, and an AppImage cannot carry the
+          # AppArmor profile or the setuid helper that get Chromium's sandbox
+          # past that, so there it does not start: Ubuntu is pointed at the
+          # .deb.  Debian, Fedora, Arch and the rest do not restrict them, which
+          # is what lifting the restriction here reproduces.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           chmod +x out/sozvon-linux-x86_64.AppImage
           SMOKE_SHOT="$PWD/out/shot-linux-appimage.png" \
               xvfb-run -a -s '-screen 0 1280x800x24' scripts/smoke.sh out/sozvon-linux-x86_64.AppImage
@@ -476,8 +483,10 @@ jobs:
             echo '  first time it is opened macOS refuses; open System Settings ->'
             echo '  Privacy & Security, choose "Open Anyway" next to Sozvon and confirm.'
             echo '- **Linux:** `sozvon-linux-amd64.deb` for Debian, Ubuntu and their'
-            echo '  relatives: `sudo apt install ./sozvon-linux-amd64.deb`. Elsewhere,'
-            echo '  `sozvon-linux-x86_64.AppImage`: make it executable and run it.'
+            echo '  relatives: `sudo apt install ./sozvon-linux-amd64.deb`. On other'
+            echo '  distributions, `sozvon-linux-x86_64.AppImage`: make it executable'
+            echo '  and run it. On Ubuntu 23.10 and later the AppImage does not start'
+            echo '  (the system forbids the sandbox it needs); use the .deb there.'
             echo
             echo 'The `windows_amd64`, `darwin_*` and `linux_*` archives are the server,'
             echo 'not the app.'

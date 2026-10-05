@@ -55,7 +55,7 @@
       ],
       "icon": "assets/icon.png",
       "category": "public.app-category.social-networking",
-      "identity": "-",
+      "identity": null,
       "hardenedRuntime": false,
       "extendInfo": {
         "NSCameraUsageDescription": "Sozvon uses the camera for video calls.",
@@ -77,7 +77,8 @@
       "afterInstall": "build/linux/after-install.tpl",
       "afterRemove": "build/linux/after-remove.tpl"
     },
-    "npmRebuild": false
+    "npmRebuild": false,
+    "afterPack": "build/after-pack.js"
   },
   "homepage": "https://leyvanah.github.io/sozvon/"
 }
