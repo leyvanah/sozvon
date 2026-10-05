@@ -10,7 +10,9 @@ on:
       version:
         description: 'Version to stamp into the dry-run build'
         required: false
-        default: 'v0.0.0-dryrun'
+        # Not 0.0.0: the APK's versionCode is computed from this, and Android
+        # refuses a versionCode of 0, so that default failed every dry run.
+        default: 'v0.0.1-dryrun'
 
 permissions:
   contents: write
