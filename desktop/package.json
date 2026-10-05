@@ -40,6 +40,41 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "public.app-category.social-networking",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSCameraUsageDescription": "Sozvon uses the camera for video calls.",
+        "NSMicrophoneUsageDescription": "Sozvon uses the microphone for calls."
+      }
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Network",
+      "synopsis": "Video calls on your own server",
+      "description": "Desktop client for Sozvon, self-hosted video calls built on Galène.",
+      "maintainer": "imaprocessus <212347434+leyvanah@users.noreply.github.com>"
+    },
+    "deb": {
+      "afterInstall": "build/linux/after-install.tpl",
+      "afterRemove": "build/linux/after-remove.tpl"
     }
-  }
+  },
+  "homepage": "https://leyvanah.github.io/sozvon/"
 }
