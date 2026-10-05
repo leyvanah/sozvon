@@ -18,13 +18,37 @@ permissions:
   contents: write
 
 jobs:
-  # The desktop app's Windows installer.  A job of its own because
-  # electron-builder makes an NSIS installer only on Windows; the release job
-  # below waits for it and publishes it with everything else, so there is
-  # still exactly one place that creates the release and one SHA256SUMS.
-  windows-installer:
-    name: Build the Windows installer
-    runs-on: windows-latest
+  # The desktop app's installers, one runner per platform, because
+  # electron-builder makes an NSIS installer only on Windows and a .dmg only
+  # on macOS.  The release job below waits for all three and publishes them
+  # with everything else, so there is still exactly one place that creates the
+  # release and one SHA256SUMS.
+  #
+  # Every installer gets a fixed name, like sozvon.apk's, so that
+  # releases/latest/download/<name> is a permanent link the website and the
+  # README can point at:
+  #
+  #   sozvon-setup.exe               Windows x64
+  #   sozvon-mac-arm64.dmg           macOS, Apple silicon
+  #   sozvon-mac-x64.dmg             macOS, Intel
+  #   sozvon-linux-amd64.deb         Debian, Ubuntu and their relatives
+  #   sozvon-linux-x86_64.AppImage   any other x86-64 Linux
+  desktop:
+    name: Build the ${{ matrix.name }} installer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            platform: windows
+          - name: macOS
+            os: macos-latest
+            platform: mac
+          - name: Linux
+            os: ubuntu-latest
+            platform: linux
     defaults:
       run:
         shell: bash
@@ -74,50 +98,161 @@ jobs:
       # it sees a tag and a token, which would race the release job for the
       # same release.  It only builds here.
       #
-      # Unsigned: there is no code-signing certificate yet, so Windows
-      # SmartScreen warns on first run.  Auto-discovery is off so that the
-      # build cannot pick up some certificate the runner happens to have.
-      #
-      # A fixed asset name, like sozvon.apk's, so that
-      # releases/latest/download/sozvon-setup.exe is a permanent link the
-      # website and the README can point at.
+      # Unsigned, for want of certificates: Windows SmartScreen warns on first
+      # run, and macOS Gatekeeper refuses to open the app until it is allowed
+      # in System Settings.  Auto-discovery is off so that the build cannot
+      # pick up some certificate the runner happens to have.  The macOS app is
+      # still ad-hoc signed (mac.identity "-" in package.json): Apple silicon
+      # runs no unsigned code at all, and an app without even that signature
+      # is reported as "damaged" rather than merely unverified.
       - name: Build the installer
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           VERSION: ${{ steps.v.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           set -eu
           rm -rf dist
-          npm run dist -- --win nsis --x64 --publish never \
-              -c.extraMetadata.version="$VERSION" \
-              -c.nsis.artifactName=sozvon-setup.exe
+          case "$PLATFORM" in
+          windows)
+              npm run dist -- --win nsis --x64 --publish never \
+                  -c.extraMetadata.version="$VERSION" \
+                  -c.nsis.artifactName=sozvon-setup.exe
+              expect="sozvon-setup.exe" ;;
+          mac)
+              npm run dist -- --mac dmg --arm64 --x64 --publish never \
+                  -c.extraMetadata.version="$VERSION" \
+                  -c.dmg.artifactName='sozvon-mac-${arch}.dmg'
+              expect="sozvon-mac-arm64.dmg sozvon-mac-x64.dmg" ;;
+          linux)
+              npm run dist -- --linux AppImage deb --x64 --publish never \
+                  -c.extraMetadata.version="$VERSION" \
+                  -c.appImage.artifactName=sozvon-linux-x86_64.AppImage \
+                  -c.deb.artifactName=sozvon-linux-amd64.deb
+              expect="sozvon-linux-amd64.deb sozvon-linux-x86_64.AppImage" ;;
+          esac
           ls -l dist
 
-          # The build must have produced the one installer, and a real one --
-          # not a stub left by a step that quietly did nothing.
-          exe=dist/sozvon-setup.exe
-          if [ ! -f "$exe" ]; then
-              echo "electron-builder did not produce $exe" >&2
-              exit 1
-          fi
-          size=$(stat -c %s "$exe")
-          if [ "$size" -lt 50000000 ]; then
-              echo "$exe is only $size bytes; an Electron installer is ~100 MB" >&2
+          # Every installer must be there, and a real one -- not a stub left
+          # by a step that quietly did nothing.  Only these are uploaded, not
+          # the blockmaps and unpacked trees beside them.
+          mkdir -p out
+          for f in $expect; do
+              if [ ! -f "dist/$f" ]; then
+                  echo "electron-builder did not produce dist/$f" >&2
+                  exit 1
+              fi
+              size=$(wc -c < "dist/$f")
+              if [ "$size" -lt 50000000 ]; then
+                  echo "dist/$f is only $size bytes; an Electron installer is ~100 MB" >&2
+                  exit 1
+              fi
+              cp "dist/$f" out/
+          done
+
+      # Install or unpack what was just built and start it, the way a person
+      # would, in smoke-test mode (desktop/scripts/smoke.sh).  A screenshot of
+      # each start goes to the run's artefacts for a person to look at.
+      - name: Start the installed app (Windows)
+        if: matrix.platform == 'windows'
+        working-directory: desktop
+        run: |
+          set -eu
+          # Per-user and silent.  Start-Process -Wait, because the installer
+          # otherwise returns before it has finished copying.
+          powershell -NoProfile -Command \
+              "Start-Process -FilePath 'out\sozvon-setup.exe' -ArgumentList '/S' -Wait"
+          app="$LOCALAPPDATA/Programs/sozvon-desktop/Sozvon.exe"
+          test -f "$app"
+          SMOKE_SHOT="$PWD/out/shot-windows.png" scripts/smoke.sh "$app"
+
+      - name: Start the installed app (macOS)
+        if: matrix.platform == 'mac'
+        working-directory: desktop
+        run: |
+          set -eu
+          for arch in arm64 x64; do
+              mnt=$(mktemp -d)
+              hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "out/sozvon-mac-$arch.dmg"
+              app="/tmp/Sozvon-$arch.app"
+              rm -rf "$app"
+              ditto "$mnt/Sozvon.app" "$app"
+              hdiutil detach "$mnt"
+
+              # The ad-hoc signature has to be there and intact (see the build
+              # step), the binary has to be the architecture it is named for,
+              # and macOS kills an app that touches the camera without saying
+              # why it wants it.
+              codesign --verify --deep --strict --verbose=2 "$app"
+              codesign -dv "$app" 2>&1 | tee sig.txt
+              grep -q 'Signature=adhoc' sig.txt
+              lipo -archs "$app/Contents/MacOS/Sozvon" | tee archs.txt
+              want=$arch
+              [ "$arch" = x64 ] && want=x86_64
+              grep -qw "$want" archs.txt
+              /usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$app/Contents/Info.plist"
+              /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app/Contents/Info.plist"
+
+              # The runner is Apple silicon: the Intel build starts through
+              # Rosetta.  Said out loud when it cannot, rather than skipped.
+              if [ "$arch" = x64 ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+                  echo "::warning::no Rosetta on this runner; the Intel build was checked but not started"
+                  continue
+              fi
+              SMOKE_SHOT="$PWD/out/shot-mac-$arch.png" scripts/smoke.sh "$app/Contents/MacOS/Sozvon"
+          done
+
+      - name: Start the installed app (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: desktop
+        run: |
+          set -eu
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb imagemagick libfuse2t64
+          echo "apparmor_restrict_unprivileged_userns: $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
+
+          # The .deb, installed the way the release notes say to.
+          sudo apt-get install -y -q "$PWD/out/sozvon-linux-amd64.deb"
+          ls -l /etc/apparmor.d/sozvon-desktop 2>/dev/null || echo "no AppArmor profile installed"
+          SMOKE_SHOT="$PWD/out/shot-linux-deb.png" \
+              xvfb-run -a -s '-screen 0 1280x800x24' scripts/smoke.sh sozvon-desktop
+
+          # The AppImage, as downloaded and made executable.
+          chmod +x out/sozvon-linux-x86_64.AppImage
+          SMOKE_SHOT="$PWD/out/shot-linux-appimage.png" \
+              xvfb-run -a -s '-screen 0 1280x800x24' scripts/smoke.sh out/sozvon-linux-x86_64.AppImage
+
+          # Removing the package must leave nothing of ours in /etc.
+          sudo apt-get remove -y -q sozvon-desktop
+          if [ -e /etc/apparmor.d/sozvon-desktop ]; then
+              echo "the AppArmor profile survived removing the package" >&2
               exit 1
           fi
 
-      - name: Upload the installer
+      - name: Upload the screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: desktop/dist/sozvon-setup.exe
+          name: desktop-screenshots-${{ matrix.platform }}
+          path: desktop/out/shot-*.png
+          if-no-files-found: warn
+
+      - name: Upload the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-installer-${{ matrix.platform }}
+          path: |
+            desktop/out/*.exe
+            desktop/out/*.dmg
+            desktop/out/*.deb
+            desktop/out/*.AppImage
           if-no-files-found: error
 
   release:
     name: Build and publish
     runs-on: ubuntu-latest
-    needs: windows-installer
+    needs: desktop
     steps:
       - uses: actions/checkout@v4
 
@@ -281,20 +416,24 @@ jobs:
           cp "$apk" dist/sozvon.apk
 
       # After the APK, not before: the APK embeds dist/ (see above), and the
-      # Windows installer has no business inside it.
-      - name: Add the Windows installer
+      # desktop installers have no business inside it.
+      - name: Add the desktop installers
         uses: actions/download-artifact@v4
         with:
-          name: windows-installer
+          pattern: desktop-installer-*
+          merge-multiple: true
           path: dist
 
-      # Re-made now that the APK and the Windows installer are in dist/ as
+      # Re-made now that the APK and the desktop installers are in dist/ as
       # well; the copy embedded in the APK covers only the server archives,
       # which is all the installer looks up there.
       - name: Checksum everything
         run: |
           set -eu
-          test -f dist/sozvon-setup.exe
+          for f in sozvon-setup.exe sozvon-mac-arm64.dmg sozvon-mac-x64.dmg \
+                   sozvon-linux-amd64.deb sozvon-linux-x86_64.AppImage; do
+              test -f "dist/$f" || { echo "missing dist/$f" >&2; exit 1; }
+          done
           (cd dist && rm -f SHA256SUMS && sha256sum * > SHA256SUMS)
           cat dist/SHA256SUMS
           ls -l dist
@@ -326,12 +465,22 @@ jobs:
             echo 'installer sets up offers the same app for download on its login'
             echo 'page.'
             echo
-            echo '`sozvon-setup.exe` is the Windows app. It is not code-signed yet,'
-            echo 'so on first run Windows SmartScreen says it "protected your PC":'
-            echo 'choose "More info", then "Run anyway". Check the file against'
+            echo 'The desktop app, for calls and for setting up a server on a VPS.'
+            echo 'None of its installers is code-signed yet; check the file against'
             echo '`SHA256SUMS` first if that makes you hesitate -- it should.'
             echo
-            echo 'The `windows_amd64` archive is the server, not the app.'
+            echo '- **Windows:** `sozvon-setup.exe`. On first run SmartScreen says it'
+            echo '  "protected your PC": choose "More info", then "Run anyway".'
+            echo '- **macOS:** `sozvon-mac-arm64.dmg` for Apple silicon (M1 and later),'
+            echo '  `sozvon-mac-x64.dmg` for Intel. Drag Sozvon to Applications. The'
+            echo '  first time it is opened macOS refuses; open System Settings ->'
+            echo '  Privacy & Security, choose "Open Anyway" next to Sozvon and confirm.'
+            echo '- **Linux:** `sozvon-linux-amd64.deb` for Debian, Ubuntu and their'
+            echo '  relatives: `sudo apt install ./sozvon-linux-amd64.deb`. Elsewhere,'
+            echo '  `sozvon-linux-x86_64.AppImage`: make it executable and run it.'
+            echo
+            echo 'The `windows_amd64`, `darwin_*` and `linux_*` archives are the server,'
+            echo 'not the app.'
             echo
             echo 'To install on a fresh Debian or Ubuntu VPS, see `contrib/install.sh`.'
           } > release-notes.md
