@@ -6,6 +6,23 @@ Sozvon is a self-hosted video conferencing service, built as a fork of
 [Galène](https://galene.org) — the lightweight WebRTC SFU by Juliusz
 Chroboczek ([github.com/jech/galene](https://github.com/jech/galene)).
 
+**Website:** <https://leyvanah.github.io/sozvon/> — what Sozvon is, how to install it, and the documentation.
+
+<table>
+<tr>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/focus-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/focus-demo.png" alt="A one-to-one call"></a><br><sub>A call: your caller fills the screen, your own video sits in a corner</sub></td>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/call-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/call-demo.png" alt="Two equal tiles with the encryption emoji"></a><br><sub>Two tiles; the five emoji top left are compared aloud to check the E2E keys</sub></td>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/chat-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/chat-demo.png" alt="Participants and chat beside the video"></a><br><sub>Participants and chat beside the video</sub></td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/settings-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/settings-demo.png" alt="Settings panel during a call"></a><br><sub>Camera, microphone and theme can be changed during a call</sub></td>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/login-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/login-demo.png" alt="Sign-in with a device check"></a><br><sub>Before joining: enter a name, check camera and microphone</sub></td>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/lobby.jpg"><img src="https://leyvanah.github.io/sozvon/assets/shots/lobby.jpg" alt="Waiting-room sign-in"></a><br><sub>A guest waits in the lobby until the operator lets them in</sub></td>
+</tr>
+</table>
+
+<sub>Participant images are generated; the interface is unretouched.</sub>
+
 ## Relationship to Galène
 
 Sozvon is a downstream fork and owes all of its core to the Galène project.

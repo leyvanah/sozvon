@@ -6,6 +6,23 @@ Sozvon — сервис видеозвонков для самостоятель
 [Galène](https://galene.org) — легковесного WebRTC SFU авторства Juliusz
 Chroboczek ([github.com/jech/galene](https://github.com/jech/galene)).
 
+**Сайт:** <https://leyvanah.github.io/sozvon/> — что такое Sozvon, установка и документация.
+
+<table>
+<tr>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/focus-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/focus-demo.png" alt="Звонок один на один"></a><br><sub>Звонок: собеседник на весь экран, ваше видео — в углу</sub></td>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/call-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/call-demo.png" alt="Две равные плитки и эмодзи шифрования"></a><br><sub>Две плитки; пять эмодзи слева вверху сверяют вслух, чтобы проверить ключи E2E</sub></td>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/chat-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/chat-demo.png" alt="Участники и чат рядом с видео"></a><br><sub>Участники и переписка рядом с видео</sub></td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/settings-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/settings-demo.png" alt="Настройки во время звонка"></a><br><sub>Камеру, микрофон и оформление можно сменить во время звонка</sub></td>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/login-demo.png"><img src="https://leyvanah.github.io/sozvon/assets/shots/login-demo.png" alt="Вход с проверкой устройств"></a><br><sub>Перед звонком: имя, проверка камеры и микрофона</sub></td>
+<td width="33%" valign="top"><a href="https://leyvanah.github.io/sozvon/assets/shots/lobby.jpg"><img src="https://leyvanah.github.io/sozvon/assets/shots/lobby.jpg" alt="Вход в комнату ожидания"></a><br><sub>Гость ждёт в лобби, пока оператор не впустит его</sub></td>
+</tr>
+</table>
+
+<sub>Изображения участников сгенерированы; интерфейс не ретушировался.</sub>
+
 ## Отношение к Galène
 
 Sozvon — нижестоящий форк, и всем своим ядром обязан проекту Galène. Он
