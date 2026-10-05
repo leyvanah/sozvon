@@ -25,29 +25,124 @@
       timer = setTimeout(() => { button.textContent = text('Копировать', 'Copy'); }, 2400);
     });
   });
-  document.querySelectorAll('[role="tablist"]').forEach(list => {
-    const tabs = Array.from(list.querySelectorAll('[role="tab"]'));
-    function activate(tab) {
-      tabs.forEach(item => {
-        const selected = item === tab;
-        item.setAttribute('aria-selected', String(selected));
-        item.tabIndex = selected ? 0 : -1;
-        document.getElementById(item.getAttribute('aria-controls')).hidden = !selected;
+  // The screenshot carousel in the hero.  The slides are a scroll-snap strip,
+  // so a swipe on a touch screen is the browser's own; this adds the arrows,
+  // a dot per slide, and moving on by itself every five seconds.  It holds
+  // still while the pointer is over it or focus is inside it, while the page
+  // or the carousel is out of sight, while a screenshot is open full size,
+  // and for good once paused -- or from the start, for anyone who has asked
+  // their system for less motion.  The pause button is what WCAG asks of
+  // anything that moves on its own.
+  const carousel = document.querySelector('.carousel');
+  if (carousel) {
+    const track = carousel.querySelector('.carousel-track');
+    const slides = Array.from(track.querySelectorAll('.carousel-slide'));
+    const dotsBox = carousel.querySelector('.carousel-dots');
+    const pauseButton = carousel.querySelector('.carousel-pause');
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const INTERVAL = 5000;
+    let index = 0;
+    let paused = reduceMotion.matches;
+    let hovered = false, focused = false, visible = true;
+    let timer;
+
+    const dots = slides.map((slide, i) => {
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.setAttribute('aria-controls', track.id);
+      dot.addEventListener('click', () => { go(i); restart(); });
+      dotsBox.append(dot);
+      return dot;
+    });
+
+    function label() {
+      const n = slides.length;
+      carousel.setAttribute('aria-roledescription', text('карусель', 'carousel'));
+      dotsBox.setAttribute('aria-label', text('Выбор скриншота', 'Choose a screenshot'));
+      slides.forEach((slide, i) => {
+        const name = text(slide.dataset.nameRu, slide.dataset.nameEn);
+        slide.setAttribute('aria-roledescription', text('слайд', 'slide'));
+        slide.setAttribute('aria-label', text(`${i + 1} из ${n}: ${name}`, `${i + 1} of ${n}: ${name}`));
+        dots[i].setAttribute('aria-label', text(`Скриншот ${i + 1}: ${name}`, `Screenshot ${i + 1}: ${name}`));
+      });
+      pauseButton.setAttribute('aria-label', paused
+        ? text('Листать автоматически', 'Play automatically')
+        : text('Остановить автоматическое листание', 'Stop moving automatically'));
+    }
+
+    // The slide in view, and the two after it, are loaded ahead of time so
+    // that an automatic turn never lands on an empty frame.
+    function mark() {
+      dots.forEach((dot, i) => dot.setAttribute('aria-current', String(i === index)));
+      slides.forEach((slide, i) => {
+        slide.inert = i !== index;
+        const ahead = (i - index + slides.length) % slides.length;
+        const img = slide.querySelector('img');
+        if (ahead <= 2 && img.loading === 'lazy') img.loading = 'eager';
       });
     }
-    tabs.forEach((tab, index) => {
-      tab.addEventListener('click', () => activate(tab));
-      tab.addEventListener('keydown', event => {
-        let next;
-        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-        if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
-        if (event.key === 'Home') next = 0;
-        if (event.key === 'End') next = tabs.length - 1;
-        if (next !== undefined) { event.preventDefault(); activate(tabs[next]); tabs[next].focus(); }
-      });
+
+    function go(i, instant) {
+      index = (i + slides.length) % slides.length;
+      track.scrollTo({left: index * track.clientWidth, behavior: instant || reduceMotion.matches ? 'auto' : 'smooth'});
+      mark();
+    }
+
+    function running() {
+      return !paused && !hovered && !focused && visible && !document.hidden && !document.body.classList.contains('viewer-open');
+    }
+    function restart() {
+      clearTimeout(timer);
+      // Polite announcements only while it is not moving by itself, or a
+      // screen reader would be read a new slide every five seconds.
+      track.setAttribute('aria-live', running() ? 'off' : 'polite');
+      // Checked again when it fires: a screenshot may have been opened since.
+      if (running()) timer = setTimeout(() => { if (running()) go(index + 1); restart(); }, INTERVAL);
+    }
+
+    carousel.querySelector('.carousel-prev').addEventListener('click', () => { go(index - 1); restart(); });
+    carousel.querySelector('.carousel-next').addEventListener('click', () => { go(index + 1); restart(); });
+    pauseButton.addEventListener('click', () => {
+      paused = !paused;
+      pauseButton.setAttribute('aria-pressed', String(paused));
+      label();
+      restart();
     });
-    activate(tabs[0]);
-  });
+    track.addEventListener('keydown', event => {
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+        event.preventDefault();
+        go(index + (event.key === 'ArrowRight' ? 1 : -1));
+      }
+    });
+
+    // A swipe or a trackpad scroll moves the strip without us: follow it.
+    let settle;
+    track.addEventListener('scroll', () => {
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        const at = Math.round(track.scrollLeft / track.clientWidth);
+        if (at !== index) { index = at; mark(); restart(); }
+      }, 120);
+    }, {passive: true});
+    // Keep the same slide in view when the strip changes width.
+    new ResizeObserver(() => go(index, true)).observe(track);
+
+    carousel.addEventListener('pointerenter', event => { if (event.pointerType === 'mouse') { hovered = true; restart(); } });
+    carousel.addEventListener('pointerleave', event => { if (event.pointerType === 'mouse') { hovered = false; restart(); } });
+    // Keyboard focus only: a mouse click leaves focus on the button it
+    // pressed, and that must not stop the carousel for good.
+    carousel.addEventListener('focusin', event => { focused = event.target.matches(':focus-visible'); restart(); });
+    carousel.addEventListener('focusout', event => { if (!carousel.contains(event.relatedTarget)) { focused = false; restart(); } });
+    document.addEventListener('visibilitychange', restart);
+    document.querySelector('.image-viewer')?.addEventListener('close', () => setTimeout(restart));
+    new IntersectionObserver(entries => { visible = entries[0].isIntersecting; restart(); }, {threshold: 0.4}).observe(carousel);
+    document.addEventListener('sozvon:language', label);
+
+    pauseButton.setAttribute('aria-pressed', String(paused));
+    label();
+    mark();
+    restart();
+  }
   const viewer = document.querySelector('.image-viewer');
   if (viewer && typeof viewer.showModal === 'function') {
     const image = viewer.querySelector('img');
