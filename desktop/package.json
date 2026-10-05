@@ -35,7 +35,9 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "resources/**/*"
+      "resources/**/*",
+      "!node_modules/cpu-features/**",
+      "!node_modules/ssh2/lib/protocol/crypto/build/**"
     ],
     "win": {
       "target": "nsis",
@@ -74,7 +76,8 @@
     "deb": {
       "afterInstall": "build/linux/after-install.tpl",
       "afterRemove": "build/linux/after-remove.tpl"
-    }
+    },
+    "npmRebuild": false
   },
   "homepage": "https://leyvanah.github.io/sozvon/"
 }
