@@ -1758,8 +1758,12 @@ document.getElementById('mutebutton').onclick = async function(e) {
         setLocalMute(!getSettings().localMute, true);
         return;
     }
-    // no microphone yet: open one, keeping the camera exactly as it is
-    await addLocalMedia(c ? c.localId : undefined, {audio: true, video: hasVideo});
+    // no microphone yet: open one, keeping the camera exactly as it is --
+    // added to the stream already up, not by republishing it
+    if(c)
+        await addMicrophone(c);
+    else
+        await addLocalMedia(undefined, {audio: true, video: hasVideo});
     if(findUpMedia('camera'))
         setLocalMute(false, true);
 };
@@ -2887,6 +2891,10 @@ async function setUpStream(c, stream) {
     // c.stream might be different from stream if there's a filter
     c.stream.getTracks().forEach(addUpTrack);
 
+    // For a track added later to a stream that is already up: see
+    // addMicrophoneNow. (Sozvon)
+    c.userdata.addUpTrack = addUpTrack;
+
     stream.onaddtrack = function(e) {
         addUpTrack(e.track);
     };
@@ -3143,6 +3151,127 @@ async function addLocalMedia(localId, force) {
 }
 
 /**
+ * Turns the microphone on for a camera stream that was published without
+ * one, on the same queue as addLocalMedia.  (Sozvon)
+ *
+ * @param {Stream} c
+ */
+async function addMicrophone(c) {
+    let next = addLocalMediaQueue.then(
+        () => addMicrophoneNow(c),
+        () => addMicrophoneNow(c),
+    );
+    addLocalMediaQueue = next.catch(() => {});
+    return next;
+}
+
+/**
+ * Adds a microphone track to the camera stream c, which is already up, and
+ * lets the connection renegotiate under the same id.
+ *
+ * Republishing the stream with audio and video, which is what turning the
+ * microphone on did before, swaps the picture too: a new outgoing stream id,
+ * a new <video> on the other side, a visible jolt -- and with E2EE a wait for
+ * a fresh keyframe on top.  Adding a transceiver leaves the video sender, and
+ * the element showing it, exactly where they are.  If the stream is not one
+ * a track can be added to, this falls back to republishing.
+ *
+ * @param {Stream} c
+ */
+async function addMicrophoneNow(c) {
+    let hasVideo = !!(c.stream && c.stream.getVideoTracks().length);
+    // Still the camera stream we were asked about, still up, still silent.
+    let usable = () =>
+        !!c.sc && !!serverConnection && serverConnection.up[c.id] === c &&
+        !!c.stream && c.stream.getAudioTracks().length === 0 &&
+        typeof c.userdata.addUpTrack === 'function';
+    if(!usable() || !hasVideo)
+        return addLocalMediaNow(c.localId, {audio: true, video: hasVideo});
+    if(!mayPublishLocalMedia()) {
+        displayError(Sozvon.i18n.t('e2ee.blocked'));
+        return;
+    }
+
+    let settings = getSettings();
+    /** @type {MediaTrackConstraints} */
+    let audio = settings.audio ? {deviceId: settings.audio} : {};
+    if(!settings.preprocessing)
+        audio.noiseSuppression = false;   // see addLocalMediaNow
+
+    /** @type {MediaStreamTrack} */
+    let track;
+    try {
+        let s = await navigator.mediaDevices.getUserMedia({audio: audio});
+        track = s.getAudioTracks()[0];
+    } catch(e) {
+        displayMediaError(e);
+        return;
+    }
+    if(!track)
+        return;
+    if(!usable()) {
+        // hung up, or the stream was replaced, while the microphone opened
+        track.stop();
+        return;
+    }
+
+    // Into every stream that holds the camera's tracks: the one being sent,
+    // and the filter's input when a filter sits in between -- that is the
+    // one stopped at hang-up, so a track missing from it would keep the
+    // microphone open afterwards (see recoverMicrophone).
+    let f = c.userdata.filter;
+    c.stream.addTrack(track);
+    if(f && f.inputStream && f.inputStream !== c.stream)
+        f.inputStream.addTrack(track);
+    // A microphone lost earlier and not brought back leaves its sender with
+    // no track (recoverMicrophone).  Reuse it: replaceTrack needs no
+    // renegotiation, and an E2EE encryptor stays attached to the sender.
+    let idle = c.pc.getTransceivers().find(t =>
+        t.direction === 'sendonly' && !t.sender.track &&
+        t.receiver.track && t.receiver.track.kind === 'audio');
+    try {
+        if(idle) {
+            track.enabled = !getSettings().localMute;
+            track.onended = e => upTrackEnded(c, track, c.stream);
+            await idle.sender.replaceTrack(track);
+        } else {
+            c.userdata.addUpTrack(track);
+        }
+    } catch(e) {
+        console.error(e);
+        c.stream.removeTrack(track);
+        if(f && f.inputStream)
+            f.inputStream.removeTrack(track);
+        track.stop();
+        displayError(e);
+        return;
+    }
+
+    mediaChoicesDone = false;
+    await setMediaChoices(true);
+    syncDeviceSelect('audioselect', track, 'audio');
+    setButtonsVisibility();
+}
+
+/**
+ * The toast for a getUserMedia that failed.
+ *
+ * @param {any} e
+ */
+function displayMediaError(e) {
+    if(e && e.name === 'NotAllowedError')
+        displayError(Sozvon.i18n.t('toast.permissionDenied'));
+    else if(e && (e.name === 'NotFoundError' ||
+                  e.name === 'OverconstrainedError' ||
+                  e.name === 'DevicesNotFoundError'))
+        displayError(Sozvon.i18n.t('toast.noDevice'));
+    else if(e && e.name === 'NotSupportedError')
+        showBrowserUnsupported();
+    else
+        displayError(e);
+}
+
+/**
  * Whether local media may be published right now.
  *
  * The E2EE controller settles on 'blocked' whenever the group requires
@@ -3250,16 +3379,7 @@ async function addLocalMediaNow(localId, force) {
     } catch(e) {
         clearTimeout(hangTimer);
         hideBrowserUnsupported();
-        if(e && e.name === 'NotAllowedError')
-            displayError(Sozvon.i18n.t('toast.permissionDenied'));
-        else if(e && (e.name === 'NotFoundError' ||
-                      e.name === 'OverconstrainedError' ||
-                      e.name === 'DevicesNotFoundError'))
-            displayError(Sozvon.i18n.t('toast.noDevice'));
-        else if(e && e.name === 'NotSupportedError')
-            showBrowserUnsupported();
-        else
-            displayError(e);
+        displayMediaError(e);
         return;
     }
 
