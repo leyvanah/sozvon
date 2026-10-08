@@ -115,6 +115,17 @@ func TestQualityLine(t *testing.T) {
 			who + " down=" + down + " asks the sender for 450 kbit/s"},
 		{"ask", "d1", m("cap", nil),
 			who + " down=" + down + " asks the sender to lift its cap"},
+		{"ask", "d1", m("cap", 600000.0, "audioDelay", 0.31,
+			"videoDelay", 0.12, "jitter", 0.004, "processing", 0.021,
+			"freeze", 0.0, "concealed", 0.012),
+			who + " down=" + down + " asks the sender for 600 kbit/s: " +
+				"audio delay 310ms video delay 120ms jitter 4ms " +
+				"processing 21ms freeze 0.0s concealed 1.2%"},
+		// evidence that is not a sane number is left out, not the line
+		{"ask", "d1", m("cap", 600000.0, "jitter", "<b>", "audioDelay", -1.0,
+			"processing", 0.05),
+			who + " down=" + down + " asks the sender for 600 kbit/s: " +
+				"processing 50ms"},
 		{"send", "u1", m("cap", 1000000.0),
 			who + " up=" + up + " sends video at 1000 kbit/s"},
 		{"everyone", "", m("degraded", true),

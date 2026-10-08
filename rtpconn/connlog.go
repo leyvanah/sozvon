@@ -283,6 +283,36 @@ func kbps(v interface{}) (string, bool) {
 	return fmt.Sprintf("%d kbit/s", int64(f/1000)), true
 }
 
+// askEvidence formats what a receiver's bitrate decision rested on: the
+// playout delays, the audio arrival jitter, the time to process a video
+// frame, freezes and concealment.  Jitter points at the network, processing
+// time at a receiver too busy to keep up -- the controller cannot tell the
+// two apart yet, and this is what will tell (Sozvon).  Each figure is
+// optional and shown only if it is a sane number.
+func askEvidence(v map[string]interface{}) string {
+	var parts []string
+	ms := func(key, name string) {
+		if f, ok := number(v[key], 3600); ok {
+			parts = append(parts,
+				fmt.Sprintf("%v %dms", name, int64(f*1000)))
+		}
+	}
+	ms("audioDelay", "audio delay")
+	ms("videoDelay", "video delay")
+	ms("jitter", "jitter")
+	ms("processing", "processing")
+	if f, ok := number(v["freeze"], 3600); ok {
+		parts = append(parts, fmt.Sprintf("freeze %.1fs", f))
+	}
+	if f, ok := number(v["concealed"], 1); ok {
+		parts = append(parts, fmt.Sprintf("concealed %.1f%%", f*100))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return ": " + strings.Join(parts, " ")
+}
+
 // qualityLine turns a report into a log line, or "" if it is malformed.
 func qualityLine(c *webClient, kind, id string, value interface{}) string {
 	v, _ := value.(map[string]interface{})
@@ -322,12 +352,13 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		if !ok {
 			return ""
 		}
+		why := askEvidence(v)
 		if v["cap"] == nil {
-			return fmt.Sprintf("%v down=%v asks the sender to lift its cap",
-				who, connTag(id))
+			return fmt.Sprintf("%v down=%v asks the sender to lift its cap%v",
+				who, connTag(id), why)
 		}
-		return fmt.Sprintf("%v down=%v asks the sender for %v",
-			who, connTag(id), limit)
+		return fmt.Sprintf("%v down=%v asks the sender for %v%v",
+			who, connTag(id), limit, why)
 	case "send":
 		dir, ok := streamKind(c, id)
 		if !ok || dir != "up" {

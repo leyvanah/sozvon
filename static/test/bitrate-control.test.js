@@ -76,6 +76,20 @@ test('snapshot sums inbound audio and video, ignoring silent concealment', () =>
     assert.ok(s.audio && s.video);
 });
 
+test('assess reports arrival jitter and frame processing time (tasks#32)', () => {
+    let at = (t, jitter, proc, decoded) => b.snapshot([
+        {type: 'inbound-rtp', kind: 'audio', jitterBufferDelay: t * 2,
+         jitterBufferEmittedCount: t * 50, jitter: jitter},
+        {type: 'inbound-rtp', kind: 'video', totalProcessingDelay: proc,
+         framesDecoded: decoded, bytesReceived: t * 1000},
+    ], t * 1000);
+    let r = b.assess(at(1, 0.002, 1.0, 30), at(3, 0.045, 2.5, 90));
+    assert.strictEqual(r.jitter, 0.045, 'the current estimate, not a delta');
+    assert.ok(Math.abs(r.processing - 0.025) < 1e-9, '1.5 s over 60 frames');
+    // no frame decoded in the interval: nothing to divide by
+    assert.strictEqual(b.assess(at(1, 0, 1, 30), at(3, 0, 1, 30)).processing, 0);
+});
+
 test('assess separates bad, good and in-between intervals', () => {
     let rx = receiver();
     let p = rx.next();

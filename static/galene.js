@@ -2218,7 +2218,15 @@ function feedBitrate(c, report) {
     if(r.changed) {
         console.info('bitrate: asking', c.username || c.source,
                      'to cap', c.id, 'at', r.cap, r.sample);
-        reportQuality('ask', c.id, {cap: r.cap});
+        // what the decision rested on, for the connection log: whether a
+        // cap follows network trouble or a receiver too busy to keep up is
+        // not settled yet (tasks#32), and this is the evidence
+        let s = r.sample;
+        reportQuality('ask', c.id, {
+            cap: r.cap, audioDelay: s.audioDelay, videoDelay: s.videoDelay,
+            jitter: s.jitter, processing: s.processing, freeze: s.freeze,
+            concealed: s.concealed,
+        });
     }
     if(!r.send || !c.source || !serverConnection ||
        !serverConnection.users[c.source])
