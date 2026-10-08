@@ -117,6 +117,11 @@
             audio: false, video: false,
             aDelay: 0, aEmitted: 0, aConcealed: 0, aSamples: 0,
             vDelay: 0, vEmitted: 0, vFreeze: 0, vBytes: 0,
+            // Not used to decide anything yet: reported with each cap
+            // asked for, to tell a congested network (packets arrive
+            // unevenly) from a receiver too busy to play on time (they
+            // arrive evenly, decoding is slow).  tasks#32.
+            aJitter: 0, vProcessing: 0, vDecoded: 0,
         };
         for(let r of report) {
             if(r.type !== 'inbound-rtp')
@@ -129,12 +134,16 @@
                 s.aConcealed += Math.max(0, (r.concealedSamples || 0) -
                                          (r.silentConcealedSamples || 0));
                 s.aSamples += r.totalSamplesReceived || 0;
+                // the arrival jitter is a current estimate, not a counter
+                s.aJitter = Math.max(s.aJitter, r.jitter || 0);
             } else if(kind === 'video') {
                 s.video = true;
                 s.vDelay += r.jitterBufferDelay || 0;
                 s.vEmitted += r.jitterBufferEmittedCount || 0;
                 s.vFreeze += r.totalFreezesDuration || 0;
                 s.vBytes += r.bytesReceived || 0;
+                s.vProcessing += r.totalProcessingDelay || 0;
+                s.vDecoded += r.framesDecoded || 0;
             }
         }
         return s;
@@ -146,12 +155,14 @@
      * @param {ReturnType<typeof snapshot>|null} prev
      * @param {ReturnType<typeof snapshot>} cur
      * @returns {{state: string, videoBps: number, audioDelay: number,
-     *            videoDelay: number, concealed: number, freeze: number}}
+     *            videoDelay: number, concealed: number, freeze: number,
+     *            jitter: number, processing: number}}
      *     state is 'bad', 'good', 'hold' (in between) or 'unknown'.
      */
     function assess(prev, cur) {
         let r = {state: 'unknown', videoBps: 0, audioDelay: 0,
-                 videoDelay: 0, concealed: 0, freeze: 0};
+                 videoDelay: 0, concealed: 0, freeze: 0,
+                 jitter: 0, processing: 0};
         if(!prev || cur.time <= prev.time)
             return r;
         let dt = (cur.time - prev.time) / 1000;
@@ -170,6 +181,11 @@
             r.videoDelay = (cur.vDelay - prev.vDelay) / dv;
             judged = true;
         }
+        r.jitter = cur.aJitter || 0;
+        let dd = (cur.vDecoded || 0) - (prev.vDecoded || 0);
+        if(dd > 0)
+            r.processing = Math.max(0, (cur.vProcessing || 0) -
+                                    (prev.vProcessing || 0)) / dd;
         if(cur.video) {
             r.freeze = Math.max(0, cur.vFreeze - prev.vFreeze);
             r.videoBps = Math.max(0, cur.vBytes - prev.vBytes) * 8 / dt;
