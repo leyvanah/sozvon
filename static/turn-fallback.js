@@ -155,8 +155,15 @@
         let local = byId.get(pair.localCandidateId);
         if(!local || !local.candidateType)
             return null;
-        let relay = local.candidateType === 'relay' ?
-            local.relayProtocol : local.protocol;
+        // relayProtocol is what marks a relayed candidate, not its type:
+        // Chrome reports a pair learnt through the relay as a peer-
+        // reflexive candidate with protocol "udp" (the relay to the far
+        // end) and relayProtocol "tcp" (us to the relay).  Read by its type,
+        // that pair looked like direct UDP.
+        if(local.relayProtocol)
+            return {type: 'relay',
+                    relay: String(local.relayProtocol).toLowerCase()};
+        let relay = local.candidateType === 'relay' ? null : local.protocol;
         return {type: local.candidateType,
                 relay: (relay || '').toLowerCase() || null};
     }
