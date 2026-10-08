@@ -61,6 +61,20 @@ test('today\'s configuration, TLS only, is left alone', () => {
                            [{urls: [TLS]}]);
 });
 
+test('UDP is only given up when a relay over TCP or TLS is left', () => {
+    assert.ok(f.canDropUdp(conf()), 'UDP and TLS relays: TLS is left');
+    assert.ok(f.canDropUdp({iceServers: [
+        {urls: ['turn:relay.example:3478', 'turn:relay.example:3478?transport=tcp']},
+    ]}), 'TURN over plain TCP counts');
+    // A server with direct paths and no relay at all, and one whose only
+    // relay is over UDP: giving UDP up would leave nothing to connect to.
+    assert.ok(!f.canDropUdp({}));
+    assert.ok(!f.canDropUdp({iceServers: []}));
+    assert.ok(!f.canDropUdp({iceServers: [{urls: [UDP]}]}));
+    assert.ok(!f.canDropUdp({iceServers: [{urls: ['stun:stun.example:3478']}]}),
+              'a STUN server is not a relay');
+});
+
 function report(localType, relayProtocol, viaTransport) {
     let r = [
         {id: 'L', type: 'local-candidate', candidateType: localType,
