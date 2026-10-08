@@ -9149,6 +9149,17 @@ function makePrecheck(prefix) {
     let state = {
         cam: false,
         mic: false,
+        // A toggle pressed whose device is still opening.  Joining in that
+        // window counts it as on: the press is the choice, and the open only
+        // confirms it.  On a slow phone, or at the first permission prompt,
+        // the window is seconds wide and "mic, then Join" fell into it,
+        // joining without sound and without a word about it. (Sozvon)
+        camOpening: false,
+        micOpening: false,
+        // Bumped by stop().  An open still in flight when the choice is
+        // applied must not come back to a preview nobody is looking at and
+        // keep the device, so it compares this before keeping its stream.
+        gen: 0,
         /** @type {MediaStream} */
         camStream: null,
         /** @type {MediaStream} */
@@ -9296,18 +9307,27 @@ function makePrecheck(prefix) {
         reflectRotation();
     }
 
-    async function startCam() {
+    /**
+     * @param {number} [gen] - state.gen when the open was asked for
+     */
+    async function startCam(gen = state.gen) {
         stopCam();
         let vid = select('video').value;
         /** @type {MediaTrackConstraints} */
         let video = vid ? {deviceId: vid} : {};
         video.aspectRatio = {ideal: 4/3};
         let stream = await navigator.mediaDevices.getUserMedia({video: video});
+        if(gen !== state.gen) {
+            stopStream(stream);
+            return;
+        }
         state.camStream = stream;
         let v = /** @type {HTMLVideoElement} */
             (document.getElementById(elementId('video')));
         v.srcObject = stream;
         await enumerate();
+        if(gen !== state.gen)
+            return;     // stop() has already released the stream
         let t = stream.getVideoTracks()[0];
         if(t && t.getSettings) {
             let current = t.getSettings().deviceId;
@@ -9326,14 +9346,23 @@ function makePrecheck(prefix) {
         v.srcObject = null;
     }
 
-    async function startMic() {
+    /**
+     * @param {number} [gen] - state.gen when the open was asked for
+     */
+    async function startMic(gen = state.gen) {
         stopMic();
         let aid = select('audio').value;
         let stream = await navigator.mediaDevices.getUserMedia(
             {audio: aid ? {deviceId: aid} : true},
         );
+        if(gen !== state.gen) {
+            stopStream(stream);
+            return;
+        }
         state.micStream = stream;
         await enumerate();
+        if(gen !== state.gen)
+            return;     // stop() has already released the stream
         let t = stream.getAudioTracks()[0];
         if(t && t.getSettings) {
             let current = t.getSettings().deviceId;
@@ -9449,8 +9478,11 @@ function makePrecheck(prefix) {
      * been applied, so the devices are free for the real call.
      */
     function stop() {
+        state.gen++;
         state.cam = false;
         state.mic = false;
+        state.camOpening = false;
+        state.micOpening = false;
         stopCam();
         stopMic();
         error('');
@@ -9462,19 +9494,26 @@ function makePrecheck(prefix) {
         let button = /** @type {HTMLButtonElement} */(this);
         button.disabled = true;
         error('');
+        let gen = state.gen;
         try {
             if(!state.cam) {
-                await startCam();
-                state.cam = true;
+                state.camOpening = true;
+                await startCam(gen);
+                if(gen === state.gen)
+                    state.cam = true;
             } else {
                 stopCam();
                 state.cam = false;
             }
         } catch(err) {
             console.warn(err);
-            state.cam = false;
-            error(Sozvon.i18n.t(mediaErrorKey(err, 'video')));
+            if(gen === state.gen) {
+                state.cam = false;
+                error(Sozvon.i18n.t(mediaErrorKey(err, 'video')));
+            }
         } finally {
+            if(gen === state.gen)
+                state.camOpening = false;
             button.disabled = false;
             reflect();
         }
@@ -9485,19 +9524,26 @@ function makePrecheck(prefix) {
         let button = /** @type {HTMLButtonElement} */(this);
         button.disabled = true;
         error('');
+        let gen = state.gen;
         try {
             if(!state.mic) {
-                await startMic();
-                state.mic = true;
+                state.micOpening = true;
+                await startMic(gen);
+                if(gen === state.gen)
+                    state.mic = true;
             } else {
                 stopMic();
                 state.mic = false;
             }
         } catch(err) {
             console.warn(err);
-            state.mic = false;
-            error(Sozvon.i18n.t(mediaErrorKey(err, 'audio')));
+            if(gen === state.gen) {
+                state.mic = false;
+                error(Sozvon.i18n.t(mediaErrorKey(err, 'audio')));
+            }
         } finally {
+            if(gen === state.gen)
+                state.micOpening = false;
             button.disabled = false;
             reflect();
         }
@@ -9565,9 +9611,11 @@ function makePrecheck(prefix) {
          * @returns {string}
          */
         applyChoices() {
-            let present = state.cam ? 'both' : state.mic ? 'mike' : null;
+            let cam = state.cam || state.camOpening;
+            let mic = state.mic || state.micOpening;
+            let present = cam ? 'both' : mic ? 'mike' : null;
             presentRequested = present;
-            if(state.cam) {
+            if(cam) {
                 let vid = select('video').value;
                 if(vid)
                     updateSettings({video: vid});
@@ -9576,7 +9624,7 @@ function makePrecheck(prefix) {
             } else {
                 updateSettings({video: ''});
             }
-            if(state.mic) {
+            if(mic) {
                 let aid = select('audio').value;
                 if(aid)
                     updateSettings({audio: aid});
