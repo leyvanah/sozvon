@@ -751,8 +751,11 @@ async function join() {
  */
 function onPeerConnection() {
     let forceRelay = getSettings().forceRelay;
-    let dropUdp = udpRelayGivenUp() &&
-        turnFallbackApi().offersUdp(this.rtcConfiguration);
+    let F = turnFallbackApi();
+    // A decision remembered from a call that had a TCP relay must not
+    // strand this one on a configuration with no relay at all.
+    let dropUdp = udpRelayGivenUp() && F.offersUdp(this.rtcConfiguration) &&
+        F.canDropUdp(this.rtcConfiguration);
     if(!forceRelay && !dropUdp)
         return null;
     let old = this.rtcConfiguration;
@@ -763,7 +766,7 @@ function onPeerConnection() {
     if(forceRelay)
         conf.iceTransportPolicy = 'relay';
     if(dropUdp)
-        conf = turnFallbackApi().withoutUdp(conf);
+        conf = F.withoutUdp(conf);
     return conf;
 }
 
@@ -814,6 +817,10 @@ function udpRelayGivenUp() {
 function giveUpUdpRelay(reason) {
     let F = turnFallbackApi();
     if(!F || udpGivenUp || !serverConnection)
+        return;
+    // Nothing to fall back to: a server with no relay over TCP/TLS.  Taking
+    // UDP away would leave every connection with no path at all.
+    if(!F.canDropUdp(serverConnection.rtcConfiguration))
         return;
     udpGivenUp = true;
     let s = fallbackStorage();

@@ -37,7 +37,8 @@
 // what is left is the relay over TCP/TLS, every connection is restarted over
 // it, and the decision is remembered for a few hours so that the next call on
 // the same network starts on the path that works.  With no UDP offered at
-// all -- relay-only and no UDP relay -- none of this does anything.
+// all -- relay-only and no UDP relay -- none of this does anything, and nor
+// does it with no relay over TCP/TLS to fall back to.
 //
 // This file holds the decisions; galene.js does the restarting.
 
@@ -252,10 +253,25 @@
         }
     }
 
+    /**
+     * Whether giving UDP up would leave anything to connect through: a
+     * relay over TCP or TLS.  Without one, withoutUdp gives a relay-only
+     * configuration with no relay in it -- every connection restarted on it
+     * dies, and so does every call started while the decision is
+     * remembered.  A lossy path still beats none.
+     *
+     * @param {RTCConfiguration} conf
+     * @returns {boolean}
+     */
+    function canDropUdp(conf) {
+        return withoutUdp(conf).iceServers.some(
+            s => urlsOf(s).some(u => /^turns?:/i.test(u)));
+    }
+
     const api = {
         DISCONNECTED_FOR, LOSS, LOSS_POLLS, REMEMBER, STORAGE_KEY,
-        isUdpRelay, hasUdpRelay, offersUdp, withoutUdp, selectedPath, Watcher,
-        remembered, remember,
+        isUdpRelay, hasUdpRelay, offersUdp, withoutUdp, canDropUdp,
+        selectedPath, Watcher, remembered, remember,
     };
 
     global.SozvonTurnFallback = api;
