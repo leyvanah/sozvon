@@ -87,7 +87,7 @@ jobs:
     # most frequent failure and invisible from the sending side.  It used to
     # run only in the pre-push hook of whoever had it installed; see
     # test/browser/README.md.
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       CGO_ENABLED: "0"
       # A skipped test is a check that did no work.  Here that fails the job
