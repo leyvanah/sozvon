@@ -117,6 +117,11 @@ jobs:
         run: test/browser/run.sh --grep-invert 'UDP|relay to fall back'
       # The TURN relay listens on the runner's own address: on loopback,
       # Chrome does not use it the way it uses a relay on the network.
+      - name: Smoke through the relay, as in production
+        run: |
+          ip=$(hostname -I | awk '{print $1}')
+          SOZVON_SERVER_ARGS="-relay-only -turn $ip:1194" \
+              test/browser/run.sh smoke
       - name: UDP fallback -- relay forced, UDP relay breaks
         run: |
           ip=$(hostname -I | awk '{print $1}')

@@ -121,6 +121,17 @@ test('two clients see and hear each other, both directions', async ({browser}) =
     // shipped before (fixed in d25c229).
     expect(await A.locator('#peers video').count()).toBe(2);
 
+    // A tile appears before its first frame: through a relay (-relay-only, as
+    // in production) the picture comes about 2.5 s later, directly within a
+    // second.  Wait for it -- a picture that never comes still fails below,
+    // and a tile that stays black is the failure this spec is for.
+    for (const [page, who] of [[A, 'alice'], [B, 'bob']])
+        await expect.poll(() => page.evaluate(() =>
+            Array.from(document.querySelectorAll('#peers video'))
+                .every(v => v.videoWidth > 0)),
+            {message: `${who}: a tile never got a picture`, timeout: 15_000},
+        ).toBe(true);
+
     // The part that matters: frames are decoding on both sides.  One-way video
     // passes every check above and fails this one.
     expectLivePicture(await stageVideos(A), 'alice');
