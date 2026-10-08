@@ -4284,16 +4284,19 @@ function refreshTileLabels(id) {
 /**
  * Smart framing of the 1-on-1 remote (speaker view). The remote tile already
  * fills the stage; these helpers decide how the *picture* fills its box:
- *   - "fill" (object-fit: cover) edge-to-edge when filling would crop only a
- *     little (the video and the screen are close in shape);
+ *   - "fill" (object-fit: cover) edge-to-edge when the stage is narrower than
+ *     the picture and filling crops only a little off its sides;
  *   - "fit" (object-fit: contain) showing the whole frame otherwise.
- * A shared screen is never cropped. (Sozvon)
+ * Filling never crops the top or the bottom: on a stage wider than the
+ * picture that is the forehead and the chin, and in a call the face is the
+ * picture. A shared screen is never cropped at all. (Sozvon)
  */
 const FRAMING_MIN_VISIBLE = 0.6;
 
 /**
  * Decide whether the remote picture should fill (cover) the stage. True only
- * when at least FRAMING_MIN_VISIBLE of the frame survives the crop.
+ * when the crop falls on the sides and at least FRAMING_MIN_VISIBLE of the
+ * frame's width survives it.
  *
  * @param {HTMLElement} remote - the .peer-remote container
  * @param {HTMLVideoElement} media - its <video class="media">
@@ -4319,8 +4322,11 @@ function decideFill(remote, media) {
     if(!sw || !sh)
         return false;
     let videoAR = vw / vh, stageAR = sw / sh;
-    let visible = Math.min(videoAR, stageAR) / Math.max(videoAR, stageAR);
-    return visible >= FRAMING_MIN_VISIBLE;
+    // On a stage wider than the picture, filling would cut its top and
+    // bottom: show the whole height instead, with bars at the sides.
+    if(stageAR > videoAR)
+        return false;
+    return stageAR / videoAR >= FRAMING_MIN_VISIBLE;
 }
 
 /**

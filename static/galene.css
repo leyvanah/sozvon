@@ -3104,9 +3104,9 @@ body.pre-join .login-container {
     padding-bottom: 0;
     object-fit: contain;
 }
-/* Sozvon — smart framing: fill the stage edge-to-edge when cropping stays
-   modest (.framing-fill, toggled by applyRemoteFraming); otherwise show the
-   whole frame (contain). */
+/* Sozvon — smart framing: fill the stage edge-to-edge when that crops only a
+   little off the sides (.framing-fill, toggled by applyRemoteFraming);
+   otherwise show the whole frame (contain). Top and bottom are never cut. */
 #peers.speaker .peer-remote.framing-fill .media {
     object-fit: cover;
 }
