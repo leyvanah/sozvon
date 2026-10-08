@@ -93,6 +93,8 @@ jobs:
       # A skipped test is a check that did no work.  Here that fails the job
       # rather than hiding in "1 skipped" under a green tick.
       SOZVON_FAIL_ON_SKIP: "1"
+      # mic-in-place.spec.js runs a second time in an encrypted room.
+      SOZVON_E2EE_ROOM: e2ee-strict
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
