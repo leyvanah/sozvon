@@ -134,6 +134,7 @@ test('a lost microphone comes back without touching the picture',
 
     // 2. The device is gone for good: video carries on alone.
     await A.evaluate(() => {
+        window.realGUM = navigator.mediaDevices.getUserMedia;
         navigator.mediaDevices.getUserMedia = async () => {
             const e = new Error('gone');
             e.name = 'NotFoundError';
@@ -146,6 +147,25 @@ test('a lost microphone comes back without touching the picture',
     await toast(A, 'Микрофон отключился — доступ отозван');
     expect(await conns(A)).toEqual(connsA);
     expect(await conns(B)).toEqual(connsB);
+    await growing(B, 'video');
+
+    // 3. The device is back and the microphone button is pressed: the new
+    // track goes into the sender left idle, still the same connections
+    // (tasks#31).
+    const transceivers = () => A.evaluate(() => Object.values(serverConnection.up)
+        .find(s => s.label === 'camera').pc.getTransceivers().length);
+    const tBefore = await transceivers();
+    await A.evaluate(() => {
+        navigator.mediaDevices.getUserMedia = window.realGUM;
+        document.getElementById('mutebutton').click();
+    });
+    await expect.poll(() => camera(A), {timeout: 20_000})
+        .toEqual({audio: 1, fresh: true, sent: true, video: true});
+    expect(await transceivers()).toBe(tBefore);
+    expect(await conns(A)).toEqual(connsA);
+    expect(await conns(B)).toEqual(connsB);
+    await growing(B, 'audio');
+    await growing(B, 'energy');
     await growing(B, 'video');
 
     expect(A.errors).toEqual([]);
