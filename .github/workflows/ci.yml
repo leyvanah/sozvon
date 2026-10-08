@@ -78,6 +78,72 @@ jobs:
           echo "onboarding tests ($n files)"
           node --test 'onboarding/test/*.test.js'
 
+  browser:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    # Two real clients in one Chromium, with a synthetic camera and
+    # microphone, against a server built from this tree: the only check that
+    # sees video actually decoding in both directions, which is the fork's
+    # most frequent failure and invisible from the sending side.  It used to
+    # run only in the pre-push hook of whoever had it installed; see
+    # test/browser/README.md.
+    timeout-minutes: 40
+    env:
+      CGO_ENABLED: "0"
+      # A skipped test is a check that did no work.  Here that fails the job
+      # rather than hiding in "1 skipped" under a green tick.
+      SOZVON_FAIL_ON_SKIP: "1"
+      # mic-in-place.spec.js runs a second time in an encrypted room.
+      SOZVON_E2EE_ROOM: e2ee-strict
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: test/browser/package-lock.json
+      - name: Install Playwright and Chromium
+        working-directory: test/browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run
+        # Everything but the three TURN scenarios, each of which needs a
+        # server set up its own way: they get a step of their own below.
+        run: test/browser/run.sh --grep-invert 'UDP|relay to fall back'
+      # The TURN relay listens on the runner's own address: on loopback,
+      # Chrome does not use it the way it uses a relay on the network.
+      - name: Smoke through the relay, as in production
+        run: |
+          ip=$(hostname -I | awk '{print $1}')
+          SOZVON_SERVER_ARGS="-relay-only -turn $ip:1194" \
+              test/browser/run.sh smoke
+      - name: UDP fallback -- relay forced, UDP relay breaks
+        run: |
+          ip=$(hostname -I | awk '{print $1}')
+          SOZVON_SERVER_ARGS="-relay-only -turn $ip:1194" \
+              test/browser/run.sh udp-fallback.spec.js -g 'broken UDP relay'
+      - name: UDP fallback -- direct path breaks, TCP relay left
+        run: |
+          ip=$(hostname -I | awk '{print $1}')
+          SOZVON_SERVER_ARGS="-turn $ip:1194" \
+              test/browser/run.sh udp-fallback.spec.js -g 'direct UDP path'
+      - name: UDP fallback -- direct path lossy, no relay at all
+        run: |
+          SOZVON_SERVER_ARGS="-turn=" \
+              test/browser/run.sh udp-fallback.spec.js -g 'relay to fall back'
+      - name: Keep traces and screenshots of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-results
+          path: test/browser/test-results/
+          retention-days: 7
+
   govulncheck:
     name: Known-vulnerability scan (informational)
     runs-on: ubuntu-latest

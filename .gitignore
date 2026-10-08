@@ -40,8 +40,10 @@ CLAUDE.md
 # deploy.  TESTING.md is the public half; this is the working document.
 /TEST-PROTOCOLS.local.md
 
-# Local-only browser smoke test (Playwright, node_modules, run artefacts).
-/test/browser/
+# Browser tests: the specs are tracked, their dependencies and run output are
+# not.
+/test/browser/node_modules/
+/test/browser/test-results/
 
 # Local-only remote-device testing notes — hold a LAN address and device
 # details for the test phone, never commit

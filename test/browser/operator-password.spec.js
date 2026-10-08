@@ -18,7 +18,11 @@ test.afterEach(async ({browser}) => {
 const HUB = 'operator-password';
 const FIRST = 'op-password-1';
 const SECOND = 'новый-пароль-2';
-const FILE = path.resolve(import.meta.dirname, '../../groups', `${HUB}.json`);
+// The stand's groups directory: run.sh says where it put it; otherwise the
+// repository's groups/, which is what a server started by hand reads.
+const FILE = path.resolve(
+    process.env.SOZVON_GROUPS || path.resolve(import.meta.dirname, '../../groups'),
+    `${HUB}.json`);
 
 async function login(browser, password) {
     const ctx = await browser.newContext();
