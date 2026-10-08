@@ -2326,12 +2326,10 @@ a:hover {
    used to describe went with the blue palette, and the elevated card went when
    the card did.)
 
-   The grain is inert as it stands: it is a data: URI and the server sends
-   `img-src 'self'` (cspHeader in webserver/webserver.go), so the browser
-   refuses it and the page is plain --bg.  Left in place rather than deleted
-   because the fix is to serve the speckle as a file, not to widen the policy —
-   but until then, do not read a rule here as evidence of what the screen
-   actually looks like. */
+   The grain is a file of its own, grain.svg, not a data: URI: the server sends
+   `img-src 'self'` (cspHeader in webserver/webserver.go), and for as long as it
+   was inlined the browser refused it and the screen was plain --bg.  Keep it a
+   file rather than widening the policy. */
 body.pre-join .login-container {
     background: var(--bg);
     position: relative;
@@ -2343,7 +2341,7 @@ body.pre-join .login-container::after {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-image: url("grain.svg");
     opacity: var(--grain);
 }
 /* Above the grain, not behind it. */
@@ -3104,9 +3102,9 @@ body.pre-join .login-container {
     padding-bottom: 0;
     object-fit: contain;
 }
-/* Sozvon — smart framing: fill the stage edge-to-edge when cropping stays
-   modest (.framing-fill, toggled by applyRemoteFraming); otherwise show the
-   whole frame (contain). */
+/* Sozvon — smart framing: fill the stage edge-to-edge when that crops only a
+   little off the sides (.framing-fill, toggled by applyRemoteFraming);
+   otherwise show the whole frame (contain). Top and bottom are never cut. */
 #peers.speaker .peer-remote.framing-fill .media {
     object-fit: cover;
 }
@@ -4016,6 +4014,7 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
             "header  header"
             "devices links"
             "create  links"
+            "account links"
             ".       links";
         /* The list spans the rows beside it, and a spanning item's height is
            shared out over the rows it crosses -- so a long list stretched the
@@ -4024,17 +4023,18 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
            fourth row is flexible, and track sizing skips growing content-sized
            rows for an item whose span includes a flexible track: the list's
            extra height lands here instead of above it. (Sozvon) */
-        grid-template-rows: auto auto auto 1fr;
+        grid-template-rows: auto auto auto auto 1fr;
         column-gap: clamp(2rem, 5vw, 4rem);
         align-content: start;
     }
     .operator-header { grid-area: header; }
     .operator-section-devices { grid-area: devices; }
     .operator-section-create { grid-area: create; }
+    .operator-section-account { grid-area: account; }
     .operator-section-last { grid-area: links; }
-    /* The list runs beside both sections rather than after them, so the last
-       thing in the left column no longer needs to hold space under itself. */
-    .operator-section-create { margin-bottom: 0; }
+    /* The list runs beside the left column rather than after it, so the last
+       thing in that column no longer needs to hold space under itself. */
+    .operator-section-account { margin-bottom: 0; }
 }
 .operator-section-title {
     margin: 0 0 1rem;
@@ -4104,6 +4104,61 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     flex: 1 1 12em;
 }
 .operator-field-expiry { flex: 0 1 9em; }
+/* The password form opens under its toggle, one field to a line. (Sozvon) */
+.operator-password {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75em;
+    margin-top: 0.75em;
+}
+.operator-password.invisible { display: none; }
+.operator-password .operator-field { flex: none; }
+.operator-password .btn {
+    align-self: flex-start;
+    padding: 9px 16px;
+    font-size: var(--fs-md);
+    border-radius: var(--radius-sm);
+}
+.operator-password-message {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-md);
+}
+.operator-password-message:empty { display: none; }
+.operator-password-message.error { color: var(--danger); }
+/* An eye at the right end of a password field shows what is typed, so a
+   long generated password can be checked before it is saved.  (Sozvon) */
+.password-reveal {
+    position: relative;
+    display: block;
+}
+.password-reveal > .form-control {
+    width: 100%;
+    padding-right: 2.75em;
+}
+.password-reveal-btn {
+    position: absolute;
+    top: 50%;
+    right: 0.25em;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25em;
+    height: 2.25em;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    cursor: pointer;
+}
+.password-reveal-btn:hover { color: var(--text); }
+.password-reveal-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
 .operator-field label {
     color: var(--text-2);
     font-size: var(--fs-sm);
@@ -4239,6 +4294,7 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     .operator-box { margin: 1.5rem auto; }
     .operator-field, .operator-field-expiry { flex: 1 1 100%; }
     .operator-create .btn { width: 100%; }
+    .operator-password .btn { align-self: stretch; }
 }
 
 /* --- Empty stage ----------------------------------------------------------

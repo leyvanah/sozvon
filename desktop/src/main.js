@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, session, ipcMain, Menu, shell, nativeImage, nativeTheme } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, ipcMain, Menu, shell, nativeImage, nativeTheme, clipboard, systemPreferences } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
@@ -6,9 +6,21 @@ const crypto = require('crypto');
 const { createTray } = require('./tray');
 const { createKnocks } = require('./knocks');
 
-const ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.ico');
-const ICON_PNG_PATH = path.join(__dirname, '..', 'assets', 'icon.png');
-if (fs.existsSync(ICON_PATH)) app.setAppUserModelId('ai.sozvon.desktop');
+// nativeImage reads an .ico only on Windows; anywhere else it hands back an
+// empty image, and a tray made from that is present but invisible -- with
+// "minimise to tray" on, the window it hides cannot be got back.  So Windows
+// keeps its .ico and the others get PNGs (see scripts/build-icon.js).  The
+// macOS one is a "Template" image, which the menu bar paints in its own
+// colour; the @2x copy beside it is picked up by name.
+const ASSETS_DIR = path.join(__dirname, '..', 'assets');
+const ICON_PATH = path.join(ASSETS_DIR,
+  process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const TRAY_ICON_PATH = path.join(ASSETS_DIR,
+  process.platform === 'win32' ? 'icon.ico'
+  : process.platform === 'darwin' ? 'trayTemplate.png'
+  : 'tray.png');
+if (process.platform === 'win32' && fs.existsSync(ICON_PATH))
+  app.setAppUserModelId('ai.sozvon.desktop');
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 const DEFAULT_CONFIG = {
@@ -33,6 +45,10 @@ const DEFAULT_CONFIG = {
   // Whether the "it is still running down here" balloon has been shown.  It
   // is an explanation, and an explanation repeated is a nag.
   trayHintShown: false,
+  // Whether the first-run onboarding has been finished or skipped.  Written
+  // by this process only (it is not in SETTABLE_CONFIG): a page that could
+  // clear it could put the onboarding back in front of somebody at will.
+  onboardingDone: false,
   // Every server this client has been to: {url, name, hub, lastGroup, rooms[]}.
   // serverUrl/lastGroup/recentGroups are kept in step with the most recent
   // one, so a config written by an older build still opens, and one written
@@ -639,6 +655,9 @@ function createWindow() {
     // minimise/maximise/close drawn over its right end in our colours.
     titleBarStyle: 'hidden',
     titleBarOverlay: overlayColors(),
+    // macOS draws its traffic lights at the left instead, over our bar; this
+    // centres them in it, and titlebar.html moves the bar's content clear.
+    trafficLightPosition: { x: 14, y: Math.round((TITLEBAR_H - 16) / 2) },
     webPreferences: {
       preload: path.join(__dirname, 'titlebar-preload.js'),
       contextIsolation: true,
@@ -646,7 +665,8 @@ function createWindow() {
       sandbox: false
     }
   });
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'titlebar.html'));
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'titlebar.html'),
+    { query: { platform: process.platform } });
 
   // A renderer that throws does it silently: nothing reaches the terminal,
   // and a bar whose script died looks exactly like a bar whose buttons are
@@ -823,7 +843,7 @@ function createWindow() {
     showLauncher(description || `Ошибка загрузки (${code})`);
   });
 
-  showLauncher();
+  showStart();
 
   // Debug aid: SOZVON_SHOT=<dir> saves what each layer is actually painting, a
   // couple of seconds in.  There is no other way to look at the two layers
@@ -868,6 +888,39 @@ function showLauncher(error) {
   contentView.webContents.loadFile(file, error ? { query: { error: String(error) } } : undefined);
 }
 
+/**
+ * The first page of a launch: the onboarding for somebody who has never
+ * connected anywhere, the launcher for everybody else.  An existing user
+ * upgrading the app has saved servers, and so never sees it.
+ */
+function showStart() {
+  if (!config.onboardingDone && !(config.servers || []).some(s => s && s.url))
+    showOnboarding();
+  else
+    showLauncher();
+}
+
+/**
+ * The onboarding page, copied from the repository's onboarding/ by
+ * scripts/sync-onboarding.js.  What it cannot know for itself goes in the
+ * query: the language, and whether it is coming back from the deploy wizard.
+ * The theme needs no passing -- prefers-color-scheme follows nativeTheme,
+ * which already carries the user's choice.
+ */
+function showOnboarding(resume) {
+  if (!contentView) return;
+  const file = path.join(__dirname, 'renderer', 'onboarding', 'index.html');
+  if (!fs.existsSync(file)) {
+    // A checkout run without npm start, which is what generates the copy.
+    console.error('onboarding missing; run npm run sync-onboarding');
+    showLauncher();
+    return;
+  }
+  const query = { lang: app.getLocale() };
+  if (resume) query.resume = resume;
+  contentView.webContents.loadFile(file, { query });
+}
+
 /** Drop the saved web login (a token in the page's own storage) and reload. */
 async function resetLogin() {
   if (!contentView) return;
@@ -888,7 +941,14 @@ async function resetLogin() {
  * browser error page that knows nothing about us.
  */
 function buildMenu() {
+  // On macOS the first menu is the application's own, whatever it is called,
+  // and copy, paste and select-all reach a text field only through an Edit
+  // menu: without one, Cmd+V does nothing in the password field.  Windows
+  // and Linux have neither convention and keep the menu as it was.
+  const mac = process.platform === 'darwin'
+    ? [{ role: 'appMenu' }, { role: 'editMenu' }] : [];
   return Menu.buildFromTemplate([
+    ...mac,
     {
       label: 'Сервер',
       submenu: [
@@ -961,7 +1021,7 @@ if (!gotTheLock) {
     });
 
     tray = createTray({
-      iconPath: ICON_PATH,
+      iconPath: TRAY_ICON_PATH,
       getConfig: () => config,
       setConfig: (patch) => {
         config = { ...config, ...patch };
@@ -1011,10 +1071,48 @@ if (!gotTheLock) {
     if (process.argv.includes('--hidden') && config.minimizeToTray !== false)
       mainWindow.hide();
 
+    // macOS: a click on the Dock icon.  The window is usually not gone but
+    // hidden in the tray, and then this is the way back to it.
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      else showWindow();
     });
+
+    if (process.env.SOZVON_SMOKE_TEST) smokeTest();
   });
+}
+
+/**
+ * Release check, run only when SOZVON_SMOKE_TEST is set: the release workflow
+ * starts every packaged build this way on its own platform and reads the
+ * verdict from stdout.  Packaging can fail in ways no build step notices -- a
+ * file left out, an icon the platform cannot read, a sandbox that will not
+ * start -- and the first person to find out would otherwise be whoever
+ * downloaded it.  The value is how many seconds to stay up after passing, so
+ * the workflow can take a screenshot of the window.
+ */
+function smokeTest() {
+  const fail = (why) => {
+    console.log('SOZVON_SMOKE_FAIL ' + why);
+    app.exit(1);
+  };
+  const timer = setTimeout(() => fail('window did not finish loading in 60 s'), 60000);
+  const loaded = (wc) => new Promise((resolve) => {
+    if (!wc.isLoading()) resolve();
+    else wc.once('did-finish-load', resolve);
+  });
+  Promise.all([mainWindow, contentView].filter(Boolean)
+    .map((v) => loaded(v.webContents)))
+    .then(() => {
+      clearTimeout(timer);
+      if (nativeImage.createFromPath(TRAY_ICON_PATH).isEmpty())
+        return fail('tray icon is empty: ' + TRAY_ICON_PATH);
+      if (!tray) return fail('no tray');
+      console.log('SOZVON_SMOKE_OK ' + process.platform + ' ' + process.arch +
+        ' ' + app.getVersion());
+      const hold = parseInt(process.env.SOZVON_SMOKE_TEST, 10) || 0;
+      setTimeout(() => app.exit(0), hold * 1000);
+    }, (e) => fail(String(e)));
 }
 
 app.on('before-quit', () => { quitting = true; });
@@ -1346,5 +1444,178 @@ handleOurs('deploy:start', async (_e, opts) => {
     };
   } finally {
     d.disconnect();
+  }
+});
+
+// ------------------------------------------------------------ onboarding ---
+
+// What the deploy wizard handed back while the onboarding was not on screen:
+// the wizard takes its place, and the answer waits here for the next load.
+// Memory only -- it carries the operator password -- and taken exactly once.
+let pendingDeploy = null;
+
+handleOurs('onboarding:open', () => showOnboarding());
+
+handleOurs('onboarding:deployed', (_e, result) => {
+  pendingDeploy = { result };
+  showOnboarding('deploy');
+});
+
+handleOurs('onboarding:deploy-cancelled', () => {
+  pendingDeploy = { cancelled: true };
+  showOnboarding('deploy');
+});
+
+/**
+ * Whether there is a Sozvon server at an origin.  Asked through the content
+ * view's own session, so the answer goes through the same certificate check
+ * the server's page would meet, pins included -- a certificate that fails
+ * here would fail there too, only with less said about why.
+ */
+async function checkServer(url) {
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return { status: 'unreachable' };
+  }
+  const ses = contentView.webContents.session;
+  const get = async (p) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 8000);
+    try {
+      return await ses.fetch(origin + p, { signal: ctl.signal, cache: 'no-store', redirect: 'manual' });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    const r = await get('/healthz');
+    if (r.ok && (await r.text()).trim() === 'ok') return { status: 'ok' };
+    // No /healthz: an upstream Galène, or something else entirely.  Worth
+    // saying, but not worth refusing -- it may well still work.
+    const front = await get('/');
+    return { status: front.ok ? 'other' : 'unreachable' };
+  } catch (e) {
+    if (/CERT|SSL/i.test(String(e && (e.message || e)))) {
+      const host = new URL(origin).hostname;
+      return { status: (config.pinnedCerts || {})[host] ? 'cert-changed' : 'cert' };
+    }
+    return { status: 'unreachable' };
+  }
+}
+
+/**
+ * Camera and microphone as Windows sees them.  There is no permission dialog
+ * on Windows for the onboarding to prepare anybody for; the one thing worth a
+ * screen is the privacy setting having switched them off for desktop apps.
+ */
+function mediaState() {
+  if (process.platform !== 'win32' || !systemPreferences.getMediaAccessStatus)
+    return { state: 'n/a' };
+  const camera = systemPreferences.getMediaAccessStatus('camera');
+  const mic = systemPreferences.getMediaAccessStatus('microphone');
+  if (camera === 'denied' || mic === 'denied') return { state: 'blocked', camera, mic };
+  return { state: 'n/a', camera, mic };
+}
+
+/**
+ * Make the first guest link on a server the onboarding just installed.  The
+ * server takes a websocket only from a page of its own, so the minter runs in
+ * a hidden window opened at the server's /healthz -- through the content
+ * view's session, so its certificate pins apply.  See onboarding/minter.js.
+ */
+async function mintLink(a) {
+  const minter = path.join(__dirname, 'renderer', 'onboarding', 'minter.js');
+  let win = null;
+  try {
+    const origin = new URL(a.origin).origin;
+    win = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        session: contentView.webContents.session,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    await win.loadURL(origin + '/healthz');
+    const params = {
+      group: String(a.group || ''),
+      username: String(a.username || ''),
+      password: String(a.password || ''),
+      slug: String(a.slug || ''),
+    };
+    const src = fs.readFileSync(minter, 'utf8') +
+      '\n;sozvonMint(' + JSON.stringify(params) + ');';
+    const r = await win.webContents.executeJavaScript(src, true);
+    return r && typeof r === 'object' ? r : { ok: false, error: 'no answer' };
+  } catch (e) {
+    return { ok: false, error: String(e && (e.message || e)) };
+  } finally {
+    if (win && !win.isDestroyed()) win.destroy();
+  }
+}
+
+const ONBOARDING_PRIVACY = {
+  camera: 'ms-settings:privacy-webcam',
+  mic: 'ms-settings:privacy-microphone',
+};
+
+handleOurs('onboarding:call', async (_e, { method, args } = {}) => {
+  const a = args || {};
+  switch (method) {
+    case 'checkServer':
+      return checkServer(String(a.url || ''));
+    case 'media':
+      return mediaState();
+    case 'openSettings':
+      await shell.openExternal(ONBOARDING_PRIVACY[a.which] || ONBOARDING_PRIVACY.camera);
+      return { ok: true };
+    case 'paste':
+      return { text: clipboard.readText() };
+    case 'copy':
+    case 'share':
+      // No share sheet worth the name on Windows: sharing is copying.
+      clipboard.writeText(String(a.text || ''));
+      return { ok: true };
+    case 'deploy':
+      // The wizard takes this page's place; its answer comes back through
+      // onboarding:deployed / onboarding:deploy-cancelled.
+      contentView.webContents.loadFile(path.join(__dirname, 'renderer', 'deploy.html'),
+        { query: { onboarding: '1' } });
+      return { pending: true };
+    case 'takeDeployResult': {
+      const r = pendingDeploy || { cancelled: true };
+      pendingDeploy = null;
+      return r;
+    }
+    case 'mint':
+      return mintLink(a);
+    case 'finish': {
+      // Where the person meant to go.  The server joins the list the same
+      // way the launcher would have put it there.
+      let origin;
+      let url;
+      try {
+        origin = new URL(a.origin).origin;
+        url = new URL(a.url);
+      } catch {
+        return { error: 'bad address' };
+      }
+      if (url.protocol !== 'https:' || url.origin !== origin) return { error: 'bad address' };
+      config.onboardingDone = true;
+      rememberServer(origin, String(a.room || ''));
+      saveConfig(config);
+      contentView.webContents.loadURL(url.href);
+      return { ok: true };
+    }
+    case 'skip':
+      config.onboardingDone = true;
+      saveConfig(config);
+      showLauncher();
+      return { ok: true };
+    default:
+      return { error: 'unknown method ' + method };
   }
 });

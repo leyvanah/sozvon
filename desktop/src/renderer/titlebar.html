@@ -121,6 +121,9 @@
     .icon-only { padding: 0; width: 30px; justify-content: center; }
     .spacer { flex: 1; -webkit-app-region: drag; align-self: stretch; }
     /* Which icon shows is which theme is in force: a moon means dark. */
+    /* macOS puts its window buttons at the left, over this bar (main.js
+       centres them in it), and none at the right. */
+    body.is-mac { padding-left: 84px; width: 100%; }
     body.is-dark .icon-sun,
     body:not(.is-dark) .icon-moon { display: none; }
     [hidden] { display: none !important; }

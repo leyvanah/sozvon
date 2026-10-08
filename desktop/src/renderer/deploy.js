@@ -32,9 +32,17 @@ function show(name) {
 
 let lastResult = null;
 
+// Opened from the first-run onboarding: the answer goes back there, which
+// shows the password and a first guest link on its own last screen, and
+// "back" returns there rather than to the launcher.
+const fromOnboarding = new URLSearchParams(location.search).get('onboarding') === '1';
+
 // ------------------------------------------------------------------ form ---
 
-$('back').addEventListener('click', () => window.sozvon.backToLauncher());
+$('back').addEventListener('click', () => {
+  if (fromOnboarding) window.sozvon.onboardingDeployCancelled();
+  else window.sozvon.backToLauncher();
+});
 
 $('authtype').addEventListener('change', () => {
   const key = $('authtype').value === 'key';
@@ -105,6 +113,10 @@ $('go').addEventListener('click', async () => {
     adminUser: 'operator',
   });
 
+  if (res && res.ok && fromOnboarding) {
+    window.sozvon.onboardingDeployed(res.result);
+    return;
+  }
   if (res && res.ok) {
     lastResult = res.result;
     $('r-url').textContent = res.result.url;

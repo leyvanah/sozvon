@@ -1,0 +1,8 @@
+{
+  "displayName": "Operator room, E2EE",
+  "description": "Operator hub whose client rooms are end-to-end encrypted: guests' names must not reach the server.",
+  "operator-room": true,
+  "e2ee": true,
+  "require-e2ee": true,
+  "users": { "op": { "password": "op", "permissions": "op" } }
+}

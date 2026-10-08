@@ -68,15 +68,18 @@ function createTray(ctx) {
           refresh();
         },
       },
-      {
-        label: 'Запускать вместе с Windows',
+      // Electron can register a login item on Windows and macOS only; on
+      // Linux the box would tick and nothing would happen.
+      ...(process.platform === 'linux' ? [] : [{
+        label: process.platform === 'darwin'
+          ? 'Запускать при входе в систему' : 'Запускать вместе с Windows',
         type: 'checkbox',
         checked: !!cfg.autoStart,
         click: (item) => {
           ctx.setAutoStart(item.checked);
           refresh();
         },
-      },
+      }]),
       { type: 'separator' },
       { label: 'Выйти из Sozvon', click: () => ctx.quit() },
     ]);

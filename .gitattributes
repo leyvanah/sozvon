@@ -6,6 +6,8 @@
 # is not hypothetical.
 *.sh            text eol=lf
 contrib/**      text eol=lf
+# The desktop .deb's install scripts, templated into its maintainer scripts.
+desktop/build/linux/*.tpl  text eol=lf
 
 # Web client assets are served verbatim; keep them stable across platforms.
 *.js            text eol=lf

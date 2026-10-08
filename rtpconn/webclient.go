@@ -78,6 +78,15 @@ type webClient struct {
 	mu   sync.Mutex
 	down map[string]*rtpDownConnection
 	up   map[string]*rtpUpConnection
+
+	// rate limit on quality reports, see connlog.go (Sozvon)
+	qualityTokens float64
+	qualityTime   time.Time
+
+	// signalling resume, see resume.go; both are set before the
+	// session's goroutines start and never change (Sozvon)
+	resumeSecret string
+	attach       chan attachRequest
 }
 
 func (c *webClient) Group() *group.Group {
@@ -227,7 +236,7 @@ func addUpConn(c *webClient, id, label string, offer string) (*rtpUpConnection, 
 		sendICE(c, id, candidate)
 	})
 
-	conn.pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+	logICE(c, "up", id, conn.pc, func(state webrtc.ICEConnectionState) {
 		if state == webrtc.ICEConnectionStateFailed {
 			c.action(connectionFailedAction{id: id})
 		}
@@ -336,7 +345,7 @@ func addDownConn(c *webClient, remote conn.Up) (*rtpDownConnection, bool, error)
 		sendICE(c, down.id, candidate)
 	})
 
-	down.pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+	logICE(c, "down", down.id, down.pc, func(state webrtc.ICEConnectionState) {
 		if state == webrtc.ICEConnectionStateFailed {
 			c.action(connectionFailedAction{id: down.id})
 		}
@@ -891,6 +900,11 @@ func StartClient(conn *websocket.Conn, addr net.Addr) (err error) {
 		return
 	}
 
+	// Sozvon: a client carrying on a session over a new connection.
+	if m.Kind == "sozvon-resume" {
+		return resumeClient(conn, m)
+	}
+
 	versionError := true
 	if m.Version != nil {
 		for _, v := range m.Version {
@@ -909,10 +923,26 @@ func StartClient(conn *websocket.Conn, addr net.Addr) (err error) {
 
 	defer close(c.done)
 
+	// Sozvon: a client that can resume gets a secret to do so.
+	if m.Kind == "sozvon-resumable" {
+		c.resumeSecret = newResumeSecret()
+		if registerResumable(c) {
+			c.attach = make(chan attachRequest)
+			defer unregisterResumable(c)
+		} else {
+			c.resumeSecret = ""
+		}
+	}
+
+	sessionStart := time.Now()
+	connLogf("c=%v session start", connTag(c.id))
+
 	c.writeCh = make(chan interface{}, 100)
 	c.writerDone = make(chan struct{})
-	go clientWriter(conn, c.writeCh, c.writerDone)
+	go clientWriter(conn, c.writeCh, c.writerDone, c.attach)
 	defer func() {
+		connLogf("c=%v session end +%v: %v",
+			connTag(c.id), since(sessionStart), closeReason(err))
 		m, e := errorToWSCloseMessage(c.id, err)
 		if isWSNormalError(err) {
 			err = nil
@@ -993,15 +1023,26 @@ func addnew(v string, l []string) []string {
 	return append(slices.Clip(l), v)
 }
 
+var errClientDead = errors.New("client is dead")
+
 func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
-	read := make(chan interface{}, 1)
-	go clientReader(ws, read, c.done)
+	// Sozvon: a resumed session reads from a new connection, so each
+	// reader is numbered and what an older one still delivers is dropped.
+	read := make(chan readResult, 1)
+	gen := 0
+	go clientReader(ws, gen, read, c.done)
 
 	defer leaveGroup(c)
 
 	readTime := time.Now()
 
-	ticker := time.NewTicker(10 * time.Second)
+	// Sozvon: signalling resume state, see resume.go.
+	resumable := c.attach != nil
+	var received uint64 // numbered messages received from the client
+	detached := false   // the client's connection is gone
+	keptAlive := false  // logged that its media keeps a silent session
+
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	err := c.write(clientMessage{
@@ -1010,6 +1051,16 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if resumable {
+		err := c.write(clientMessage{
+			Type:  "sozvon-session",
+			Value: c.resumeSecret,
+		})
+		if err != nil {
+			return err
+		}
 	}
 
 	if versionError {
@@ -1026,31 +1077,88 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 
 	for {
 		select {
-		case m, ok := <-read:
-			if !ok {
-				return errors.New("reader died")
+		case r := <-read:
+			if r.gen != gen {
+				continue
 			}
-			switch m := m.(type) {
-			case clientMessage:
-				readTime = time.Now()
-				err := handleClientMessage(c, m)
-				if err != nil {
-					return err
+			if r.err != nil {
+				// A connection closed on purpose ends the
+				// session; a lost one may come back.  (Sozvon)
+				if !resumable || isWSNormalError(r.err) {
+					return r.err
 				}
-			case error:
-				return m
+				if !detached {
+					detached = true
+					connLogf("c=%v signalling lost +%v: %v; "+
+						"waiting for the client to resume",
+						connTag(c.id), since(readTime),
+						closeReason(r.err))
+				}
+				continue
+			}
+			if keptAlive {
+				connLogf("c=%v signalling heard again after %v",
+					connTag(c.id), since(readTime))
+			}
+			readTime = time.Now()
+			keptAlive = false
+			if countedType(r.m.Type) {
+				received++
+			}
+			err := handleClientMessage(c, r.m)
+			if err != nil {
+				return err
 			}
 		case <-c.actions.Ch:
 			actions := c.actions.Get()
 			for _, a := range actions {
+				if a, ok := a.(resumeAction); ok {
+					res, err := resumeSession(c, a, received)
+					if err != nil {
+						return err
+					}
+					gen++
+					go clientReader(a.conn, gen, read, c.done)
+					readTime = time.Now()
+					detached = false
+					keptAlive = false
+					connLogf("c=%v signalling resumed over a new "+
+						"connection, %d message(s) replayed",
+						connTag(c.id), res.replayed)
+					continue
+				}
 				err := handleAction(c, a)
 				if err != nil {
 					return err
 				}
 			}
 		case <-ticker.C:
+			if resumable {
+				// Sozvon: see resume.go.
+				silent := time.Since(readTime)
+				media := c.mediaAlive()
+				limit, err := silenceLimit(detached, media)
+				if silent > limit {
+					return err
+				}
+				if media && !keptAlive && silent > silentNoMedia {
+					keptAlive = true
+					connLogf("c=%v signalling silent for %v, "+
+						"media alive: keeping the session",
+						connTag(c.id), since(readTime))
+				}
+				if !detached && silent > resumePing {
+					err := c.write(clientMessage{
+						Type: "ping",
+					})
+					if err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			if time.Since(readTime) > 45*time.Second {
-				return errors.New("client is dead")
+				return errClientDead
 			}
 			// Some reverse proxies timeout connexions at 60
 			// seconds, make sure we generate some activity
@@ -1064,6 +1172,27 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 			}
 		}
 	}
+}
+
+// resumeSession hands the connection of a resume request to the writer,
+// which replays what the client missed.  The reply tells the requester
+// whether the connection is now the writer's.  (Sozvon)
+func resumeSession(c *webClient, a resumeAction, received uint64) (attachResult, error) {
+	req := attachRequest{
+		conn:     a.conn,
+		received: a.received,
+		ack:      received,
+		reply:    make(chan attachResult, 1),
+	}
+	select {
+	case c.attach <- req:
+	case <-c.writerDone:
+		a.reply <- resumeReply{err: ErrClientDead}
+		return attachResult{}, ErrClientDead
+	}
+	res := <-req.reply
+	a.reply <- resumeReply{err: res.err, handed: true}
+	return res, res.err
 }
 
 func pushDownConn(c *webClient, id string, up conn.Up, tracks []conn.UpTrack, replace string) error {
@@ -1230,7 +1359,7 @@ func handleAction(c *webClient, a any) error {
 			Permissions:      perms,
 			Status:           status,
 			Data:             data,
-			RTCConfiguration: ice.ICEConfiguration(),
+			RTCConfiguration: ice.ClientICEConfiguration(),
 		})
 		if err != nil {
 			return err
@@ -1305,7 +1434,7 @@ func handleAction(c *webClient, a any) error {
 			Username:         &username,
 			Permissions:      perms,
 			Status:           &status,
-			RTCConfiguration: ice.ICEConfiguration(),
+			RTCConfiguration: ice.ClientICEConfiguration(),
 		})
 		if !slices.Contains(c.permissions, "present") {
 			up := getUpConns(c)
@@ -1370,6 +1499,8 @@ func leaveGroup(c *webClient) {
 	if c.group == nil {
 		return
 	}
+
+	connLogf("c=%v left", connTag(c.id))
 
 	if c.up != nil {
 		for id := range c.up {
@@ -1565,6 +1696,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 		}
 		c.group = g
 		c.knocking = nil
+		connLogf("c=%v joined", connTag(c.id))
 	case "request":
 		requested, err := parseRequested(m.Request)
 		if err != nil {
@@ -1894,6 +2026,8 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 			isLink := isOperatorHub(c.group) &&
 				isDirectChild(tok.Group, c.group.Name())
 			tok.Link = isLink
+
+			tok.Username = tokenUsername(c.group, tok.Username)
 
 			if tok.Group != c.group.Name() && !isLink {
 				return terror("error", "wrong group in token")
@@ -2225,6 +2359,8 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 		}
 	case "pong":
 		// nothing
+	case "sozvon-quality":
+		gotQualityReport(c, m)
 	case "ping":
 		return c.write(clientMessage{
 			Type: "pong",
@@ -2375,66 +2511,132 @@ func parseStatefulToken(value interface{}) (*token.Stateful, error) {
 	}, nil
 }
 
-func clientReader(conn *websocket.Conn, read chan<- interface{}, done <-chan struct{}) {
-	defer close(read)
+// readResult is a message, or the error that ended a reader.  gen tells
+// which connection it came from.  (Sozvon)
+type readResult struct {
+	gen int
+	m   clientMessage
+	err error
+}
+
+func clientReader(conn *websocket.Conn, gen int, read chan<- readResult, done <-chan struct{}) {
 	for {
 		var m clientMessage
 		err := conn.ReadJSON(&m)
 		if err != nil {
 			select {
-			case read <- err:
-				return
+			case read <- readResult{gen: gen, err: err}:
 			case <-done:
-				return
 			}
+			return
 		}
 		select {
-		case read <- m:
+		case read <- readResult{gen: gen, m: m}:
 		case <-done:
 			return
 		}
 	}
 }
 
-func clientWriter(conn *websocket.Conn, ch <-chan interface{}, done chan<- struct{}) {
+// clientWriter writes the messages for a client.  When attach is nil it
+// stops at the first error, as upstream does.  Otherwise the session is
+// resumable (Sozvon, see resume.go): numbered messages are kept for
+// replay, a failed connection is dropped, and what follows is kept until
+// the client comes back over a new connection received on attach.
+func clientWriter(conn *websocket.Conn, ch <-chan interface{}, done chan<- struct{}, attach <-chan attachRequest) {
+	var ring *replayRing
+	if attach != nil {
+		ring = newReplayRing()
+	}
+
 	defer func() {
 		close(done)
-		conn.Close()
+		if conn != nil {
+			conn.Close()
+		}
 	}()
 
-	for {
-		m, ok := <-ch
-		if !ok {
-			break
+	// send writes one frame; it reports false if the writer must stop
+	send := func(b []byte) bool {
+		if conn == nil {
+			return true
 		}
 		err := conn.SetWriteDeadline(
 			time.Now().Add(500 * time.Millisecond),
 		)
-		if err != nil {
-			return
+		if err == nil {
+			err = conn.WriteMessage(websocket.TextMessage, b)
 		}
-		switch m := m.(type) {
-		case clientMessage:
-			err := conn.WriteJSON(m)
-			if err != nil {
+		if err != nil {
+			if ring == nil {
+				return false
+			}
+			conn.Close()
+			conn = nil
+		}
+		return true
+	}
+
+	for {
+		select {
+		case m, ok := <-ch:
+			if !ok {
 				return
 			}
-		case []byte:
-			err := conn.WriteMessage(websocket.TextMessage, m)
-			if err != nil {
+			var b []byte
+			counted := true
+			switch m := m.(type) {
+			case clientMessage:
+				var err error
+				b, err = json.Marshal(m)
+				if err != nil {
+					log.Printf("clientWriter: %v", err)
+					return
+				}
+				counted = countedType(m.Type)
+			case []byte:
+				b = m
+			case closeMessage:
+				if conn != nil && m.data != nil {
+					conn.SetWriteDeadline(
+						time.Now().Add(500 * time.Millisecond),
+					)
+					conn.WriteMessage(
+						websocket.CloseMessage,
+						m.data,
+					)
+				}
+				return
+			default:
+				log.Printf("clientWriter: unexpected message %T", m)
 				return
 			}
-		case closeMessage:
-			if m.data != nil {
-				conn.WriteMessage(
-					websocket.CloseMessage,
-					m.data,
-				)
+			if ring != nil && counted {
+				ring.push(b)
 			}
-			return
-		default:
-			log.Printf("clientWriter: unexpected message %T", m)
-			return
+			if !send(b) {
+				return
+			}
+		case a := <-attach:
+			msgs, ok := ring.after(a.received)
+			if !ok {
+				refuseResume(a.conn, "messages lost")
+				a.reply <- attachResult{err: errResumeGap}
+				continue
+			}
+			if conn != nil {
+				conn.Close()
+			}
+			conn = a.conn
+			b, _ := json.Marshal(clientMessage{
+				Type:  "sozvon-resumed",
+				Value: a.ack,
+			})
+			send(b)
+			for _, b := range msgs {
+				send(b)
+			}
+			a.reply <- attachResult{replayed: len(msgs)}
 		}
 	}
 }

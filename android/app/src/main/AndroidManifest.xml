@@ -49,6 +49,16 @@
                 android:resource="@xml/shortcuts"/>
         </activity>
 
+        <!-- The first-run onboarding (onboarding/ at the repository root,
+             copied into the assets).  Not exported: only MainActivity opens
+             it.  configChanges, so turning the phone does not reload the page
+             and lose the step somebody was on. -->
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize"/>
+
         <!-- "Deploy your own server": drives the Sozvon installer on a VPS over
              SSH.  Not exported, so it is reachable only from the address
              screen and never from another app. -->

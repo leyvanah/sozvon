@@ -1,0 +1,553 @@
+/*
+ * The onboarding's look.  The palette is the client's own (static/common.css),
+ * restated because this page is shown from the device, before any server is
+ * known: monochrome, black and a grey ramp, three status colours kept for
+ * state.  "Accent" is not a hue -- an emphasised control inverts.
+ *
+ * Dark is the base, as in the client.  Light arrives two ways: data-theme on
+ * the root when the app knows what the user chose (Android passes it), and
+ * prefers-color-scheme otherwise (the desktop app drives that from its own
+ * setting).
+ *
+ * Sozvon is a fork of Galène (MIT); see LICENCE.
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #0A0A0A;
+  --surface-2: #141414;
+  --text: #FFFFFF;
+  --text-2: #BDBDBD;
+  --text-3: #8A8A8A;
+  --accent: #FFFFFF;
+  --accent-contrast: #000000;
+  --accent-hover: #D6D6D6;
+  --border: #444444;
+  --divider: rgba(255, 255, 255, 0.10);
+  --hover: rgba(255, 255, 255, 0.06);
+  --danger: #E06A6A;
+  --warn: #D6B85A;
+  --ok: #6BBE8A;
+  --mark-filter: invert(1);
+  --radius: 10px;
+  --radius-lg: 14px;
+  --font: "Inter", "Segoe UI Variable Text", "Segoe UI", Roboto, -apple-system, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #FFFFFF;
+  --surface: #F7F7F7;
+  --surface-2: #F0F0F0;
+  --text: #000000;
+  --text-2: #444444;
+  --text-3: #767676;
+  --accent: #000000;
+  --accent-contrast: #FFFFFF;
+  --accent-hover: #333333;
+  --border: #BDBDBD;
+  --divider: rgba(0, 0, 0, 0.12);
+  --hover: rgba(0, 0, 0, 0.05);
+  --danger: #B5524F;
+  --warn: #8A6D1F;
+  --ok: #2E7D50;
+  --mark-filter: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #FFFFFF;
+    --surface: #F7F7F7;
+    --surface-2: #F0F0F0;
+    --text: #000000;
+    --text-2: #444444;
+    --text-3: #767676;
+    --accent: #000000;
+    --accent-contrast: #FFFFFF;
+    --accent-hover: #333333;
+    --border: #BDBDBD;
+    --divider: rgba(0, 0, 0, 0.12);
+    --hover: rgba(0, 0, 0, 0.05);
+    --danger: #B5524F;
+    --warn: #8A6D1F;
+    --ok: #2E7D50;
+    --mark-filter: none;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+
+button, input { font: inherit; color: inherit; }
+
+/* ------------------------------------------------------------ frame --- */
+
+.frame {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* The Android activity draws edge to edge; these keep the controls off the
+     status bar and the gesture area. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 12px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  color: var(--text);
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--hover); }
+.icon-btn[hidden] { visibility: hidden; display: grid; }
+.icon-btn svg { width: 22px; height: 22px; }
+
+.progress {
+  display: flex;
+  gap: 4px;
+  height: 3px;
+}
+.progress[hidden] { visibility: hidden; display: flex; }
+.progress i {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.progress i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 360ms var(--ease);
+}
+.progress i.on::after { transform: scaleX(1); }
+
+.text-btn {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-size: 14px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.text-btn:hover { color: var(--text); }
+.text-btn[hidden] { visibility: hidden; display: inline-block; }
+
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 8px 24px 24px;
+}
+
+/* On a wide window the column is centred vertically as well: a desktop
+   window is not a phone held upright. */
+@media (min-width: 720px) and (min-height: 640px) {
+  .stage { justify-content: center; padding-bottom: 56px; }
+  .screen { flex: 0 1 auto !important; }
+}
+
+.screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  animation: enter 320ms var(--ease) both;
+}
+.screen.back { animation-name: enter-back; }
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes enter-back {
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ------------------------------------------------------- typography --- */
+
+.ico { display: contents; }
+
+.kicker {
+  margin: 8px 0 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 28px;
+  line-height: 1.18;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+  outline: none;
+}
+
+.kicker.gap { margin-top: 26px; }
+
+.lead {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.note {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* ---------------------------------------------------------- welcome --- */
+
+.welcome { text-align: center; align-items: center; }
+.welcome .hero {
+  flex: 1;
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+/* An image rather than a CSS mask: a mask is fetched in CORS mode, which a
+   page shown from file:///android_asset is not allowed to do.  The drawing is
+   black, so the dark theme turns it white. */
+.mark {
+  width: 46px;
+  height: 124px;
+  filter: var(--mark-filter);
+  position: relative;
+  z-index: 1;
+}
+/* Two rings going out from the handset: a call ringing.  Quiet on purpose,
+   and gone for anyone who asked the system for less motion. */
+.ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150px;
+  height: 150px;
+  margin: -75px 0 0 -75px;
+  border: 1px solid var(--text-3);
+  border-radius: 50%;
+  opacity: 0;
+  animation: ring 3.2s var(--ease) infinite;
+}
+.ring + .ring { animation-delay: 1.6s; }
+@keyframes ring {
+  0% { transform: scale(0.55); opacity: 0; }
+  20% { opacity: 0.55; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+.wordmark {
+  margin: 0 0 22px;
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  padding-left: 0.32em;
+}
+.welcome h1 { font-size: 30px; max-width: 420px; }
+.welcome .actions { align-self: stretch; }
+.welcome .lead { max-width: 400px; }
+
+/* ---------------------------------------------------------- options --- */
+
+.options { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
+
+.option {
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 44px 1fr 20px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: border-color 160ms, background 160ms, transform 160ms var(--ease);
+}
+.option:hover { border-color: var(--border); background: var(--hover); }
+.option:active { transform: scale(0.99); }
+.option[aria-pressed="true"] { border-color: var(--accent); }
+.option .glyph {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.option .glyph svg { width: 22px; height: 22px; }
+.option b { display: block; font-size: 15px; font-weight: 500; }
+.option .desc { display: block; font-size: 13px; color: var(--text-3); line-height: 1.4; margin-top: 2px; }
+.option .chev { width: 18px; height: 18px; color: var(--text-3); }
+
+/* ----------------------------------------------------------- fields --- */
+
+.field { margin-top: 24px; }
+.field label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.input {
+  width: 100%;
+  height: 50px;
+  padding: 0 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 15px;
+  transition: border-color 160ms;
+}
+.input:focus { outline: none; border-color: var(--accent); }
+.input::placeholder { color: var(--text-3); }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+
+.inline-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 2px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font-size: 14px;
+  cursor: pointer;
+}
+.inline-btn:hover { color: var(--text); }
+.inline-btn svg { width: 18px; height: 18px; }
+
+.error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+/* ----------------------------------------------------------- status --- */
+
+.status {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.status svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.status.ok { color: var(--ok); }
+.status.warn { color: var(--warn); }
+.status.bad { color: var(--danger); }
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 1px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------------------------------------ cards --- */
+
+.card {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-lg);
+}
+.rows { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 14px; }
+.rows dt { color: var(--text-3); }
+.rows dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.mono { font-family: var(--mono); font-size: 13.5px; }
+
+.cred {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--divider);
+}
+.cred:first-child { border-top: none; padding-top: 2px; }
+.cred .label { grid-column: 1 / -1; font-size: 12px; color: var(--text-3); }
+.cred .value { overflow-wrap: anywhere; }
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.copy-btn:hover { color: var(--text); border-color: var(--text-3); }
+.copy-btn svg { width: 15px; height: 15px; }
+
+/* ------------------------------------------------------------ lists --- */
+
+.points { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.points li { display: grid; grid-template-columns: 22px 1fr; gap: 12px; color: var(--text-2); }
+.points svg { width: 20px; height: 20px; margin-top: 1px; color: var(--text); }
+
+.tips { list-style: none; margin: 18px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tips li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13.5px;
+  color: var(--text-3);
+}
+.tips li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.65em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+/* The "where it goes" picture: what the provider gave you, and the field of
+   the installer it goes into. */
+.map { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.map-row {
+  display: grid;
+  grid-template-columns: 1fr 22px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.chip {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.3;
+}
+.chip.from { border: 1px dashed var(--border); color: var(--text-2); }
+.chip.to { border: 1px solid var(--accent); color: var(--text); font-weight: 500; }
+.map-row svg { width: 20px; height: 20px; color: var(--text-3); }
+
+/* ---------------------------------------------------------- actions --- */
+
+.actions {
+  margin-top: auto;
+  padding-top: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+@media (min-width: 720px) and (min-height: 640px) {
+  .actions { margin-top: 0; }
+}
+
+.primary {
+  height: 52px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: background 160ms, transform 160ms var(--ease);
+}
+.primary:hover { background: var(--accent-hover); }
+.primary:active { transform: scale(0.99); }
+.primary svg { width: 18px; height: 18px; }
+.primary[aria-disabled="true"] { background: var(--surface-2); color: var(--text-3); cursor: default; }
+
+.secondary {
+  height: 46px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font-size: 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.secondary:hover { color: var(--text); background: var(--hover); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The heading takes focus only so a screen reader announces the step; it is
+   not a control, and a ring around it reads as one. */
+h1:focus, h1:focus-visible { outline: none; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen, .ring, .progress i::after, .option, .primary { animation: none !important; transition: none !important; }
+  .ring { display: none; }
+}

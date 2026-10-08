@@ -5,12 +5,14 @@
   "main": "src/main.js",
   "scripts": {
     "sync-installer": "node scripts/sync-installer.js",
-    "prestart": "npm run sync-installer",
+    "sync-onboarding": "node scripts/sync-onboarding.js",
+    "sync": "npm run sync-installer && npm run sync-onboarding",
+    "prestart": "npm run sync",
     "start": "electron .",
     "icon": "node scripts/build-icon.js",
-    "prepackage": "npm run sync-installer",
+    "prepackage": "npm run sync",
     "package": "electron-builder --dir",
-    "predist": "npm run sync-installer",
+    "predist": "npm run sync",
     "dist": "electron-builder"
   },
   "author": "imaprocessus",
@@ -33,11 +35,50 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "resources/**/*"
+      "resources/**/*",
+      "!node_modules/cpu-features/**",
+      "!node_modules/ssh2/lib/protocol/crypto/build/**"
     ],
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
-    }
-  }
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "public.app-category.social-networking",
+      "identity": null,
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSCameraUsageDescription": "Sozvon uses the camera for video calls.",
+        "NSMicrophoneUsageDescription": "Sozvon uses the microphone for calls."
+      }
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Network",
+      "synopsis": "Video calls on your own server",
+      "description": "Desktop client for Sozvon, self-hosted video calls built on Galène.",
+      "maintainer": "imaprocessus <212347434+leyvanah@users.noreply.github.com>"
+    },
+    "deb": {
+      "afterInstall": "build/linux/after-install.tpl",
+      "afterRemove": "build/linux/after-remove.tpl"
+    },
+    "npmRebuild": false,
+    "afterPack": "build/after-pack.js"
+  },
+  "homepage": "https://leyvanah.github.io/sozvon/"
 }

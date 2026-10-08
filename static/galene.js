@@ -20,32 +20,9 @@
 
 'use strict';
 
-/**
- * Sozvon: FOUC guard cleanup.  galene.html hides every content block up front
- * with the `hidden` attribute (the browser honours it with no author CSS, so
- * the strict CSP — which forbids inline <style> — cannot block it) and shows a
- * loading overlay (#app-loading) with a spinner.  Once everything has loaded we
- * clear those `hidden` attributes and drop the overlay.  We run on 'load' (not
- * DOMContentLoaded) so galene.css has certainly applied and we never uncover an
- * unstyled page; the timeout is a safety net.
- */
-(function removeLoadingOverlay() {
-    function hide() {
-        // galene.html sets `hidden` only on the FOUC-guard blocks, so clearing
-        // every [hidden] here is safe.
-        document.querySelectorAll('[hidden]').forEach(function(el) {
-            el.removeAttribute('hidden');
-        });
-        let o = document.getElementById('app-loading');
-        if(o)
-            o.remove();
-    }
-    if(document.readyState === 'complete')
-        hide();
-    else
-        window.addEventListener('load', hide);
-    setTimeout(hide, 10000);
-})();
+// Sozvon: the loading overlay (#app-loading) and the `hidden` FOUC guard in
+// galene.html are lifted by load-guard.js, once the page is known to work;
+// this file only reports that it ran (SozvonAppLoaded, at the very end).
 
 /**
  * The name of the group that we join.
@@ -78,6 +55,14 @@ let reconnectAttempt = 0;
 let reconnectTimer = null;
 /** The join parameters of the dropped connection, replayed to rejoin. */
 let reconnectLastJoin = null;
+/**
+ * The name the server gave us on that join, for the "join as" card: a join
+ * with an operator's token sends no name of its own, so the join parameters
+ * alone would offer to "join as" nobody.  (Sozvon)
+ *
+ * @type {string|null}
+ */
+let reconnectName = null;
 /**
  * What we were sending when the connection dropped, so that the rejoin can
  * send it again without the user having to find the buttons.  The camera
@@ -119,6 +104,15 @@ let storingRememberToken = null;
 
 /** True while the current join is an auto-login from a stored remember-token. */
 let usingRememberToken = false;
+
+/**
+ * The link this page was opened with -- its token, and the client's name
+ * after '#' -- set aside because an operator's own token covers the room;
+ * tried if that one is refused.  (Sozvon)
+ *
+ * @type {{token: string, name: string}|null}
+ */
+let linkTokenFallback = null;
 
 /**
  * Set while a maketoken request is in flight to mint the operator's session
@@ -617,7 +611,8 @@ function reflectRejoinOption() {
     if(show) {
         let elt = document.getElementById('rejoin-username');
         if(elt)
-            elt.textContent = reconnectLastJoin.username || '';
+            elt.textContent = ownRealName || reconnectName ||
+                hidePseudonym(reconnectLastJoin.username);
     }
 }
 
@@ -740,6 +735,8 @@ async function join() {
         }
     }
 
+    username = joinUsername(username, credentials);
+
     try {
         await serverConnection.join(group, username, credentials);
     } catch(e) {
@@ -753,15 +750,124 @@ async function join() {
  * @this {ServerConnection}
  */
 function onPeerConnection() {
-    if(!getSettings().forceRelay)
+    let forceRelay = getSettings().forceRelay;
+    let dropUdp = udpRelayGivenUp() &&
+        turnFallbackApi().offersUdp(this.rtcConfiguration);
+    if(!forceRelay && !dropUdp)
         return null;
     let old = this.rtcConfiguration;
     /** @type {RTCConfiguration} */
     let conf = {};
     for(let key in old)
         conf[key] = old[key];
-    conf.iceTransportPolicy = 'relay';
+    if(forceRelay)
+        conf.iceTransportPolicy = 'relay';
+    if(dropUdp)
+        conf = turnFallbackApi().withoutUdp(conf);
     return conf;
+}
+
+// --- Falling back from TURN over UDP (Sozvon) ------------------------------
+//
+// A relay over UDP carries a call much better than one over TLS, but some
+// networks drop or throttle UDP, sometimes only after ICE has chosen it.
+// turn-fallback.js watches the path every connection uses; when the UDP one
+// is broken, UDP is taken out of the ICE configuration, every connection is
+// restarted over what is left, and the decision is kept for a few hours.
+// With no UDP relay configured nothing here has any effect.
+
+/** @returns {any} */
+function turnFallbackApi() {
+    return /** @type {any} */ (window).SozvonTurnFallback;
+}
+
+/** UDP was given up during this page's life. */
+let udpGivenUp = false;
+
+/** @type {any} */
+let turnWatcher = null;
+
+/** @returns {Storage|null} */
+function fallbackStorage() {
+    try {
+        return window.localStorage;
+    } catch(e) {
+        return null;
+    }
+}
+
+/** @returns {boolean} */
+function udpRelayGivenUp() {
+    let F = turnFallbackApi();
+    if(!F)
+        return false;
+    let s = fallbackStorage();
+    return udpGivenUp || (!!s && F.remembered(s, Date.now()));
+}
+
+/**
+ * Take TURN over UDP out of every connection and restart ICE on each, so
+ * that they come back over TLS.
+ *
+ * @param {string} reason - 'failed', 'disconnected' or 'loss'
+ */
+function giveUpUdpRelay(reason) {
+    let F = turnFallbackApi();
+    if(!F || udpGivenUp || !serverConnection)
+        return;
+    udpGivenUp = true;
+    let s = fallbackStorage();
+    if(s)
+        F.remember(s, Date.now());
+    console.warn('TURN over UDP does not work here (' + reason +
+                 '), falling back to TCP/TLS');
+    reportQuality('transport', '', {udp: false, reason: reason});
+    /** @type {Stream[]} */
+    let streams = [];
+    for(let id in serverConnection.up)
+        streams.push(serverConnection.up[id]);
+    for(let id in serverConnection.down)
+        streams.push(serverConnection.down[id]);
+    for(let c of streams) {
+        if(!c.pc)
+            continue;
+        try {
+            c.pc.setConfiguration(F.withoutUdp(c.pc.getConfiguration()));
+            c.restartIce();
+        } catch(e) {
+            console.warn('UDP fallback', e);
+        }
+    }
+}
+
+/**
+ * Feed one poll of one connection to the watcher.
+ *
+ * @param {Stream} c
+ * @param {RTCStatsReport} report
+ */
+function watchTurnPath(c, report) {
+    let F = turnFallbackApi();
+    if(!F || !c.pc)
+        return;
+    let path = F.selectedPath(report.values());
+    let key = path ? path.type + '/' + path.relay : null;
+    if(key && key !== c.userdata.turnPath) {
+        c.userdata.turnPath = key;
+        reportQuality('path', c.id, {type: path.type, relay: path.relay});
+    }
+    if(udpGivenUp)
+        return;
+    if(!turnWatcher)
+        turnWatcher = new F.Watcher();
+    let q = c.userdata.quality;
+    let reason = turnWatcher.update(c.id, {
+        ice: c.pc.iceConnectionState,
+        path: path,
+        loss: q && q.last ? q.last.loss : null,
+    }, Date.now());
+    if(reason)
+        giveUpUdpRelay(reason);
 }
 
 /**
@@ -859,7 +965,12 @@ async function reconnectNow() {
         stopReconnect();
         return;
     }
-    if(reconnectAttempt > RECONNECT_MAX_ATTEMPTS) {
+    // The operator room never gives up: it sends no media, so trying again
+    // every half minute costs nothing, and it is the page an operator keeps
+    // open for days -- across a laptop's sleep, which outlasts any number of
+    // attempts and used to leave it on the login card until a reload.
+    // (Sozvon)
+    if(reconnectAttempt > RECONNECT_MAX_ATTEMPTS && !groupStatus.operatorRoom) {
         wantConnected = false;
         stopReconnect();
         setConnected(false);
@@ -877,8 +988,84 @@ async function reconnectNow() {
     }
 }
 
+/**
+ * Make the pending reconnect attempt now, with the backoff reset: the network
+ * is back, or the user is looking at the page again -- typically both, right
+ * after a laptop wakes, when the next attempt may still be half a minute
+ * away (and timers in a background tab run later still).  An attempt already
+ * in flight has no pending timer and is left alone.  (Sozvon)
+ */
+function reconnectSoon() {
+    if(!reconnecting || !reconnectTimer)
+        return;
+    if(typeof navigator !== 'undefined' && navigator.onLine === false)
+        return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    reconnectAttempt = 0;
+    reconnectNow();
+}
+
+window.addEventListener('online', reconnectSoon);
+document.addEventListener('visibilitychange', function() {
+    if(document.visibilityState === 'visible')
+        reconnectSoon();
+});
+
 /** Rejoin the group after a reconnect, using the saved credentials. (Sozvon) */
+/**
+ * The join to replay after a reconnect, with credentials that are still good.
+ * A join made with a token replays that token, and an operator's session
+ * token lives 12 hours: a tab that slept through the night came back with a
+ * token the server had let expire, and was refused until a reload, which
+ * looks for credentials afresh.  So look again here too: the current session
+ * token, else the device's remembered one, else what the join had.  (Sozvon)
+ *
+ * @param {any} join
+ * @returns {any}
+ */
+function freshRejoin(join) {
+    let c = join && join.credentials;
+    if(!c || c.type !== 'token')
+        return join;
+    let session = loadOperatorSession(join.group);
+    if(session)
+        return Object.assign({}, join,
+            {credentials: {type: 'token', token: session.token}});
+    let remembered = loadRememberToken(join.group);
+    if(remembered)
+        return Object.assign({}, join, {
+            username: remembered.username || join.username,
+            credentials: {type: 'token', token: remembered.token},
+        });
+    return join;
+}
+
+/**
+ * The same join with the device's remembered token, if there is one and it is
+ * not the token just refused; null otherwise.  A session token can be refused
+ * before the time it says it expires (revoked, or a clock out of step), and
+ * the remembered token, which lives for a month, should get its turn before
+ * the operator is sent to the login card.  (Sozvon)
+ *
+ * @param {any} join
+ * @returns {any}
+ */
+function rememberedRejoin(join) {
+    let c = join && join.credentials;
+    if(!c || c.type !== 'token')
+        return null;
+    let remembered = loadRememberToken(join.group);
+    if(!remembered || remembered.token === c.token)
+        return null;
+    return Object.assign({}, join, {
+        username: remembered.username || join.username,
+        credentials: {type: 'token', token: remembered.token},
+    });
+}
+
 async function rejoinAfterReconnect() {
+    reconnectLastJoin = freshRejoin(reconnectLastJoin);
     try {
         await serverConnection.join(
             reconnectLastJoin.group, reconnectLastJoin.username,
@@ -1897,8 +2084,44 @@ function feedQuality(c, iceState, snap) {
         return;
     if(!c.userdata.quality)
         c.userdata.quality = new Q.Tracker();
-    c.userdata.quality.update(iceState, snap);
+    let r = c.userdata.quality.update(iceState, snap);
+    if(r.changed) {
+        let a = c.userdata.quality.last;
+        reportQuality('level', c.id, {
+            level: r.level, previous: r.previous, ice: iceState,
+            rtt: a ? a.rtt : null, jitter: a ? a.jitter : null,
+            loss: a ? a.loss : null,
+        });
+    }
     setQualityIndicator(c);
+}
+
+/**
+ * Tell the server about a change in call quality, for its connection log.
+ * The server writes it down only when started with -log-connections, and
+ * without anything that identifies the caller; see rtpconn/connlog.go.
+ * Only changes are sent -- a settled level, a cap asked for or applied --
+ * so this is a handful of messages in a bad call and none in a good one.
+ * (Sozvon)
+ *
+ * @param {string} kind - 'level', 'ask' (receiver asks for a cap) or
+ *     'send' (sender applies one)
+ * @param {string} id - the stream
+ * @param {Object<string,any>} value
+ */
+function reportQuality(kind, id, value) {
+    if(!serverConnection || !serverConnection.socket)
+        return;
+    try {
+        serverConnection.send({
+            type: 'sozvon-quality',
+            kind: kind,
+            id: id,
+            value: value,
+        });
+    } catch(e) {
+        // the socket is closing; the log can do without this line
+    }
 }
 
 async function pollQuality() {
@@ -1924,9 +2147,15 @@ async function pollQuality() {
             console.warn('getStats failed', e);
         }
         feedQuality(c, pc.iceConnectionState, snap);
-        if(report)
+        if(report) {
             feedBitrate(c, report);
+            watchTurnPath(c, report);
+        }
     }));
+    if(turnWatcher)
+        for(let id of [...turnWatcher.streams.keys()])
+            if(!serverConnection.up[id] && !serverConnection.down[id])
+                turnWatcher.forget(id);
     reflectEveryoneQuality();
 }
 
@@ -1975,9 +2204,11 @@ function feedBitrate(c, report) {
     if(!c.userdata.bitrate)
         c.userdata.bitrate = new B.Controller(B.START_CAP);
     let r = c.userdata.bitrate.update(B.snapshot(report.values(), Date.now()));
-    if(r.changed)
+    if(r.changed) {
         console.info('bitrate: asking', c.username || c.source,
                      'to cap', c.id, 'at', r.cap, r.sample);
+        reportQuality('ask', c.id, {cap: r.cap});
+    }
     if(!r.send || !c.source || !serverConnection ||
        !serverConnection.users[c.source])
         return;
@@ -2082,6 +2313,7 @@ async function applySendCap(c) {
         return;
     c.userdata.sentThroughput = t;
     console.info('bitrate: sending', c.id, 'at', t === null ? 'full rate' : t);
+    reportQuality('send', c.id, {cap: t});
     await setSendParameters(c, t, s);
 }
 
@@ -2157,7 +2389,7 @@ function qualityHint(c, level, everyone) {
         case 'lost': return t('quality.selfLost');
         }
     } else {
-        let who = c.username || t('quality.anonymous');
+        let who = shownName(c.source, c.username) || t('quality.anonymous');
         switch(level) {
         case 'weak': return t('quality.peerWeak', {who});
         case 'bad': return t('quality.peerBad', {who});
@@ -2196,6 +2428,8 @@ function reflectEveryoneQuality() {
     if(everyone === qualityEveryone)
         return;
     qualityEveryone = everyone;
+    // our own link, judged from every remote one degrading at once
+    reportQuality('everyone', '', {degraded: everyone});
     for(let id in serverConnection.up)
         setQualityIndicator(serverConnection.up[id]);
 }
@@ -2588,11 +2822,7 @@ async function setUpStream(c, stream) {
                 }
             }
         }
-        t.onended = e => {
-            stream.onaddtrack = null;
-            stream.onremovetrack = null;
-            c.close();
-        };
+        t.onended = e => upTrackEnded(c, t, stream);
 
         let encodings = [];
         let simulcast = c.label !== 'screenshare' && doSimulcast();
@@ -2687,6 +2917,134 @@ async function setUpStream(c, stream) {
             c.close();
         }
     };
+}
+
+/**
+ * Called when a track of an up stream ends on its own.  Our own teardown uses
+ * track.stop(), which does not fire 'ended', so this is always an involuntary
+ * loss: a device unplugged or reset, permission revoked, or the user pressing
+ * the browser's own "Stop sharing".
+ *
+ * @param {Stream} c
+ * @param {MediaStreamTrack} t
+ * @param {MediaStream} stream - the stream setUpStream was given
+ */
+function upTrackEnded(c, t, stream) {
+    if(c.label === 'camera' && t.kind === 'audio') {
+        // Losing the microphone used to close the whole camera stream, so
+        // the other side lost the picture along with the sound.  Keep the
+        // stream up and bring the microphone back. (Sozvon)
+        recoverMicrophone(c, t);
+        return;
+    }
+    stream.onaddtrack = null;
+    stream.onremovetrack = null;
+    c.close();
+}
+
+/**
+ * Reopens the microphone of a camera up stream after it dropped out, and
+ * swaps the new track in without renegotiating.  If it cannot be reopened,
+ * the stream carries on with video alone, or is closed if there is none.
+ * (Sozvon)
+ *
+ * @param {Stream} c
+ * @param {MediaStreamTrack} lost
+ */
+async function recoverMicrophone(c, lost) {
+    let sender = c.pc && c.pc.getSenders().find(s => s.track === lost);
+    if(!sender) {
+        c.close();
+        return;
+    }
+
+    // The streams that hold the track: the one being sent, and the filter's
+    // input when a filter sits in between.  The input is what gets stopped
+    // when the stream closes (see removeFilter), so the new track must be
+    // there too, or the microphone would stay open after hang-up.
+    let holders = () => {
+        let l = [c.stream];
+        let f = c.userdata.filter;
+        if(f && f.inputStream && f.inputStream !== c.stream)
+            l.push(f.inputStream);
+        return l.filter(s => s);
+    };
+    let swap = (from, to) => holders().forEach(s => {
+        if(s.getTracks().indexOf(from) < 0)
+            return;
+        s.removeTrack(from);
+        if(to)
+            s.addTrack(to);
+    });
+    // Still worth bringing back: the stream is live and still ours, and
+    // nobody turned the microphone off or replaced it meanwhile.
+    let wanted = () =>
+        !!c.sc && !!serverConnection && serverConnection.up[c.id] === c &&
+        sender.track === lost && !!c.stream &&
+        c.stream.getTracks().indexOf(lost) >= 0;
+
+    displayWarning(Sozvon.i18n.t('toast.micReconnecting'));
+
+    let settings = getSettings();
+    /** @type {MediaTrackConstraints} */
+    let audio = {};
+    if(settings.audio)
+        // a preference, not a requirement: if the chosen device is gone for
+        // good, the default one will do
+        audio.deviceId = settings.audio;
+    if(!settings.preprocessing)
+        audio.noiseSuppression = false;
+
+    let track = await /** @type {any} */ (window).SozvonMicRecovery.reopen({
+        open: async () => {
+            let s = await navigator.mediaDevices.getUserMedia({audio: audio});
+            s.getVideoTracks().forEach(v => v.stop());
+            return s.getAudioTracks()[0];
+        },
+        wanted: wanted,
+    });
+
+    if(!wanted()) {
+        if(track)
+            track.stop();
+        return;
+    }
+
+    if(track) {
+        track.enabled = !getSettings().localMute;
+        track.onended = e => upTrackEnded(c, track, c.stream);
+        try {
+            await sender.replaceTrack(track);
+        } catch(e) {
+            console.error(e);
+            track.stop();
+            track = null;
+        }
+    }
+
+    if(!track) {
+        if(!c.stream.getVideoTracks().some(v => v.readyState === 'live')) {
+            c.close();
+            displayError(Sozvon.i18n.t('toast.micEnded'));
+            return;
+        }
+        // Carry on with video alone.  Taking the dead track out of the
+        // stream makes the microphone button show "off", and pressing it
+        // republishes the stream with a fresh microphone.
+        try {
+            await sender.replaceTrack(null);
+        } catch(e) {
+            console.warn(e);
+        }
+        swap(lost, null);
+        displayError(Sozvon.i18n.t('toast.micEnded'));
+        setButtonsVisibility();
+        return;
+    }
+
+    swap(lost, track);
+    displayMessage(Sozvon.i18n.t('toast.micBack'));
+    setButtonsVisibility();
 }
 
 /**
@@ -2939,15 +3297,8 @@ async function addLocalMediaNow(localId, force) {
     syncDeviceSelect('audioselect', stream.getAudioTracks()[0], 'audio');
     syncDeviceSelect('videoselect', stream.getVideoTracks()[0], 'video');
 
-    // A track that ends on its own — permission revoked mid-call, or the
-    // device unplugged — fires 'ended'; our own teardown uses track.stop(),
-    // which does NOT.  So a fired 'ended' means an involuntary loss the user
-    // should be told about, rather than the mic silently going dead. (Sozvon)
-    stream.getAudioTracks().forEach(t => {
-        t.addEventListener('ended', () => {
-            displayError(Sozvon.i18n.t('toast.micEnded'));
-        });
-    });
+    // A microphone that ends on its own is reported, and brought back, by
+    // recoverMicrophone through the up stream's 'ended' handler. (Sozvon)
 
     let c;
 
@@ -3869,7 +4220,7 @@ function setLabel(c, fallback) {
     let label = document.getElementById('label-' + c.localId);
     if(!label)
         return;
-    let l = c.username;
+    let l = c.up ? ownShownName(c.username) : shownName(c.source, c.username);
     if(l) {
         label.textContent = l;
         label.classList.remove('label-fallback');
@@ -3933,16 +4284,19 @@ function refreshTileLabels(id) {
 /**
  * Smart framing of the 1-on-1 remote (speaker view). The remote tile already
  * fills the stage; these helpers decide how the *picture* fills its box:
- *   - "fill" (object-fit: cover) edge-to-edge when filling would crop only a
- *     little (the video and the screen are close in shape);
+ *   - "fill" (object-fit: cover) edge-to-edge when the stage is narrower than
+ *     the picture and filling crops only a little off its sides;
  *   - "fit" (object-fit: contain) showing the whole frame otherwise.
- * A shared screen is never cropped. (Sozvon)
+ * Filling never crops the top or the bottom: on a stage wider than the
+ * picture that is the forehead and the chin, and in a call the face is the
+ * picture. A shared screen is never cropped at all. (Sozvon)
  */
 const FRAMING_MIN_VISIBLE = 0.6;
 
 /**
  * Decide whether the remote picture should fill (cover) the stage. True only
- * when at least FRAMING_MIN_VISIBLE of the frame survives the crop.
+ * when the crop falls on the sides and at least FRAMING_MIN_VISIBLE of the
+ * frame's width survives it.
  *
  * @param {HTMLElement} remote - the .peer-remote container
  * @param {HTMLVideoElement} media - its <video class="media">
@@ -3968,8 +4322,11 @@ function decideFill(remote, media) {
     if(!sw || !sh)
         return false;
     let videoAR = vw / vh, stageAR = sw / sh;
-    let visible = Math.min(videoAR, stageAR) / Math.max(videoAR, stageAR);
-    return visible >= FRAMING_MIN_VISIBLE;
+    // On a stage wider than the picture, filling would cut its top and
+    // bottom: show the whole height instead, with bars at the sides.
+    if(stageAR > videoAR)
+        return false;
+    return stageAR / videoAR >= FRAMING_MIN_VISIBLE;
 }
 
 /**
@@ -4730,7 +5087,10 @@ document.getElementById('invite-dialog').onclose = function(e) {
         }
     }
     let template = {}
-    if(username)
+    if(username && groupStatus.e2ee && !groupStatus.operatorRoom)
+        // the name goes after '#' in the link, not to the server (Sozvon)
+        pendingInviteName = username;
+    else if(username)
         template.username = username;
     if(notBefore)
         template['not-before'] = notBefore;
@@ -4868,7 +5228,7 @@ function changeUser(id, userinfo) {
  * @param {user} userinfo
  */
 function setUserStatus(id, elt, userinfo) {
-    let name = userinfo.username ? userinfo.username : '(anon)';
+    let name = shownName(id, userinfo.username) || '(anon)';
 
     // Sozvon: structured row = round avatar (initial + presence dot) + name +
     // (when the user has audio) a per-user volume slider and mute toggle.
@@ -5327,6 +5687,8 @@ function gotUser(id, kind) {
         break;
     case 'delete':
         delUser(id);
+        if(guestNames)
+            guestNames.delete(id);
         if(e2eeActive())
             serverConnection.e2ee.delUser(id);
         forgetBitrateRequests(id);
@@ -5386,6 +5748,160 @@ function e2eeEnabled() {
     return e2eeActive() && serverConnection.e2ee.supported;
 }
 
+// --- Guests' names stay off the server (Sozvon) ----------------------------
+//
+// In a room with end-to-end encryption a guest joins under a pseudonym made
+// up by the browser; the name they typed goes to the other side only inside
+// the encrypted channel, once the handshake is done (guest-name.js).  A
+// pseudonym is never shown: where a name would go, the interface shows
+// nothing until the real one arrives, so every place that displays a name
+// goes through shownName().  Account holders -- operators with a password or
+// a remembered login -- keep their username: the server has to know it to
+// let them in.
+
+/** @returns {any} */
+function guestNameApi() {
+    return /** @type {any} */ (window).SozvonGuestName;
+}
+
+/**
+ * Names received over the encrypted channel during this call, by user id.
+ * Memory only.
+ *
+ * @type {any}
+ */
+let guestNames = null;
+
+/** @returns {any} */
+function guestNameBook() {
+    let G = guestNameApi();
+    if(!guestNames && G)
+        guestNames = new G.Book();
+    return guestNames;
+}
+
+/**
+ * The name this guest typed, while it is in the room under a pseudonym.
+ *
+ * @type {string|null}
+ */
+let ownRealName = null;
+
+/** @type {string|null} */
+let ownPseudonym = null;
+
+/** The peer our name was last sent to, over the current encrypted session. */
+let nameSentTo = null;
+
+/**
+ * What to show for a user's name.
+ *
+ * @param {string} id
+ * @param {string} username - as the server knows it
+ * @returns {string}
+ */
+function shownName(id, username) {
+    if(serverConnection && id && id === serverConnection.id)
+        return ownShownName(username);
+    let b = guestNameBook();
+    if(b)
+        return b.shown(id, username);
+    return username || '';
+}
+
+/**
+ * What to show for our own name.
+ *
+ * @param {string} [username] - as the server knows it
+ * @returns {string}
+ */
+function ownShownName(username) {
+    if(username === undefined)
+        username = serverConnection ? serverConnection.username : '';
+    let G = guestNameApi();
+    let pseudo = !!G && G.isPseudonym(username);
+    if(ownRealName && (!username || pseudo))
+        return ownRealName;
+    return pseudo ? '' : (username || '');
+}
+
+/**
+ * For a name that comes without a user id to look it up by -- a knock, the
+ * operator's overview: a pseudonym shows as nothing.
+ *
+ * @param {string} username
+ * @returns {string}
+ */
+function hidePseudonym(username) {
+    let G = guestNameApi();
+    return G && G.isPseudonym(username) ? '' : (username || '');
+}
+
+/**
+ * The username to join with: a pseudonym for a guest in a room with
+ * end-to-end encryption, the typed name otherwise.  Rejoining with the same
+ * name keeps the same pseudonym.
+ *
+ * @param {string|null} username
+ * @param {any} credentials
+ * @returns {string|null}
+ */
+function joinUsername(username, credentials) {
+    let G = guestNameApi();
+    let account = usingRememberToken ||
+        (typeof credentials === 'string' && credentials !== '') ||
+        (!!credentials && typeof credentials === 'object' &&
+         credentials.type === 'authServer');
+    if(!G || !username || !groupStatus.e2ee || groupStatus.operatorRoom ||
+       account) {
+        ownRealName = null;
+        ownPseudonym = null;
+        return username;
+    }
+    if(ownRealName !== username || !ownPseudonym)
+        ownPseudonym = G.makePseudonym();
+    ownRealName = username;
+    return ownPseudonym;
+}
+
+/**
+ * Send our name to the peer once the encrypted session is up.
+ */
+function sendOwnName() {
+    let G = guestNameApi();
+    let e2ee = serverConnection && serverConnection.e2ee;
+    if(!G || !ownRealName || !e2ee || e2ee.state !== 'established' ||
+       !e2ee.peer || nameSentTo === e2ee.peer)
+        return;
+    let peer = e2ee.peer;
+    e2ee.sendChat(G.KIND, G.pack(ownRealName)).then(function(ok) {
+        if(ok)
+            nameSentTo = peer;
+    }).catch(function(e) {
+        console.warn('sending our name:', e);
+    });
+}
+
+/**
+ * A peer's name arrived: show it wherever their name appears.
+ *
+ * @param {string} id
+ * @param {string} name
+ */
+function gotPeerName(id, name) {
+    let b = guestNameBook();
+    if(!b || !b.set(id, name))
+        return;
+    let u = serverConnection && serverConnection.users[id];
+    if(u)
+        changeUser(id, u);
+    for(let cid in serverConnection.down) {
+        let c = serverConnection.down[cid];
+        if(c.source === id)
+            setLabel(c);
+    }
+}
+
 /**
  * Restrict a video transceiver to VP8 (+rtx), the codec the E2EE worker
  * assumes when it leaves the keyframe header in clear.
@@ -5430,6 +5946,12 @@ function gotE2EESas(sas) {
 function gotE2EEState() {
     updateE2EEUI();
     enforceE2EEMediaPolicy();
+    // a new encrypted session, or none: send our name again when it is up
+    let e2ee = serverConnection && serverConnection.e2ee;
+    if(!e2ee || e2ee.state !== 'established')
+        nameSentTo = null;
+    else
+        sendOwnName();
 }
 
 /**
@@ -5634,7 +6156,7 @@ function displayKnockToast(id, username) {
 
     let label = document.createElement('span');
     label.textContent = Sozvon.i18n.t('toast.askingToJoin',
-        {who: username || Sozvon.i18n.t('toast.someone')});
+        {who: hidePseudonym(username) || Sozvon.i18n.t('toast.someone')});
     body.appendChild(label);
 
     let actions = document.createElement('span');
@@ -5727,7 +6249,7 @@ function gotKnock(id, username, present) {
     // is, with the same two buttons. (Sozvon)
     hostKnock('room:' + id,
               Sozvon.i18n.t('toast.askingToJoin',
-                            {who: username || Sozvon.i18n.t('toast.someone')}),
+                            {who: hidePseudonym(username) || Sozvon.i18n.t('toast.someone')}),
               [{id: 'admit', label: Sozvon.i18n.t('knock.admit'), primary: true},
                {id: 'deny', label: Sozvon.i18n.t('knock.deny')}],
               function(action) {
@@ -5769,11 +6291,11 @@ function gotKnock(id, username, present) {
  */
 function gotKnockRefused(id, username) {
     displayMessage(Sozvon.i18n.t('toast.knockRefused',
-        {who: username || Sozvon.i18n.t('toast.someone')}));
+        {who: hidePseudonym(username) || Sozvon.i18n.t('toast.someone')}));
 }
 
 function displayUsername() {
-    document.getElementById('userspan').textContent = serverConnection.username;
+    document.getElementById('userspan').textContent = ownShownName();
     let op = serverConnection.permissions.indexOf('op') >= 0;
     let present = serverConnection.permissions.indexOf('present') >= 0;
     let text = '';
@@ -5880,6 +6402,26 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
             this.close();
             return;
         }
+        if(reconnecting && !full) {
+            // Sozvon: the token this rejoin replayed was refused; try the
+            // device's remembered one before giving up, and drop a session
+            // token the server no longer takes so that a new one is minted.
+            let alt = rememberedRejoin(reconnectLastJoin);
+            if(alt) {
+                let session = loadOperatorSession(group);
+                if(session &&
+                   session.token === reconnectLastJoin.credentials.token) {
+                    try {
+                        window.sessionStorage.removeItem('sozvon.operatorSession');
+                    } catch(e) { /* ignore */ }
+                }
+                console.warn('Rejoin refused, trying the remembered token:',
+                             message);
+                reconnectLastJoin = alt;
+                rejoinAfterReconnect();
+                return;
+            }
+        }
         // Sozvon: the server refused the (re)join — stop any reconnect cycle.
         wantConnected = false;
         stopReconnect();
@@ -5888,6 +6430,18 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         // refused there too (the room filled up meanwhile); do not leave it
         // saying "you have been let in". (Sozvon)
         setVisibility('lobby-waiting', false);
+        if(linkTokenFallback && !full) {
+            // The operator's own token was refused here: open the link the
+            // way it was meant to be opened, on the same socket.  A remembered
+            // token is kept -- it may still be good at the hub. (Sozvon)
+            token = linkTokenFallback.token;
+            getInputElement('username').value = linkTokenFallback.name;
+            linkTokenFallback = null;
+            usingRememberToken = false;
+            probingState = null;
+            join();
+            return;
+        }
         if(probingState === 'probing' && error === 'need-username') {
             probingState = 'need-username';
             setVisibility('passwordform', false);
@@ -5966,6 +6520,9 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         setButtonsVisibility();
         return;
     case 'leave':
+        if(guestNames)
+            guestNames.clear();
+        nameSentTo = null;
         closeSafariStream();
         this.close();
         setButtonsVisibility();
@@ -6002,11 +6559,13 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         if(serverConnection.e2ee)
             serverConnection.e2ee.setRequire(groupStatus.requireE2ee);
         usingRememberToken = false;
+        linkTokenFallback = null;
         // Sozvon: we are connected and in the group.  Remember the intent to stay
         // connected and the join parameters so an unexpected drop reconnects,
         // and clear any reconnect cycle that has just succeeded.
         wantConnected = true;
         reconnectLastJoin = serverConnection.lastJoin || reconnectLastJoin;
+        reconnectName = hidePseudonym(serverConnection.username) || null;
         let wasReconnecting = reconnecting;
         if(reconnecting)
             displayMessage(Sozvon.i18n.t('toast.reconnected'));
@@ -6168,10 +6727,10 @@ function gotFileTransfer(f) {
     if(f.up)
         p.textContent =
         `We have offered to send a file called "${f.name}" ` +
-        `to user ${f.username}.`;
+        `to user ${chatName(f.userid, f.username)}.`;
     else
         p.textContent =
-        `User ${f.username} offered to send us a file ` +
+        `User ${chatName(f.userid, f.username)} offered to send us a file ` +
         `called "${f.name}" of size ${f.size}.`
     let bno = null, byes = null;
     if(!f.up) {
@@ -6360,6 +6919,16 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
             serverConnection.e2ee.decryptChat(message).then(function(res) {
                 if(!res)
                     return;
+                let G = guestNameApi();
+                if(G) {
+                    let m = G.classify(res.kind, res.text);
+                    if(m.type === 'drop')
+                        return;
+                    if(m.type === 'name') {
+                        gotPeerName(id, m.name);
+                        return;
+                    }
+                }
                 let u = serverConnection.users[id];
                 // The sender goes in the peerId slot, where every other
                 // message puts it.  There is no message id: this one was
@@ -6454,10 +7023,16 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
         if(operatorRoom.active) {
             // A dashboard-created link: don't dump it into chat or share it,
             // the dashboard refreshes its own list.
+            if(pendingLinkName && message.token)
+                operatorLinkNames.set(message.token, pendingLinkName);
+            pendingLinkName = null;
             pollOperatorRoom();
             break;
         }
         let f = formatToken(message, false);
+        if(pendingInviteName && guestNameApi())
+            f[1] = guestNameApi().withNameInHash(f[1], pendingInviteName);
+        pendingInviteName = null;
         localMessage(f[0] + ': ' + f[1]);
         if('share' in navigator) {
             try {
@@ -6599,6 +7174,124 @@ let operatorRoom = {
     knockToasts: {},
 };
 
+/**
+ * Offer the password change on the operator panel where the server may make
+ * it -- it rewrites the group file, which needs writableGroups -- and to a
+ * user it knows by name.  (Sozvon)
+ */
+function reflectOperatorAccount() {
+    let user = serverConnection && serverConnection.username;
+    let can = !!groupStatus.canChangePassword && !!user;
+    setVisibility('operator-account', can);
+    if(can)
+        getInputElement('operator-password-user').value = user;
+}
+
+/**
+ * Show or hide what is typed in a password field, from the eye button next
+ * to it -- the only way to check a long generated password before saving
+ * it.  (Sozvon)
+ *
+ * @param {HTMLButtonElement} button
+ * @param {boolean} show
+ */
+function setPasswordShown(button, show) {
+    let input = document.getElementById(button.getAttribute('aria-controls'));
+    if(!(input instanceof HTMLInputElement))
+        return;
+    input.type = show ? 'text' : 'password';
+    button.setAttribute('aria-pressed', show ? 'true' : 'false');
+    let key = show ? 'operator.hidePassword' : 'operator.showPassword';
+    // the data attributes too, or a change of language puts the old text back
+    button.setAttribute('data-i18n-title', key);
+    button.setAttribute('data-i18n-aria', key);
+    button.title = Sozvon.i18n.t(key);
+    button.setAttribute('aria-label', button.title);
+    let icon = button.querySelector('i');
+    if(icon) {
+        icon.classList.toggle('fa-eye', !show);
+        icon.classList.toggle('fa-eye-slash', show);
+    }
+}
+
+/** Hide every password shown in the form again. */
+function hideOperatorPasswords() {
+    document.querySelectorAll('#operator-password-form .password-reveal-btn')
+        .forEach(b => setPasswordShown(/** @type {HTMLButtonElement} */ (b), false));
+}
+
+document.addEventListener('click', function(e) {
+    let target = /** @type {Element} */ (e.target);
+    let button = target && target.closest &&
+        target.closest('.password-reveal-btn');
+    if(!(button instanceof HTMLButtonElement))
+        return;
+    e.preventDefault();
+    setPasswordShown(button, button.getAttribute('aria-pressed') !== 'true');
+});
+
+/**
+ * Change the operator's own password from the panel's form.  (Sozvon)
+ */
+async function changeOperatorPassword() {
+    let P = /** @type {any} */ (window).SozvonPasswordChange;
+    let current = getInputElement('operator-password-current');
+    let next = getInputElement('operator-password-new');
+    let again = getInputElement('operator-password-again');
+    let message = document.getElementById('operator-password-message');
+    let save = /** @type {HTMLButtonElement} */
+        (document.getElementById('operator-password-save'));
+    function say(key, isError, params) {
+        message.textContent = Sozvon.i18n.t(key, params);
+        message.classList.toggle('error', isError);
+    }
+
+    let problem = P.check(current.value, next.value, again.value);
+    if(problem) {
+        say({
+            empty: 'operator.passwordEmpty',
+            mismatch: 'operator.passwordMismatch',
+            short: 'operator.passwordShort',
+            long: 'operator.passwordLong',
+            same: 'operator.passwordSame',
+        }[problem], true, {n: P.MIN_LENGTH});
+        return;
+    }
+
+    save.disabled = true;
+    let result;
+    try {
+        result = await P.change(window.fetch.bind(window), group,
+                                serverConnection.username,
+                                current.value, next.value);
+    } catch(e) {
+        console.error('Password change failed:', e);
+        result = 'error';
+    } finally {
+        save.disabled = false;
+    }
+    switch(result) {
+    case 'ok':
+        current.value = '';
+        next.value = '';
+        again.value = '';
+        hideOperatorPasswords();
+        say('operator.passwordChanged', false);
+        break;
+    case 'wrong':
+        current.value = '';
+        current.focus();
+        say('operator.passwordWrong', true);
+        break;
+    case 'banned':
+        say('operator.passwordBanned', true);
+        break;
+    default:
+        say('operator.passwordFailed', true);
+        break;
+    }
+}
+
 function enterOperatorRoom() {
     if(operatorRoom.active) {
         renderOperatorRoom();
@@ -6619,6 +7312,7 @@ function enterOperatorRoom() {
     // first is served at "/") and tabs are where you tell them apart — and
     // gotJoined already puts it there via setTitle. (Sozvon)
     setVisibility('operator-room', true);
+    reflectOperatorAccount();
     mintOperatorSession();
     renderOperatorRoom();
     pollOperatorRoom();
@@ -6672,6 +7366,7 @@ function operatorLogout() {
         revokeToken(remembered.token);
     clearRememberToken(rememberKey || group);
     reconnectLastJoin = null;
+    reconnectName = null;
     usingRememberToken = false;
     token = null;
     wantConnected = false;
@@ -6741,6 +7436,10 @@ function operatorLinkUrl(t) {
     url.pathname = '/' + childSlug(t.group) + '/';
     url.search = 'token=' + encodeURIComponent(t.token);
     url.hash = '';
+    let n = operatorLinkNames.get(t.token);
+    let G = guestNameApi();
+    if(n && n.name && G)
+        return G.withNameInHash(url.toString(), n.name);
     return url.toString();
 }
 
@@ -6842,7 +7541,8 @@ function renderOperatorRoom() {
  */
 function operatorRow(t, st) {
     let slug = t.group.slice((group + '/').length);
-    let label = t.username || slug;
+    let n = operatorLinkNames.get(t.token);
+    let label = t.username || (n && n.label) || slug;
 
     let row = document.createElement('div');
     row.className = 'operator-link';
@@ -6867,10 +7567,11 @@ function operatorRow(t, st) {
     if(knocking.length > 0) {
         badge.classList.add('knocking');
         badge.textContent =
-            Sozvon.i18n.t('operator.statusKnocking', {names: knocking.join(', ')});
+            Sozvon.i18n.t('operator.statusKnocking', {names: shownNames(knocking)});
     } else if(clients.length > 0) {
         badge.classList.add('incall');
-        let names = clients.map(c => c.username || '?').join(', ');
+        let names = clients.map(c => hidePseudonym(c.username) ||
+                                Sozvon.i18n.t('toast.someone')).join(', ');
         badge.textContent =
             Sozvon.i18n.t('operator.statusInCall', {names: names});
     } else {
@@ -7000,12 +7701,40 @@ function dismissOperatorKnockToast(childGroup) {
  * @param {Array<string>} names  usernames currently knocking in that room
  * @returns {Object}
  */
+/**
+ * The sender's name on a chat message: what shownName says, "(anon)" for
+ * someone with no name at all, and nothing for a pseudonym whose name has
+ * not arrived.  (Sozvon)
+ *
+ * @param {string} id
+ * @param {string} nick
+ * @returns {string}
+ */
+function chatName(id, nick) {
+    let n = shownName(id, nick);
+    if(n)
+        return n;
+    return nick ? '' : '(anon)';
+}
+
+/**
+ * Names for a list that has no user ids to look them up by: pseudonyms show
+ * as "someone".  (Sozvon)
+ *
+ * @param {Array<string>} names
+ * @returns {string}
+ */
+function shownNames(names) {
+    let someone = Sozvon.i18n.t('toast.someone');
+    return names.map(n => hidePseudonym(n) || someone).join(', ') || someone;
+}
+
 function operatorKnockToast(childGroup, names) {
     let body = document.createElement('div');
     body.classList.add('knock-toast-body');
 
     let label = document.createElement('span');
-    let who = names.join(', ') || Sozvon.i18n.t('toast.someone');
+    let who = shownNames(names);
     label.textContent = Sozvon.i18n.t('operator.knockToast',
         {who: who, room: childSlug(childGroup)});
     body.appendChild(label);
@@ -7129,6 +7858,28 @@ function makeSlug(label) {
     return randomSlugSuffix() + randomSlugSuffix();
 }
 
+/**
+ * Who each link created in this page is for, by token; memory only, so it
+ * is gone after a reload -- by design, since nothing may keep it. (Sozvon)
+ *
+ * @type {Map<string, {label: string, name: string}>}
+ */
+let operatorLinkNames = new Map();
+
+/**
+ * Set between asking for a link and receiving it.
+ *
+ * @type {{label: string, name: string}|null}
+ */
+let pendingLinkName = null;
+
+/**
+ * The name for an invite made from the call, to go after '#'. (Sozvon)
+ *
+ * @type {string|null}
+ */
+let pendingInviteName = null;
+
 function createOperatorLink() {
     let labelElt = /** @type{HTMLInputElement} */
         (document.getElementById('operator-label'));
@@ -7141,17 +7892,25 @@ function createOperatorLink() {
     let days = expElt ? parseInt(expElt.value) : 0;
     if(isNaN(days))
         days = 0;
+    // With end-to-end encryption the server must not learn who the link is
+    // for: the room gets a random name, the client's name goes after '#'
+    // in the link, and label and name are kept in this page's memory only
+    // (operatorLinkNames).  Otherwise, as before: the room is named after
+    // the label and the name goes into the token. (Sozvon)
+    let private_ = !!groupStatus.e2ee;
     // No label and no client name: makeSlug('') yields a purely random slug,
     // so the link still gets a unique name -- no need to force the operator
     // to type one.
-    let slug = makeSlug(label || clientName);
+    let slug = makeSlug(private_ ? '' : (label || clientName));
     let template = {
         group: group + '/' + slug,
         // days === 0 means a perpetual link (null expiry, never expires)
         expires: days > 0 ? new Date(Date.now() + days * units.d) : null,
         permissions: ['present', 'message'],
     };
-    if(clientName)
+    if(private_)
+        pendingLinkName = {label: label || clientName, name: clientName};
+    else if(clientName)
         template.username = clientName;
     makeToken(template);
     if(labelElt)
@@ -7261,6 +8020,10 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
         return;
     }
 
+    // what to show for the sender; nick itself stays the server's name,
+    // which the message menu acts upon (Sozvon)
+    let shown = chatName(peerId, nick);
+
     // Flag unread chat on the panel toggle when a live message from someone
     // else arrives while the panel isn't on screen.
     if(peerId && !history &&
@@ -7325,10 +8088,10 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
             let header = document.createElement('p');
             let user = document.createElement('span');
             let u = dest && serverConnection.users[dest];
-            let name = (u && u.username);
+            let name = u ? chatName(dest, u.username) : '';
             user.textContent = dest ?
-                `${nick || '(anon)'} \u2192 ${name || '(anon)'}` :
-                (nick || '(anon)');
+                `${shown} \u2192 ${name || '(anon)'}` :
+                shown;
             user.classList.add('message-user');
             header.appendChild(user);
             header.classList.add('message-header');
@@ -7354,7 +8117,7 @@ function addToChatbox(id, peerId, dest, nick, time, privileged, history, kind, m
         asterisk.textContent = '*';
         asterisk.classList.add('message-me-asterisk');
         let user = document.createElement('span');
-        user.textContent = nick || '(anon)';
+        user.textContent = shown;
         user.classList.add('message-me-user');
         body.classList.add('message-me-content');
         container.appendChild(asterisk);
@@ -7863,7 +8626,7 @@ function findUserId(user) {
 
     for(let id in serverConnection.users) {
         let u = serverConnection.users[id];
-        if(u && u.username === user)
+        if(u && (u.username === user || shownName(id, u.username) === user))
             return id;
     }
     return null;
@@ -8386,6 +9149,17 @@ function makePrecheck(prefix) {
     let state = {
         cam: false,
         mic: false,
+        // A toggle pressed whose device is still opening.  Joining in that
+        // window counts it as on: the press is the choice, and the open only
+        // confirms it.  On a slow phone, or at the first permission prompt,
+        // the window is seconds wide and "mic, then Join" fell into it,
+        // joining without sound and without a word about it. (Sozvon)
+        camOpening: false,
+        micOpening: false,
+        // Bumped by stop().  An open still in flight when the choice is
+        // applied must not come back to a preview nobody is looking at and
+        // keep the device, so it compares this before keeping its stream.
+        gen: 0,
         /** @type {MediaStream} */
         camStream: null,
         /** @type {MediaStream} */
@@ -8533,18 +9307,27 @@ function makePrecheck(prefix) {
         reflectRotation();
     }
 
-    async function startCam() {
+    /**
+     * @param {number} [gen] - state.gen when the open was asked for
+     */
+    async function startCam(gen = state.gen) {
         stopCam();
         let vid = select('video').value;
         /** @type {MediaTrackConstraints} */
         let video = vid ? {deviceId: vid} : {};
         video.aspectRatio = {ideal: 4/3};
         let stream = await navigator.mediaDevices.getUserMedia({video: video});
+        if(gen !== state.gen) {
+            stopStream(stream);
+            return;
+        }
         state.camStream = stream;
         let v = /** @type {HTMLVideoElement} */
             (document.getElementById(elementId('video')));
         v.srcObject = stream;
         await enumerate();
+        if(gen !== state.gen)
+            return;     // stop() has already released the stream
         let t = stream.getVideoTracks()[0];
         if(t && t.getSettings) {
             let current = t.getSettings().deviceId;
@@ -8563,14 +9346,23 @@ function makePrecheck(prefix) {
         v.srcObject = null;
     }
 
-    async function startMic() {
+    /**
+     * @param {number} [gen] - state.gen when the open was asked for
+     */
+    async function startMic(gen = state.gen) {
         stopMic();
         let aid = select('audio').value;
         let stream = await navigator.mediaDevices.getUserMedia(
             {audio: aid ? {deviceId: aid} : true},
         );
+        if(gen !== state.gen) {
+            stopStream(stream);
+            return;
+        }
         state.micStream = stream;
         await enumerate();
+        if(gen !== state.gen)
+            return;     // stop() has already released the stream
         let t = stream.getAudioTracks()[0];
         if(t && t.getSettings) {
             let current = t.getSettings().deviceId;
@@ -8686,8 +9478,11 @@ function makePrecheck(prefix) {
      * been applied, so the devices are free for the real call.
      */
     function stop() {
+        state.gen++;
         state.cam = false;
         state.mic = false;
+        state.camOpening = false;
+        state.micOpening = false;
         stopCam();
         stopMic();
         error('');
@@ -8699,19 +9494,26 @@ function makePrecheck(prefix) {
         let button = /** @type {HTMLButtonElement} */(this);
         button.disabled = true;
         error('');
+        let gen = state.gen;
         try {
             if(!state.cam) {
-                await startCam();
-                state.cam = true;
+                state.camOpening = true;
+                await startCam(gen);
+                if(gen === state.gen)
+                    state.cam = true;
             } else {
                 stopCam();
                 state.cam = false;
             }
         } catch(err) {
             console.warn(err);
-            state.cam = false;
-            error(Sozvon.i18n.t(mediaErrorKey(err, 'video')));
+            if(gen === state.gen) {
+                state.cam = false;
+                error(Sozvon.i18n.t(mediaErrorKey(err, 'video')));
+            }
         } finally {
+            if(gen === state.gen)
+                state.camOpening = false;
             button.disabled = false;
             reflect();
         }
@@ -8722,19 +9524,26 @@ function makePrecheck(prefix) {
         let button = /** @type {HTMLButtonElement} */(this);
         button.disabled = true;
         error('');
+        let gen = state.gen;
         try {
             if(!state.mic) {
-                await startMic();
-                state.mic = true;
+                state.micOpening = true;
+                await startMic(gen);
+                if(gen === state.gen)
+                    state.mic = true;
             } else {
                 stopMic();
                 state.mic = false;
             }
         } catch(err) {
             console.warn(err);
-            state.mic = false;
-            error(Sozvon.i18n.t(mediaErrorKey(err, 'audio')));
+            if(gen === state.gen) {
+                state.mic = false;
+                error(Sozvon.i18n.t(mediaErrorKey(err, 'audio')));
+            }
         } finally {
+            if(gen === state.gen)
+                state.micOpening = false;
             button.disabled = false;
             reflect();
         }
@@ -8802,9 +9611,11 @@ function makePrecheck(prefix) {
          * @returns {string}
          */
         applyChoices() {
-            let present = state.cam ? 'both' : state.mic ? 'mike' : null;
+            let cam = state.cam || state.camOpening;
+            let mic = state.mic || state.micOpening;
+            let present = cam ? 'both' : mic ? 'mike' : null;
             presentRequested = present;
-            if(state.cam) {
+            if(cam) {
                 let vid = select('video').value;
                 if(vid)
                     updateSettings({video: vid});
@@ -8813,7 +9624,7 @@ function makePrecheck(prefix) {
             } else {
                 updateSettings({video: ''});
             }
-            if(state.mic) {
+            if(mic) {
                 let aid = select('audio').value;
                 if(aid)
                     updateSettings({audio: aid});
@@ -8922,6 +9733,22 @@ document.getElementById('disconnectbutton').onclick = function(e) {
     let logout = document.getElementById('operator-logout');
     if(logout)
         logout.onclick = operatorLogout;
+    let pwToggle = document.getElementById('operator-password-toggle');
+    let pwForm = document.getElementById('operator-password-form');
+    if(pwToggle && pwForm) {
+        pwToggle.onclick = function() {
+            let hidden = pwForm.classList.toggle('invisible');
+            pwToggle.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+            if(hidden)
+                hideOperatorPasswords();
+            if(!hidden)
+                getInputElement('operator-password-current').focus();
+        };
+        pwForm.onsubmit = function(e) {
+            e.preventDefault();
+            changeOperatorPassword();
+        };
+    }
 }
 
 // Sozvon: the round "Leave" button in the bottom control dock reuses the exact
@@ -9733,7 +10560,11 @@ async function start() {
         getSelectElement('simulcastselect').value = 'off';
 
     let parms = new URLSearchParams(window.location.search);
-    if(window.location.search)
+    // A name the inviter put after '#', which browsers never send to the
+    // server: offered as the guest's name below. (Sozvon)
+    let hashName = guestNameApi() ?
+        guestNameApi().nameFromHash(window.location.hash) : '';
+    if(window.location.search || window.location.hash)
         window.history.replaceState(null, '', window.location.pathname);
     setTitle(groupStatus.displayName || capitalise(group));
 
@@ -9750,6 +10581,16 @@ async function start() {
         try {
             window.sessionStorage.setItem('sozvon.pendingToken:' + group, token);
         } catch(e) { /* ignore */ }
+        // An operator signed in on this device who opens a client's link --
+        // to check it, or to wait for the client there -- is still the
+        // operator: come in with the operator's own token, which covers the
+        // hub's rooms, rather than be asked for a name as the client would.
+        // The link stays as a fallback for an operator token the server no
+        // longer takes (see gotJoined 'fail'). (Sozvon)
+        if(loadOperatorSession(group) || loadRememberToken(group)) {
+            linkTokenFallback = {token: token, name: hashName || ''};
+            token = null;
+        }
     }
 
     // An operator's session token (covers this hub and its child rooms)
@@ -9774,6 +10615,14 @@ async function start() {
             if(uElt instanceof HTMLInputElement)
                 uElt.value = remembered.username || '';
         }
+    }
+
+    // The client's name is for the client: an operator opening the link
+    // comes in under their own.
+    if(hashName && !linkTokenFallback) {
+        let uElt = document.getElementById('username');
+        if(uElt instanceof HTMLInputElement)
+            uElt.value = hashName;
     }
 
     // A pending invite token stashed on an earlier visit (e.g. before a
@@ -9834,3 +10683,8 @@ async function start() {
 }
 
 start();
+
+// Sozvon: tells load-guard.js that this file ran to the end, which it needs
+// before it uncovers the page.  Last line on purpose: a top-level throw above
+// (say, a script this one depends on did not load) leaves it unset.
+self.SozvonAppLoaded = true;

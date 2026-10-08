@@ -27,6 +27,26 @@ val syncInstaller by tasks.registering(Copy::class) {
     }
 }
 
+// The first-run onboarding, likewise: onboarding/ at the root is the single
+// source, shared with the desktop app, and OnboardingActivity shows this copy
+// from the assets.  Synced (not merely copied) so a file deleted there does
+// not linger here; the tests and the README stay behind.
+val syncOnboarding by tasks.registering(Sync::class) {
+    val source = rootProject.file("../onboarding")
+    from(source) {
+        exclude("test/**", "README.md")
+    }
+    into(layout.projectDirectory.dir("src/main/assets/onboarding"))
+    doFirst {
+        if (!File(source, "index.html").exists()) {
+            throw GradleException(
+                "onboarding/ not found at ${source.absolutePath}. " +
+                    "Build the app from a full checkout of the Sozvon repository."
+            )
+        }
+    }
+}
+
 // The server release travels inside the APK as well, so the app can install a
 // server that cannot reach GitHub -- which, on Russian hosting, is the usual
 // case: github.com and api.github.com time out while the rest of the internet
@@ -189,7 +209,7 @@ val fetchServerRelease by tasks.registering {
     }
 }
 
-tasks.named("preBuild") { dependsOn(syncInstaller, fetchServerRelease) }
+tasks.named("preBuild") { dependsOn(syncInstaller, syncOnboarding, fetchServerRelease) }
 
 android {
     namespace = "org.sozvon.app"

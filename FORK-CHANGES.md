@@ -357,6 +357,17 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     which says "and then, separately, this one" without drawing anything.
   * **Independent camera and microphone** buttons — toggling one no longer
     affects the other.
+  * **A microphone that drops out mid-call comes back on its own**
+    (`static/mic-recovery.js`). Upstream closes the whole camera stream when
+    any of its tracks ends, so a headset re-pairing or a driver reset took
+    the picture away along with the sound, and nothing returned until the
+    user pressed the microphone button. Now the stream stays up, the
+    microphone is reopened (five attempts over ~10 s, preferring the chosen
+    device and falling back to the default one), and the new track is
+    swapped in with `replaceTrack()`: the same connections throughout, no
+    renegotiation, E2EE untouched. If it cannot be reopened the call goes on
+    with video alone and the microphone button shows "off". Screen sharing
+    still ends with its track, which there means "stop sharing".
   * **State-reflecting mic/camera icons**: each colours by what is live right
     now — **blue + upright** when the device is on, **red + slashed** when off.
     The old neutral-grey in-between state is gone.
@@ -595,6 +606,21 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     site root when there is a hub; the clients open that address after a deploy
     (the Android app already opened the origin; the Electron launcher now takes
     an empty room as "open the server itself").
+  * **The operator changes their own password on the panel**
+    (`static/password-change.js`, an "Account" section under the link form).
+    Upstream already has the server side: the `.users/<user>/.password` API
+    takes the user's own current password, re-hashes the new one with bcrypt
+    and rewrites the group file. It offers that as a bare page in a new tab,
+    behind a small link in the settings drawer that the operator panel does
+    not show. The panel now has the form in place: current password, new one
+    twice, refused before sending when the two differ, when it is shorter
+    than 8 characters or longer than bcrypt's 72 bytes, or when it is the
+    current one. Credentials go out as UTF-8 (`btoa` alone throws on
+    Cyrillic). The section only appears where the server may rewrite group
+    files, which needs `"writableGroups": true` in `data/config.json`, so
+    an operator is never offered a form that can only fail. The other
+    groups that define the same user are left alone: a password is per
+    group, and changing it here changes it for this hub and its rooms.
 
   Sample hub configuration (`groups/<hub>.json`):
 
@@ -652,6 +678,25 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
   * A `cleartextMode` toggle in the media worker forwards frames unchanged for
     the allowed-but-unencrypted fallback, while the handshake window still drops
     unkeyed frames so secure media is never emitted in clear.
+  * **Guests' names stay off the server** (`static/guest-name.js`). In an
+    E2EE room a guest joins under a pseudonym the browser makes up
+    (`~` and ten random letters); the name they typed goes to the peer only
+    over the encrypted chat channel, as a message of kind `name` whose
+    plaintext also carries a marker -- the kind travels outside the
+    ciphertext, so a name relabelled as chat, or chat as a name, is dropped.
+    A pseudonym is never shown: tiles, the user list, chat, file offers,
+    knocks and the operator overview show nothing (or "someone") until the
+    real name arrives. Operators with a password or a remembered login keep
+    their username, which the server needs to let them in. Names live in
+    memory only, for the call.
+    Links follow suit. In an E2EE operator room a client's room gets a random
+    name instead of one derived from the label, and the client's name goes
+    after `#` in the link, which browsers never send; label and name are
+    kept in the operator page's memory, so after a reload the list shows the
+    room names only. The in-call invite does the same, and a guest page fills
+    the name in from `#` and clears it from the address. On the server, a
+    token minted in an E2EE group may name only one of the group's own users
+    (`rtpconn/guestname.go`); a guest's name from an older client is dropped.
 
 ### Pre-join device check
 
@@ -912,6 +957,80 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
 
 ### Operations / self-hosting
 
+  * **Anonymous connection log**, `-log-connections` (`rtpconn/connlog.go`,
+    off by default). Upstream says nothing about why someone dropped out of a
+    call: a page reload closes the websocket with 1001, which counts as
+    normal and is not logged, and ICE failures are handled silently. With the
+    flag, every session start and end (with the reason: close code, the 45 s
+    timeout, a lost connection), join and leave, and ICE state of every up
+    and down connection is logged, with the time since it began; a connected
+    ICE state adds the selected pair as type and protocol, and for a relay
+    how the server reaches it (`relay/udp(via tls)`). A participant is a
+    six-hex tag, a hash of their client id salted per server run: lines
+    about one person in one call go together, nothing leads back to a name.
+    No addresses, usernames or group names; error texts, which carry
+    addresses, are reduced to their kind.
+    The client reports its side too (`sozvon-quality` messages): each
+    settled change of a stream's quality level with the RTT, jitter and loss
+    that caused it, each bitrate cap a receiver asks for and a sender
+    applies, and the "own link degraded" judgement. Only changes are sent;
+    the server checks every field, drops free text, and rate-limits reports
+    to a burst of 20 and one per 3 s. Nothing is logged without the flag.
+  * **Falling back from TURN over UDP** (`static/turn-fallback.js`). A relay
+    reached over UDP carries a call much better than one over TCP/TLS, where
+    one lost packet holds up everything behind it; but some networks drop or
+    throttle UDP, sometimes only once real volume starts, after ICE has
+    already chosen it, and a plain ICE restart picks the same path again.
+    The client watches the path each connection uses (`getStats()`: the
+    selected pair's local candidate and its `relayProtocol`). When a
+    connection on a UDP relay fails, stays disconnected for 6 s, or loses
+    15% or more of its packets for five polls in a row, UDP is taken out of
+    the ICE configuration (`setConfiguration`), every connection restarts
+    ICE over what is left, and the decision is kept in `localStorage` for six
+    hours, so the next call on the same network starts on TCP/TLS. With no
+    UDP relay configured nothing changes. A network that blocks UDP outright
+    needs none of this: ICE never selects the UDP relay. Both the client's
+    path and a fallback are reported to the connection log
+    (`client path relay via udp`, `gives up UDP (loss)`).
+    The same covers **direct UDP to the server**, when the server allows
+    direct paths (no `-relay-only`): a direct path over UDP that breaks
+    in the same ways gives UDP up too, and giving up also switches the
+    policy to relay-only, so the browser ends up on the relay over TCP/TLS.
+  * **Signalling resume** (`rtpconn/resume.go`, `static/signalling-resume.js`,
+    `protocol.js`). Upstream ties a session to its websocket: when the
+    socket went silent for 45 s the server removed the participant, media
+    and all, and the client tore everything down at 50 s. The websocket and
+    the media travel on different paths, and on 2026-10-02 a participant
+    whose audio and video were flowing fine dropped out of a call this way.
+    A client that asks (`kind: "sozvon-resumable"` in its handshake) now gets
+    a secret; when its socket dies, or says nothing for 20 s, it opens a new
+    one and presents its id and the secret (`kind: "sozvon-resume"`), and the
+    session carries on with its peer connections untouched. Both sides
+    number what they send (handshakes and the resume messages aside) and
+    keep the last 512 messages or 2 MB; on resume each says how many it has
+    received and the other sends the rest, so whatever was stuck in the dead
+    socket arrives once, in order, and no message needs to change.
+    What keeps a session waiting is its **media**: while one of its peer
+    connections is ICE-connected the server waits up to two minutes for the
+    client to come back. With no live media a silent client is dropped after
+    25 s, and one whose socket is gone after 15 s -- sooner than upstream's
+    45 s, so someone who has really gone does not linger as a phantom.
+    Resumable clients are pinged after 10 s of silence and ping the server
+    after 8 s, which keeps those limits safe for a healthy idle client. A
+    normal close (leaving, reloading, a kick) ends the session at once, as
+    before; clients that do not opt in keep upstream's rules. The connection
+    log records each step (`signalling lost`, `media alive: keeping the
+    session`, `signalling resumed over a new connection, N message(s)
+    replayed`, `timeout (no signalling, media gone)`).
+  * **ICE servers for clients only** (`"clientsOnly": true` in
+    `data/ice-servers.json`, `ice/ice.go`). The server's own side of a
+    connection uses only the other entries; clients are offered all of them.
+    Measured on 2026-09-30: STUN over UDP to the Russian relay was clean from
+    a client in Russia (p95 9 ms) but held up for seconds from the Finnish
+    SFU (p95 1.4–4.6 s) while ICMP on the same path was clean. So the relay
+    over UDP is offered to clients only, and the SFU keeps reaching it over
+    TLS. The client-side fallback above cannot see the server's side, which
+    is why this has to be decided on the server.
   * **Static files are compressed** (`webserver/compress.go`). Upstream serves
     them uncompressed through its own file handler; the client's first load was
     808 KB, of which ~500 KB was text. A room now loads in 160 KB. Compressing

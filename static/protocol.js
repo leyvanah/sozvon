@@ -155,6 +155,39 @@ function ServerConnection() {
      * @type {number}
      */
     this.pingHandler = null;
+    /**
+     * The secret with which this session may be resumed over a new
+     * socket, once the server has sent it.  See signalling-resume.js.
+     * (Sozvon)
+     *
+     * @type {string}
+     */
+    this.resumeSecret = null;
+    /**
+     * The numbered messages received from the server. (Sozvon)
+     *
+     * @type {number}
+     */
+    this.received = 0;
+    /**
+     * The numbered messages sent, the last ones kept for replay. (Sozvon)
+     */
+    this.sentLog = typeof SozvonResume !== 'undefined' ?
+        new SozvonResume.SentLog() : null;
+    /**
+     * While the session is being resumed: when it started, and the
+     * pending timer. (Sozvon)
+     *
+     * @type {{since: number, timer: number}}
+     */
+    this.resuming = null;
+    /**
+     * Whether close() was called: a socket we closed ourselves ends the
+     * session rather than being resumed. (Sozvon)
+     *
+     * @type {boolean}
+     */
+    this.leaving = false;
 
     /* Callbacks */
 
@@ -302,6 +335,7 @@ function ServerConnection() {
  * be called when the connection is effectively closed.
  */
 ServerConnection.prototype.close = function() {
+    this.leaving = true;
     this.socket && this.socket.close(1000, 'Close requested by client');
     this.socket = null;
 };
@@ -324,6 +358,20 @@ ServerConnection.prototype.error = function(e) {
   * @param {message} m - the message to send.
   */
 ServerConnection.prototype.send = function(m) {
+    // Sozvon: a client that asked to be resumable numbers and keeps what it
+    // sends from the start, as the server does; in a session that can be
+    // resumed, a message sent while the socket is down goes out once it is
+    // back.
+    if(this.socket && this.sentLog && SozvonResume.counted(m.type)) {
+        let open = this.socket.readyState === this.socket.OPEN;
+        if(!open && !this.resumeSecret)
+            throw(new Error('Connection is not open'));
+        let s = JSON.stringify(m);
+        this.sentLog.push(s);
+        if(this.resuming || !open)
+            return;
+        return this.socket.send(s);
+    }
     if(!this.socket || this.socket.readyState !== this.socket.OPEN) {
         // send on a closed socket doesn't throw
         throw(new Error('Connection is not open'));
@@ -342,10 +390,16 @@ ServerConnection.prototype.connect = function(url) {
     if(sc.socket)
         throw new Error("Attempting to connect stale connection");
 
-    sc.socket = new WebSocket(url);
+    /**
+     * The socket whose events we act on.  Once a session carries on over a
+     * new socket, whatever the old one still does is ignored. (Sozvon)
+     *
+     * @type {WebSocket}
+     */
+    let current = null;
 
     /**
-     * Whether this socket has been torn down.  We may give up on a socket
+     * Whether this session has been torn down.  We may give up on a socket
      * before the browser reports it closed (see the ping handler), and the
      * teardown must still happen exactly once. (Sozvon)
      */
@@ -359,6 +413,8 @@ ServerConnection.prototype.connect = function(url) {
         if(closed)
             return;
         closed = true;
+        stopResuming();
+        sc.resumeSecret = null;
         if(sc.onbeforeclose)
             sc.onbeforeclose.call(sc);
         sc.permissions = [];
@@ -387,12 +443,152 @@ ServerConnection.prototype.connect = function(url) {
             sc.onclose.call(sc, code, reason);
     }
 
-    this.pingHandler = setInterval(() => {
-        if(!sc.lastServerMessage) {
-            sc.error(new Error('Timeout'));
+    /*
+     * Sozvon: signalling resume.  When the socket of a resumable session
+     * dies or goes silent, open a new one and ask the server to carry on the
+     * same session over it; the peer connections are not touched.  See
+     * signalling-resume.js and rtpconn/resume.go.
+     */
+
+    function stopResuming() {
+        if(sc.resuming && sc.resuming.timer)
+            clearTimeout(sc.resuming.timer);
+        sc.resuming = null;
+    }
+
+    /**
+     * Replace the current socket with a new one, and ask the server to
+     * carry on the session over it.
+     *
+     * @param {string} why
+     */
+    function resume(why) {
+        if(closed)
+            return;
+        if(!sc.resuming) {
+            sc.resuming = {since: Date.now(), timer: null};
+            console.warn(`Signalling lost (${why}), resuming the session`);
+        } else if(sc.resuming.timer) {
+            clearTimeout(sc.resuming.timer);
+            sc.resuming.timer = null;
+        }
+        let old = current;
+        if(Date.now() - sc.resuming.since > SozvonResume.GIVE_UP_AFTER) {
+            console.warn('Could not resume the session');
+            current = null;
+            try {
+                old.close(1000);
+            } catch(e) {
+            }
+            gone(1006, 'Timeout');
             return;
         }
+        try {
+            old.close(4000, 'Resuming');
+        } catch(e) {
+        }
+        let s = new WebSocket(url);
+        current = sc.socket = s;
+        wire(s);
+        sc.resuming.timer = setTimeout(() => {
+            if(current === s && sc.resuming)
+                resume('no answer');
+        }, SozvonResume.ATTEMPT_TIMEOUT);
+    }
+
+    /** Try again after a short pause: the network refused outright. */
+    function retry() {
+        if(sc.resuming.timer)
+            clearTimeout(sc.resuming.timer);
+        sc.resuming.timer = setTimeout(() => resume('retry'),
+                                       SozvonResume.RETRY_DELAY);
+    }
+
+    /** @param {WebSocket} s */
+    function wire(s) {
+        s.onerror = function(e) {
+            if(closed || s !== current || sc.resuming)
+                return;
+            if(sc.onerror)
+                sc.onerror.call(sc, new Error('Socket error: ' + e));
+        };
+        s.onopen = function(e) {
+            if(closed || s !== current)
+                return;
+            let hello = {
+                type: 'handshake',
+                version: ['2'],
+                id: sc.id,
+            };
+            if(sc.resuming) {
+                hello.kind = 'sozvon-resume';
+                hello.value = {
+                    secret: sc.resumeSecret,
+                    received: sc.received,
+                };
+            } else if(sc.sentLog) {
+                hello.kind = 'sozvon-resumable';
+            }
+            try {
+                s.send(JSON.stringify(hello));
+            } catch(e) {
+                if(sc.resuming)
+                    retry();
+                else
+                    sc.error(e);
+            }
+        };
+        s.onclose = function(e) {
+            if(s !== current)
+                return;
+            if(sc.resuming && !sc.leaving &&
+               e.code !== SozvonResume.CLOSE_NO_RESUME) {
+                retry();
+                return;
+            }
+            if(!sc.resuming && sc.sentLog &&
+               SozvonResume.onClose(e.code, !!sc.resumeSecret,
+                                    sc.leaving) === 'resume') {
+                resume(`closed ${e.code}`);
+                return;
+            }
+            if(sc.resuming && e.code === SozvonResume.CLOSE_NO_RESUME)
+                console.warn('The server could not resume the session');
+            gone(e.code, e.reason);
+        };
+        s.onmessage = function(e) {
+            // Sozvon: a socket we gave up on may still deliver whatever was
+            // stuck in flight once the path recovers.
+            if(closed || s !== current)
+                return;
+            gotMessage(s, e);
+        };
+    }
+
+    let started = Date.now();
+    this.pingHandler = setInterval(() => {
+        if(!sc.lastServerMessage) {
+            if(Date.now() - started >= 10000)
+                sc.error(new Error('Timeout'));
+            return;
+        }
+        // Sozvon: a resume in progress has timers of its own.
+        if(sc.resuming)
+            return;
         let d = new Date().valueOf() - sc.lastServerMessage;
+        // Sozvon: a resumable session gives up on a silent socket sooner,
+        // since giving up no longer ends the call.
+        if(sc.resumeSecret) {
+            switch(SozvonResume.onTick(d)) {
+            case 'resume':
+                resume(`nothing received for ${Math.round(d / 1000)}s`);
+                break;
+            case 'ping':
+                sc.send({type: 'ping'});
+                break;
+            }
+            return;
+        }
         // Sozvon: 50 s rather than 65, so that we give up at about the time
         // the server does -- it drops a client after 45 s of silence, checked
         // every 10 s.  Past that point our media is already gone on the
@@ -408,34 +604,16 @@ ServerConnection.prototype.connect = function(url) {
         }
         if(sc.version && d >= 15000)
             sc.send({type: 'ping'});
-    }, 10000);
+    }, 5000);
 
-    this.socket.onerror = function(e) {
-        if(closed)
-            return;
-        if(sc.onerror)
-            sc.onerror.call(sc, new Error('Socket error: ' + e));
-    };
-    this.socket.onopen = function(e) {
-        try {
-            sc.send({
-                type: 'handshake',
-                version: ['2'],
-                id: sc.id,
-            });
-        } catch(e) {
-            sc.error(e);
-            return;
-        }
-    };
-    this.socket.onclose = function(e) {
-        gone(e.code, e.reason);
-    };
-    this.socket.onmessage = function(e) {
-        // Sozvon: a socket we gave up on may still deliver whatever was stuck
-        // in flight once the path recovers; it belongs to a torn-down session.
-        if(closed)
-            return;
+    current = sc.socket = new WebSocket(url);
+    wire(current);
+
+    /**
+     * @param {WebSocket} s
+     * @param {MessageEvent} e
+     */
+    function gotMessage(s, e) {
         let m;
         try {
             m = JSON.parse(e.data);
@@ -448,6 +626,9 @@ ServerConnection.prototype.connect = function(url) {
             return;
         }
         sc.lastServerMessage = new Date().valueOf();
+        // Sozvon: count what the server numbers, see signalling-resume.js.
+        if(sc.sentLog && SozvonResume.counted(m.type))
+            sc.received++;
         switch(m.type) {
         case 'handshake': {
             if((m.version instanceof Array) && m.version.includes('2')) {
@@ -457,8 +638,35 @@ ServerConnection.prototype.connect = function(url) {
                 sc.error(new Error(`Unknown protocol version ${m.version}`));
                 return;
             }
+            // Sozvon: the handshake of a resumed socket starts nothing new.
+            if(sc.resuming)
+                break;
             if(sc.onconnected)
                 sc.onconnected.call(sc);
+            break;
+        }
+        case 'sozvon-session':
+            if(typeof m.value === 'string' && sc.sentLog)
+                sc.resumeSecret = m.value;
+            break;
+        case 'sozvon-resumed': {
+            if(!sc.resuming)
+                break;
+            // the server says how many of ours it has; send the rest
+            let rest = sc.sentLog.after(m.value);
+            let took = Math.round((Date.now() - sc.resuming.since) / 1000);
+            if(!rest) {
+                console.warn('Cannot resume the session: messages lost');
+                current = null;
+                s.close(1000);
+                gone(1006, 'Cannot resume');
+                return;
+            }
+            stopResuming();
+            for(let r of rest)
+                s.send(r);
+            console.info(`Session resumed after ${took}s, ` +
+                         `${rest.length} message(s) sent again`);
             break;
         }
         case 'offer':
@@ -600,7 +808,7 @@ ServerConnection.prototype.connect = function(url) {
             console.warn('Unexpected server message', m.type);
             return;
         }
-    };
+    }
 };
 
 /**

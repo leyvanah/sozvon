@@ -19,6 +19,7 @@ import (
 	"github.com/leyvanah/sozvon/group"
 	"github.com/leyvanah/sozvon/ice"
 	"github.com/leyvanah/sozvon/limit"
+	"github.com/leyvanah/sozvon/rtpconn"
 	"github.com/leyvanah/sozvon/token"
 	"github.com/leyvanah/sozvon/turnserver"
 	"github.com/leyvanah/sozvon/webserver"
@@ -88,6 +89,9 @@ func main() {
 	flag.StringVar(&trustedProxies, "trusted-proxy", "",
 		"comma-separated `addresses` or CIDR prefixes of reverse "+
 			"proxies whose X-Forwarded-For header is trusted")
+	flag.BoolVar(&rtpconn.LogConnections, "log-connections", false,
+		"log connection events (sessions, ICE states), anonymised: "+
+			"no addresses, names or groups")
 	flag.BoolVar(&showVersion, "version", false,
 		"print the version and exit")
 	flag.Parse()

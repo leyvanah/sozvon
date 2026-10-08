@@ -179,3 +179,18 @@ test('worst orders the levels', () => {
     assert.strictEqual(q.worst('weak', 'good'), 'weak');
     assert.strictEqual(q.worst('bad', 'lost', 'weak'), 'lost');
 });
+
+test('a change of level carries the numbers that caused it', () => {
+    // The server logs each change with its cause (sozvon-quality reports);
+    // the tracker keeps the latest assessment for that.
+    let t = new q.Tracker();
+    run(t, [...series(2, 100, 0), ...series(
+        q.WORSEN_AFTER, 100, 20, {received: 200, lost: 0})]);
+    assert.strictEqual(t.level, 'bad');
+    assert.ok(t.last, 'no assessment kept');
+    assert.ok(t.last.loss > 0.15 && t.last.loss < 0.25,
+              `loss ${t.last.loss}`);
+    // a path that went down has no numbers
+    t.update('failed', null);
+    assert.strictEqual(t.last, null);
+});

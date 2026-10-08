@@ -61,6 +61,22 @@ jobs:
           node-version: '22'
       - name: Test
         run: node --test 'static/test/*.test.js'
+      # The apps' first-run onboarding (onboarding/), shared by the Android and
+      # the desktop app: plain JavaScript like the above.  Counted before it is
+      # run, like the desktop's tests, so an emptied directory fails loudly
+      # instead of passing with nothing checked.
+      - name: Onboarding tests
+        run: |
+          n=0
+          for f in onboarding/test/*.test.js; do
+              [ -f "$f" ] && n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+              echo "no tests in onboarding/test/ -- this step would have passed vacuously" >&2
+              exit 1
+          fi
+          echo "onboarding tests ($n files)"
+          node --test 'onboarding/test/*.test.js'
 
   browser:
     name: Browser tests
@@ -158,7 +174,8 @@ jobs:
                    src/tray.js src/knocks.js src/knock-preload.js \
                    src/renderer/launcher.js src/renderer/deploy.js \
                    src/renderer/knock.js \
-                   scripts/test-deploy.js scripts/sync-installer.js; do
+                   scripts/test-deploy.js scripts/sync-installer.js \
+                   scripts/sync-onboarding.js; do
               node --check "$f"
           done
       # Which page the app answers, and how far it lets one go.  Electron is
