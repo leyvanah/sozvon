@@ -2326,12 +2326,10 @@ a:hover {
    used to describe went with the blue palette, and the elevated card went when
    the card did.)
 
-   The grain is inert as it stands: it is a data: URI and the server sends
-   `img-src 'self'` (cspHeader in webserver/webserver.go), so the browser
-   refuses it and the page is plain --bg.  Left in place rather than deleted
-   because the fix is to serve the speckle as a file, not to widen the policy —
-   but until then, do not read a rule here as evidence of what the screen
-   actually looks like. */
+   The grain is a file of its own, grain.svg, not a data: URI: the server sends
+   `img-src 'self'` (cspHeader in webserver/webserver.go), and for as long as it
+   was inlined the browser refused it and the screen was plain --bg.  Keep it a
+   file rather than widening the policy. */
 body.pre-join .login-container {
     background: var(--bg);
     position: relative;
@@ -2343,7 +2341,7 @@ body.pre-join .login-container::after {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-image: url("grain.svg");
     opacity: var(--grain);
 }
 /* Above the grain, not behind it. */
