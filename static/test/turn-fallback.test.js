@@ -226,6 +226,27 @@ test('reads direct paths with their protocol', () => {
                            {type: 'host', relay: 'tcp'});
 });
 
+test('a pair learnt through the relay is read as the relay it goes through', () => {
+    // Seen in Chrome after falling back to a TURN relay over TCP: the local
+    // candidate of the selected pair is "prflx", its protocol "udp" (the
+    // relay to the server), its relayProtocol "tcp" (us to the relay).
+    const r = [
+        {id: 'L', type: 'local-candidate', candidateType: 'prflx',
+         protocol: 'udp', relayProtocol: 'tcp'},
+        {id: 'P', type: 'candidate-pair', localCandidateId: 'L'},
+        {id: 'T', type: 'transport', selectedCandidatePairId: 'P'},
+    ];
+    assert.deepStrictEqual(f.selectedPath(r), {type: 'relay', relay: 'tcp'});
+
+    // ...so a loss on it is not a reason to give UDP up.
+    const w = new f.Watcher();
+    let reason = null;
+    for(let i = 0; i < f.LOSS_POLLS + 2; i++)
+        reason = w.update('s', {ice: 'connected', path: f.selectedPath(r),
+                                loss: 0.5}, i * 2000) || reason;
+    assert.strictEqual(reason, null);
+});
+
 test('a direct UDP path that breaks gives UDP up; a TCP one does not', () => {
     let w = new f.Watcher();
     w.update('a', {ice: 'connected', path: {type: 'srflx', relay: 'udp'}}, 0);
