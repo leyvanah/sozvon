@@ -110,7 +110,25 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
       - name: Run
-        run: test/browser/run.sh
+        # Everything but the three TURN scenarios, each of which needs a
+        # server set up its own way: they get a step of their own below.
+        run: test/browser/run.sh --grep-invert 'UDP|relay to fall back'
+      # The TURN relay listens on the runner's own address: on loopback,
+      # Chrome does not use it the way it uses a relay on the network.
+      - name: UDP fallback -- relay forced, UDP relay breaks
+        run: |
+          ip=$(hostname -I | awk '{print $1}')
+          SOZVON_SERVER_ARGS="-relay-only -turn $ip:1194" \
+              test/browser/run.sh udp-fallback.spec.js -g 'broken UDP relay'
+      - name: UDP fallback -- direct path breaks, TCP relay left
+        run: |
+          ip=$(hostname -I | awk '{print $1}')
+          SOZVON_SERVER_ARGS="-turn $ip:1194" \
+              test/browser/run.sh udp-fallback.spec.js -g 'direct UDP path'
+      - name: UDP fallback -- direct path lossy, no relay at all
+        run: |
+          SOZVON_SERVER_ARGS="-turn=" \
+              test/browser/run.sh udp-fallback.spec.js -g 'relay to fall back'
       - name: Keep traces and screenshots of a failure
         if: failure()
         uses: actions/upload-artifact@v4

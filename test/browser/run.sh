@@ -38,9 +38,19 @@ echo "browser tests: building the server" >&2
 ( cd "$root" && CGO_ENABLED=0 go build -o "$bin" . )
 
 mkdir -p "$work/data" "$work/recordings"
+# A copy of the rooms, since a test may rewrite one (operator-password changes
+# a password, through the server, which needs writableGroups for that).
+cp -R "$here/groups" "$work/groups"
+echo '{"writableGroups": true}' >"$work/data/config.json"
+export SOZVON_GROUPS="$work/groups"
+# SOZVON_SERVER_ARGS: extra server flags, for the scenarios that need a stand
+# set up their own way (the TURN ones in udp-fallback.spec.js).  Split on
+# spaces on purpose.
+# shellcheck disable=SC2086
 "$bin" -insecure -dev -http "localhost:$port" \
-    -static "$root/static/" -groups "$here/groups/" \
+    -static "$root/static/" -groups "$work/groups/" \
     -data "$work/data/" -recordings "$work/recordings/" \
+    ${SOZVON_SERVER_ARGS:-} \
     >"$work/server.log" 2>&1 &
 srv=$!
 

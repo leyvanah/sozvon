@@ -15,8 +15,23 @@ test/browser/run.sh --repeat-each=5 quality
 ```
 
 `run.sh` builds the server, starts it on port 18443 (`SOZVON_TEST_PORT`) with
-the rooms in `groups/` and a throwaway data directory, runs Playwright, and
-stops the server. Any Playwright arguments pass through.
+a copy of the rooms in `groups/` (exported as `SOZVON_GROUPS`) and a
+throwaway data directory with `writableGroups`, runs Playwright, and stops the
+server. Any Playwright arguments pass through; `SOZVON_SERVER_ARGS` adds
+server flags.
+
+The three TURN scenarios in `udp-fallback.spec.js` each need the server set
+up their own way and skip, saying how, on any other stand. CI runs them one
+by one, with the relay on the runner's own address (on loopback Chrome does
+not use it like a relay on the network):
+
+```sh
+SOZVON_SERVER_ARGS="-relay-only -turn $ip:1194" test/browser/run.sh udp-fallback -g 'broken UDP relay'
+SOZVON_SERVER_ARGS="-turn $ip:1194"             test/browser/run.sh udp-fallback -g 'direct UDP path'
+SOZVON_SERVER_ARGS="-turn="                     test/browser/run.sh udp-fallback -g 'relay to fall back'
+```
+
+and the rest of the suite with `--grep-invert 'UDP|relay to fall back'`.
 
 Against a server you already run instead: `SOZVON_URL=http://localhost:8443
 npx playwright test` from this directory, with the two rooms from `groups/`
@@ -32,8 +47,9 @@ test-results/*/trace.zip` replays the run frame by frame.
   test was skipped, and `run.sh` refuses to call that a pass.
 - Skips are listed with their reasons, never folded into "passed". In CI
   (`SOZVON_FAIL_ON_SKIP=1`) a skip fails the job.
-- The only skip left in the suite is `bitrate.spec.js` on a receiver that
-  still cannot play audio on time 45 s into a quiet call.
+- Apart from the TURN scenarios above on the wrong stand, the only skip left
+  in the suite is `bitrate.spec.js` on a receiver that still cannot play
+  audio on time 45 s into a quiet call.
 
 ## The specs
 

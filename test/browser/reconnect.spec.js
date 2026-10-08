@@ -199,7 +199,11 @@ test('a rejoin refused because the dead session still counts is retried', async 
         // them until its own timeout -- while new ones get through, and Alice
         // is made to notice at once rather than after 50 s.
         proxy.blackhole();
+        // A resumable session would carry on over a new socket and never
+        // rejoin (signalling-resume.spec.js); this is about the full rejoin,
+        // which still happens when a resume is not possible.
         await A.evaluate(() => {
+            serverConnection.resumeSecret = null;
             serverConnection.lastServerMessage = Date.now() - 60_000;
         });
 
