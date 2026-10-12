@@ -46,7 +46,8 @@ test('SentLog is bounded in bytes too', () => {
 });
 
 test('counted leaves out the handshake and the resume messages', () => {
-    for(const t of ['handshake', 'sozvon-session', 'sozvon-resumed'])
+    for(const t of ['handshake', 'sozvon-session', 'sozvon-resumed',
+                    'sozvon-network'])
         assert.strictEqual(R.counted(t), false, t);
     for(const t of ['join', 'ping', 'pong', 'chat', 'ice', 'offer'])
         assert.strictEqual(R.counted(t), true, t);

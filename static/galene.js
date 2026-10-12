@@ -786,6 +786,11 @@ function turnFallbackApi() {
 
 /** UDP was given up during this page's life. */
 let udpGivenUp = false;
+/**
+ * The network it was given up on, as the server tags it.
+ * @type {string|null}
+ */
+let udpGivenUpOn = null;
 
 /** @type {any} */
 let turnWatcher = null;
@@ -805,7 +810,9 @@ function udpRelayGivenUp() {
     if(!F)
         return false;
     let s = fallbackStorage();
-    return udpGivenUp || (!!s && F.remembered(s, Date.now()));
+    let network = serverConnection ? serverConnection.network : null;
+    return udpGivenUp ||
+        (!!s && F.remembered(s, Date.now(), network));
 }
 
 /**
@@ -823,9 +830,10 @@ function giveUpUdpRelay(reason) {
     if(!F.canDropUdp(serverConnection.rtcConfiguration))
         return;
     udpGivenUp = true;
+    udpGivenUpOn = serverConnection.network;
     let s = fallbackStorage();
     if(s)
-        F.remember(s, Date.now());
+        F.remember(s, Date.now(), udpGivenUpOn);
     console.warn('TURN over UDP does not work here (' + reason +
                  '), falling back to TCP/TLS');
     reportQuality('transport', '', {udp: false, reason: reason});
@@ -922,15 +930,63 @@ function recoverIce(c) {
  */
 function gotResumed() {
     let R = iceRecoveryApi();
-    if(!R)
-        return;
-    if(!iceRecovery)
+    if(R && !iceRecovery)
         iceRecovery = new R.Recovery();
-    iceRecovery.resumed(Date.now());
+    if(iceRecovery)
+        iceRecovery.resumed(Date.now());
+    // On a new network, UDP given up on the old one gets another chance;
+    // that restarts every connection, so there is nothing left to recover.
+    if(retryUdp())
+        return;
     for(let id in this.up)
         recoverIce(this.up[id]);
     for(let id in this.down)
         recoverIce(this.down[id]);
+}
+
+/**
+ * If UDP was given up during this call on another network than the one
+ * the client is on now, and is not remembered as broken on this one, put
+ * it back in every connection and restart them.  If it is broken here too,
+ * the fallback finds out again.  Returns whether it did.
+ *
+ * Without a network tag from the server (or behind a proxy that hides the
+ * client's address, where every client looks alike) nothing changes.
+ */
+function retryUdp() {
+    let F = turnFallbackApi();
+    let sc = serverConnection;
+    if(!F || !sc || !udpGivenUp || !sc.network ||
+       sc.network === udpGivenUpOn)
+        return false;
+    let s = fallbackStorage();
+    if(s && F.remembered(s, Date.now(), sc.network))
+        return false;
+    udpGivenUp = false;
+    udpGivenUpOn = null;
+    turnWatcher = null;
+    console.warn('A new network: trying UDP again');
+    reportQuality('transport', '', {udp: true, reason: 'network'});
+    let conf = onPeerConnection.call(sc) || sc.rtcConfiguration;
+    /** @type {Stream[]} */
+    let streams = [];
+    for(let id in sc.up)
+        streams.push(sc.up[id]);
+    for(let id in sc.down)
+        streams.push(sc.down[id]);
+    for(let c of streams) {
+        if(!c.pc)
+            continue;
+        try {
+            c.pc.setConfiguration(conf);
+            c.restartIce();
+            if(iceRecovery)
+                iceRecovery.restarted(c.id, Date.now());
+        } catch(e) {
+            console.warn('UDP retry', e);
+        }
+    }
+    return true;
 }
 
 /**

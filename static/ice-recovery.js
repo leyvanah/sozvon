@@ -129,6 +129,23 @@
         return restart;
     };
 
+    /**
+     * A connection was restarted by someone else (the UDP fallback): it is
+     * not to be restarted again before MIN_GAP.
+     *
+     * @param {string} id
+     * @param {number} now
+     */
+    Recovery.prototype.restarted = function(id, now) {
+        let s = this.streams.get(id);
+        if(!s) {
+            s = {disconnectedSince: null, restartedAt: null};
+            this.streams.set(id, s);
+        }
+        s.restartedAt = now;
+        s.disconnectedSince = null;
+    };
+
     /** @param {string} id */
     Recovery.prototype.forget = function(id) {
         this.streams.delete(id);

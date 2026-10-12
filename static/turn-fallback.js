@@ -53,8 +53,10 @@
     // consecutive polls (of about 2 s) it must persist.
     const LOSS = 0.15;
     const LOSS_POLLS = 5;
-    // How long the decision is remembered.
+    // How long the decision is remembered, for the network it was taken on.
     const REMEMBER = 6 * 3600 * 1000;
+    // How many networks it is remembered for at most.
+    const NETWORKS = 16;
     const STORAGE_KEY = 'sozvon-turn-udp-off';
 
     /**
@@ -233,17 +235,47 @@
     };
 
     /**
-     * Whether UDP was given up recently in this browser.  Storage may be
-     * missing or throw (private windows); then nothing is remembered.
+     * The networks UDP was given up on, with when, still within REMEMBER.
+     * A network is the tag the server gives it, '' when it gave none.  A
+     * value from before networks were told apart (a bare time) is not
+     * believed: at worst UDP is tried once more.
+     *
+     * @param {any} storage
+     * @param {number} now
+     * @returns {Object<string, number>}
+     */
+    function load(storage, now) {
+        /** @type {Object<string, number>} */
+        let out = {};
+        let v = JSON.parse(storage.getItem(STORAGE_KEY) || 'null');
+        if(!v || typeof v !== 'object' || Array.isArray(v))
+            return out;
+        for(let k in v) {
+            let t = v[k];
+            if(typeof t === 'number' && now - t >= 0 && now - t < REMEMBER)
+                out[k] = t;
+        }
+        return out;
+    }
+
+    /**
+     * Whether UDP was given up recently in this browser, on this network.
+     * Storage may be missing or throw (private windows); then nothing is
+     * remembered.
+     *
+     * On 2026-10-12 a decision taken under a VPN outlived the VPN, and the
+     * call went on over the TCP relay for an hour on a network where UDP
+     * worked: a network is what the decision is about.
      *
      * @param {any} storage - localStorage, or something like it
      * @param {number} now
+     * @param {string|null} [network] - the server's tag for it
      * @returns {boolean}
      */
-    function remembered(storage, now) {
+    function remembered(storage, now, network) {
         try {
-            let t = parseInt(storage.getItem(STORAGE_KEY), 10);
-            return !isNaN(t) && now - t >= 0 && now - t < REMEMBER;
+            return Object.prototype.hasOwnProperty.call(
+                load(storage, now), network || '');
         } catch(e) {
             return false;
         }
@@ -252,10 +284,22 @@
     /**
      * @param {any} storage
      * @param {number} now
+     * @param {string|null} [network]
      */
-    function remember(storage, now) {
+    function remember(storage, now, network) {
         try {
-            storage.setItem(STORAGE_KEY, String(now));
+            let v = {};
+            try {
+                v = load(storage, now);
+            } catch(e) {
+            }
+            v[network || ''] = now;
+            let keys = Object.keys(v).sort((a, b) => v[b] - v[a]);
+            /** @type {Object<string, number>} */
+            let out = {};
+            for(let k of keys.slice(0, NETWORKS))
+                out[k] = v[k];
+            storage.setItem(STORAGE_KEY, JSON.stringify(out));
         } catch(e) {
         }
     }
@@ -276,7 +320,7 @@
     }
 
     const api = {
-        DISCONNECTED_FOR, LOSS, LOSS_POLLS, REMEMBER, STORAGE_KEY,
+        DISCONNECTED_FOR, LOSS, LOSS_POLLS, REMEMBER, NETWORKS, STORAGE_KEY,
         isUdpRelay, hasUdpRelay, offersUdp, withoutUdp, canDropUdp,
         selectedPath, Watcher, remembered, remember,
     };

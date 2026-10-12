@@ -213,6 +213,14 @@ function ServerConnection() {
      */
     this.onbeforeclose = null;
     /**
+     * The network the client connects from, as the server tags it (a
+     * salted hash, not an address), or null if it has not said.  It can
+     * change when the session is resumed over a new socket.  (Sozvon)
+     *
+     * @type {string|null}
+     */
+    this.network = null;
+    /**
      * onresumed is called once the session has been resumed over a new
      * socket.  The peer connections were not touched; whether their paths
      * survived whatever killed the old socket is the application's to
@@ -657,6 +665,10 @@ ServerConnection.prototype.connect = function(url) {
         case 'sozvon-session':
             if(typeof m.value === 'string' && sc.sentLog)
                 sc.resumeSecret = m.value;
+            break;
+        case 'sozvon-network':
+            if(typeof m.value === 'string')
+                sc.network = m.value;
             break;
         case 'sozvon-resumed': {
             if(!sc.resuming)

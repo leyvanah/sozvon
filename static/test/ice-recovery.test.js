@@ -99,3 +99,11 @@ test('connections are judged apart, and forgotten', () => {
     rec.forget('a');
     assert.ok(!rec.streams.has('a'));
 });
+
+test('a restart made elsewhere is not repeated at once', () => {
+    const rec = new r.Recovery();
+    rec.resumed(0);
+    rec.restarted('u', 0);
+    assert.strictEqual(rec.update('u', 'disconnected', 100), null);
+    assert.strictEqual(rec.update('u', 'disconnected', r.MIN_GAP), 'resumed');
+});

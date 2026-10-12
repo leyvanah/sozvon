@@ -136,6 +136,11 @@ jobs:
         run: |
           SOZVON_SERVER_ARGS="-turn=" \
               test/browser/run.sh udp-fallback.spec.js -g 'relay to fall back'
+      - name: UDP given up on one network is tried again on another
+        run: |
+          ip=$(hostname -I | awk '{print $1}')
+          SOZVON_SERVER_ARGS="-turn $ip:1194 -trusted-proxy 127.0.0.1" \
+              test/browser/run.sh udp-network
       - name: Network change under the TCP relay -- media comes back
         run: |
           ip=$(hostname -I | awk '{print $1}')

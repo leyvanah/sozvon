@@ -1011,6 +1011,23 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     direct paths (no `-relay-only`): a direct path over UDP that breaks
     in the same ways gives UDP up too, and giving up also switches the
     policy to relay-only, so the browser ends up on the relay over TCP/TLS.
+    **The decision is about a network, not a browser** (`rtpconn/network.go`).
+    On 2026-10-12 UDP given up under a VPN stayed given up after the VPN
+    was turned off, and the call ran over the TCP relay for an hour on a
+    network where UDP worked. A browser forced to relay cannot see its own
+    public address, but the server can: after the handshake, and again on
+    every resumed connection, it sends `sozvon-network`, a tag for the
+    client's network -- a salted SHA-256 of its /24 (IPv4) or /56 (IPv6),
+    16 hex digits, the salt new at every start, so the tag gives nothing
+    away and cannot be matched across restarts. The decision is stored per
+    tag (at most 16 networks), and a session resumed from a network other
+    than the one UDP was given up on, and not known to be broken itself,
+    puts UDP back in every connection and restarts them
+    (`tries UDP again on a new network` in the connection log). A server
+    restart only makes the decision be taken again. Behind a reverse proxy
+    the server needs `-trusted-proxy`, and the proxy must send
+    `X-Forwarded-For` on the websocket too; without them every client looks
+    alike and the decision behaves as before, for the whole browser.
   * **Signalling resume** (`rtpconn/resume.go`, `static/signalling-resume.js`,
     `protocol.js`). Upstream ties a session to its websocket: when the
     socket went silent for 45 s the server removed the participant, media
