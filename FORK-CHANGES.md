@@ -1022,6 +1022,22 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     log records each step (`signalling lost`, `media alive: keeping the
     session`, `signalling resumed over a new connection, N message(s)
     replayed`, `timeout (no signalling, media gone)`).
+  * **Media back after a network change** (`static/ice-recovery.js`).
+    Upstream restarts ICE only once a connection has failed, and Chrome
+    says so 20–30 s after its path went away. When the path went away
+    because the network changed -- on 2026-10-12 a participant on the TCP
+    relay turned a VPN off -- nothing comes back by itself before then: the
+    socket to the relay belonged to the old network and goes quiet rather
+    than closing. The signalling resumed two seconds later, the media did
+    not, and the participant reloaded the page. Now a resumed session is
+    taken as a sign the network changed: every connection that is down, or
+    goes down within the next 15 s, restarts ICE at once. Without a resume,
+    a connection that stays disconnected for 8 s is restarted too (longer
+    than the UDP fallback waits, so the two do not restart the same
+    connection twice). The connection log records each restart
+    (`restarts ICE after the signalling resumed`). Measured in
+    `test/browser/network-change.spec.js`: media back in 6–8 s instead
+    of 31 s.
   * **ICE servers for clients only** (`"clientsOnly": true` in
     `data/ice-servers.json`, `ice/ice.go`). The server's own side of a
     connection uses only the other entries; clients are offered all of them.

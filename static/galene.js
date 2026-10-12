@@ -877,6 +877,62 @@ function watchTurnPath(c, report) {
         giveUpUdpRelay(reason);
 }
 
+// ice-recovery.js decides when a connection whose path went away is
+// restarted before Chrome declares it failed: right after the signalling
+// resumes, which usually means the network changed, or once it has stayed
+// disconnected for a while.  (Sozvon)
+
+function iceRecoveryApi() {
+    return /** @type {any} */ (window).SozvonIceRecovery;
+}
+
+/** @type {any} */
+let iceRecovery = null;
+
+/**
+ * Feed a connection's ICE state to ice-recovery.js, and restart ICE on it
+ * if it says so.
+ *
+ * @param {Stream} c
+ */
+function recoverIce(c) {
+    let R = iceRecoveryApi();
+    if(!R || !c.pc)
+        return;
+    if(!iceRecovery)
+        iceRecovery = new R.Recovery();
+    let reason = iceRecovery.update(c.id, c.pc.iceConnectionState,
+                                    Date.now());
+    if(!reason)
+        return;
+    console.warn(`Restarting ICE on ${c.id} (${reason})`);
+    reportQuality('restart', c.id, {reason: reason});
+    try {
+        c.restartIce();
+    } catch(e) {
+        console.warn('ICE restart', e);
+    }
+}
+
+/**
+ * The signalling has been resumed over a new socket: the media paths may
+ * have gone with the old network.
+ *
+ * @this {ServerConnection}
+ */
+function gotResumed() {
+    let R = iceRecoveryApi();
+    if(!R)
+        return;
+    if(!iceRecovery)
+        iceRecovery = new R.Recovery();
+    iceRecovery.resumed(Date.now());
+    for(let id in this.up)
+        recoverIce(this.up[id]);
+    for(let id in this.down)
+        recoverIce(this.down[id]);
+}
+
 /**
  * @this {ServerConnection}
  * @param {number} code
@@ -1112,6 +1168,7 @@ function gotDownStream(c) {
     }
     c.onstatus = function(status) {
         setMediaStatus(c);
+        recoverIce(c);
     };
     c.onstats = gotDownStats;
     if(getSettings().activityDetection)
@@ -2162,11 +2219,16 @@ async function pollQuality() {
             feedBitrate(c, report);
             watchTurnPath(c, report);
         }
+        recoverIce(c);
     }));
     if(turnWatcher)
         for(let id of [...turnWatcher.streams.keys()])
             if(!serverConnection.up[id] && !serverConnection.down[id])
                 turnWatcher.forget(id);
+    if(iceRecovery)
+        for(let id of [...iceRecovery.streams.keys()])
+            if(!serverConnection.up[id] && !serverConnection.down[id])
+                iceRecovery.forget(id);
     reflectEveryoneQuality();
 }
 
@@ -2688,6 +2750,7 @@ function newUpStream(localId) {
     let c = serverConnection.newUpStream(localId);
     c.onstatus = function(status) {
         setMediaStatus(c);
+        recoverIce(c);
     };
     c.onerror = function(e) {
         console.error(e);
@@ -10513,6 +10576,7 @@ async function serverConnect() {
     serverConnection.onpeerconnection = onPeerConnection;
     serverConnection.onbeforeclose = noteSentMedia;
     serverConnection.onclose = gotClose;
+    serverConnection.onresumed = gotResumed;
     serverConnection.ondownstream = gotDownStream;
     serverConnection.onuser = gotUser;
     serverConnection.onknock = gotKnock;

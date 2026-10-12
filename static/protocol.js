@@ -213,6 +213,15 @@ function ServerConnection() {
      */
     this.onbeforeclose = null;
     /**
+     * onresumed is called once the session has been resumed over a new
+     * socket.  The peer connections were not touched; whether their paths
+     * survived whatever killed the old socket is the application's to
+     * judge.  (Sozvon)
+     *
+     * @type{(this: ServerConnection) => void}
+     */
+    this.onresumed = null;
+    /**
      * onclose is called when the connection is closed
      *
      * @type{(this: ServerConnection, code: number, reason: string) => void}
@@ -667,6 +676,8 @@ ServerConnection.prototype.connect = function(url) {
                 s.send(r);
             console.info(`Session resumed after ${took}s, ` +
                          `${rest.length} message(s) sent again`);
+            if(sc.onresumed)
+                sc.onresumed.call(sc);
             break;
         }
         case 'offer':
