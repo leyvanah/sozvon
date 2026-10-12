@@ -215,6 +215,12 @@ var fallbackReasons = map[string]bool{
 	"failed": true, "disconnected": true, "loss": true,
 }
 
+// why a client restarted ICE early (static/ice-recovery.js)
+var restartReasons = map[string]string{
+	"resumed":      "after the signalling resumed",
+	"disconnected": "after staying disconnected",
+}
+
 var iceStates = map[string]bool{
 	"new": true, "checking": true, "connected": true, "completed": true,
 	"disconnected": true, "failed": true, "closed": true,
@@ -411,6 +417,18 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		}
 		return fmt.Sprintf("%v gives up UDP (%v), "+
 			"falling back to the relay over TCP/TLS", who, reason)
+	case "restart":
+		dir, ok := streamKind(c, id)
+		if !ok {
+			return ""
+		}
+		reason, _ := v["reason"].(string)
+		why, ok := restartReasons[reason]
+		if !ok {
+			return ""
+		}
+		return fmt.Sprintf("%v %v=%v restarts ICE %v",
+			who, dir, connTag(id), why)
 	case "everyone":
 		degraded, ok := v["degraded"].(bool)
 		if !ok {
