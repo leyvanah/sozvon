@@ -313,6 +313,9 @@ func askEvidence(v map[string]interface{}) string {
 	if f, ok := number(v["concealed"], 1); ok {
 		parts = append(parts, fmt.Sprintf("concealed %.1f%%", f*100))
 	}
+	// what the receiver takes to be the path's own delay (static/bitrate-control.js)
+	ms("pathAudio", "path audio")
+	ms("pathVideo", "path video")
 	if len(parts) == 0 {
 		return ""
 	}
