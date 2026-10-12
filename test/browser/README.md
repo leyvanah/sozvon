@@ -20,8 +20,8 @@ throwaway data directory with `writableGroups`, runs Playwright, and stops the
 server. Any Playwright arguments pass through; `SOZVON_SERVER_ARGS` adds
 server flags.
 
-The three TURN scenarios in `udp-fallback.spec.js` each need the server set
-up their own way and skip, saying how, on any other stand. CI runs them one
+The three TURN scenarios in `udp-fallback.spec.js`, and
+`network-change.spec.js`, each need the server set up their own way and skip, saying how, on any other stand. CI runs them one
 by one, with the relay on the runner's own address (on loopback Chrome does
 not use it like a relay on the network):
 
@@ -29,9 +29,10 @@ not use it like a relay on the network):
 SOZVON_SERVER_ARGS="-relay-only -turn $ip:1194" test/browser/run.sh udp-fallback -g 'broken UDP relay'
 SOZVON_SERVER_ARGS="-turn $ip:1194"             test/browser/run.sh udp-fallback -g 'direct UDP path'
 SOZVON_SERVER_ARGS="-turn="                     test/browser/run.sh udp-fallback -g 'relay to fall back'
+SOZVON_SERVER_ARGS="-relay-only -turn $ip:1194" test/browser/run.sh network-change
 ```
 
-and the rest of the suite with `--grep-invert 'UDP|relay to fall back'`.
+and the rest of the suite with `--grep-invert 'UDP|relay to fall back|network change'`.
 
 Against a server you already run instead: `SOZVON_URL=http://localhost:8443
 npx playwright test` from this directory, with the two rooms from `groups/`
