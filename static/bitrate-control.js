@@ -41,6 +41,19 @@
 // opening while playback stays healthy costs a well-connected call about a
 // minute of slightly softer picture instead.
 //
+// Not all delay is ours to cure.  A path that delivers in bursts -- the TCP
+// relay, a VPN, a mobile network -- keeps the jitter buffer deep whatever the
+// sender does, and judged against fixed thresholds such a path looks
+// congested for good: on 2026-10-09 and twice on 2026-10-12 a call was cut
+// to the 150 kbit/s floor within a minute and stayed there to the end, an
+// hour in one case, with the audio buffer at 260-330 ms whether the sender
+// sent 600 kbit/s or 150 (tasks#62).  So the controller remembers what delay
+// it saw at lower caps: if the buffer was that deep even at a much lower
+// cap, or at the floor, that much is the path's, and the thresholds are
+// measured from it.  Delay the sender adds on top still counts as before,
+// and with no such evidence -- a stream that has never been cut -- the
+// fixed thresholds apply alone.
+//
 // Like connection-quality.js this has no DOM or WebRTC dependency, so the
 // control logic is tested under Node.
 
@@ -62,6 +75,27 @@
         concealed: 0.01,
         freeze: 0,
     };
+
+    // On top of the path's own delay (see above): what the sender may add
+    // before the interval counts as congested, and what it may add and the
+    // interval still count as healthy.  The fixed thresholds above stay the
+    // floor of both.
+    const EXCESS_CONGESTED = {audioDelay: 0.15, videoDelay: 0.2};
+    const EXCESS_HEALTHY = {audioDelay: 0.05, videoDelay: 0.08};
+    // A delay seen at a cap this much lower than the current one (or at the
+    // floor) is the path's: sending less did not cure it.
+    const PROVEN_BELOW = 0.7;
+    // How long such evidence is kept, and how long the delay it showed is
+    // trusted once no new evidence comes (uncapped, nothing is lower) and
+    // the delay stops being explained by it.  Long enough to climb back
+    // from the floor step by step, which takes a couple of minutes.
+    const PATH_MEMORY = 300000;
+    // A lower delay seen for this many intervals in a row shows the path
+    // got better, and the path's delay follows it down.
+    const PATH_LOWER_AFTER = 3;
+    // Nor is a delay measured in the first seconds after a change: the
+    // buffer still holds what the old cap left in it.
+    const SETTLE = 4000;
 
     const MIN_CAP = 150000;         // never ask for less than this
     // A request above this is not a cap anyone could mean (and above
@@ -154,15 +188,19 @@
      *
      * @param {ReturnType<typeof snapshot>|null} prev
      * @param {ReturnType<typeof snapshot>} cur
+     * @param {{audioDelay: number, videoDelay: number}|null} [path] - the
+     *     delay that is the path's, not the sender's; none if unknown
      * @returns {{state: string, videoBps: number, audioDelay: number,
      *            videoDelay: number, concealed: number, freeze: number,
-     *            jitter: number, processing: number}}
-     *     state is 'bad', 'good', 'hold' (in between) or 'unknown'.
+     *            jitter: number, processing: number,
+     *            path: {audioDelay: number, videoDelay: number}|null}}
+     *     state is 'bad', 'good', 'hold' (in between) or 'unknown';
+     *     path is what it was judged against.
      */
-    function assess(prev, cur) {
+    function assess(prev, cur, path) {
         let r = {state: 'unknown', videoBps: 0, audioDelay: 0,
                  videoDelay: 0, concealed: 0, freeze: 0,
-                 jitter: 0, processing: 0};
+                 jitter: 0, processing: 0, path: path || null};
         if(!prev || cur.time <= prev.time)
             return r;
         let dt = (cur.time - prev.time) / 1000;
@@ -193,13 +231,29 @@
         if(!judged)
             return r;
 
-        if(r.audioDelay > CONGESTED.audioDelay ||
-           r.videoDelay > CONGESTED.videoDelay ||
-           r.concealed > CONGESTED.concealed ||
-           r.freeze > CONGESTED.freeze)
+        let congested = CONGESTED, healthy = HEALTHY;
+        if(path) {
+            congested = {...CONGESTED,
+                audioDelay: Math.max(CONGESTED.audioDelay,
+                                     path.audioDelay + EXCESS_CONGESTED.audioDelay),
+                videoDelay: Math.max(CONGESTED.videoDelay,
+                                     path.videoDelay + EXCESS_CONGESTED.videoDelay),
+            };
+            healthy = {...HEALTHY,
+                audioDelay: Math.max(HEALTHY.audioDelay,
+                                     path.audioDelay + EXCESS_HEALTHY.audioDelay),
+                videoDelay: Math.max(HEALTHY.videoDelay,
+                                     path.videoDelay + EXCESS_HEALTHY.videoDelay),
+            };
+        }
+
+        if(r.audioDelay > congested.audioDelay ||
+           r.videoDelay > congested.videoDelay ||
+           r.concealed > congested.concealed ||
+           r.freeze > congested.freeze)
             r.state = 'bad';
-        else if(r.audioDelay <= HEALTHY.audioDelay &&
-                r.videoDelay <= HEALTHY.videoDelay &&
+        else if(r.audioDelay <= healthy.audioDelay &&
+                r.videoDelay <= healthy.videoDelay &&
                 r.concealed <= HEALTHY.concealed &&
                 r.freeze <= HEALTHY.freeze)
             r.state = 'good';
@@ -232,7 +286,88 @@
         this.startedAt = null;
         /** @type {number[]} */
         this.rates = [];
+        /**
+         * Delays seen while capped, as evidence of the path's own delay.
+         * @type {Array<{time: number, cap: number, audioDelay: number, videoDelay: number}>}
+         */
+        this.seen = [];
+        /**
+         * The path's delay as last established, and until when it holds.
+         * @type {{audioDelay: number, videoDelay: number}|null}
+         */
+        this.path = null;
+        this.pathUntil = -Infinity;
+        /** @type {Array<{audioDelay: number, videoDelay: number}>} */
+        this.recent = [];
     }
+
+    /**
+     * The evidence of the path's delay at the current cap: the least delay
+     * seen at a cap well below it, or at the floor.  null if there is none.
+     *
+     * @param {number} now
+     * @returns {{audioDelay: number, videoDelay: number}|null}
+     */
+    Controller.prototype.pathEvidence = function(now) {
+        while(this.seen.length && now - this.seen[0].time > PATH_MEMORY)
+            this.seen.shift();
+        let current = this.cap === null ? Infinity : this.cap;
+        let path = null;
+        for(let e of this.seen) {
+            if(e.cap > MIN_CAP && e.cap > current * PROVEN_BELOW)
+                continue;
+            if(!path) {
+                path = {audioDelay: e.audioDelay, videoDelay: e.videoDelay};
+            } else {
+                path.audioDelay = Math.min(path.audioDelay, e.audioDelay);
+                path.videoDelay = Math.min(path.videoDelay, e.videoDelay);
+            }
+        }
+        return path;
+    };
+
+    /**
+     * The delay that is the path's, not the sender's: fresh evidence if
+     * there is any, else what was last established, while it holds.
+     *
+     * @param {number} now
+     * @returns {{audioDelay: number, videoDelay: number}|null}
+     */
+    Controller.prototype.pathDelay = function(now) {
+        let evidence = this.pathEvidence(now);
+        if(evidence) {
+            this.path = evidence;
+            this.pathUntil = Math.max(this.pathUntil, now + PATH_MEMORY);
+        } else if(this.path && now >= this.pathUntil) {
+            this.path = null;
+        }
+        return this.path;
+    };
+
+    /**
+     * After an interval was judged against the path's delay: while the
+     * delay sits within it the path still explains it, so it holds on; and
+     * a path seen to be better than established is lowered.
+     *
+     * @param {{state: string, audioDelay: number, videoDelay: number}} sample
+     * @param {number} now
+     */
+    Controller.prototype.confirmPath = function(sample, now) {
+        this.recent.push({audioDelay: sample.audioDelay,
+                          videoDelay: sample.videoDelay});
+        if(this.recent.length > PATH_LOWER_AFTER)
+            this.recent.shift();
+        if(!this.path)
+            return;
+        if(sample.state !== 'bad')
+            this.pathUntil = Math.max(this.pathUntil, now + PATH_MEMORY);
+        if(this.recent.length >= PATH_LOWER_AFTER) {
+            let a = Math.max(...this.recent.map(r => r.audioDelay));
+            let v = Math.max(...this.recent.map(r => r.videoDelay));
+            this.path = {audioDelay: Math.min(this.path.audioDelay, a),
+                         videoDelay: Math.min(this.path.videoDelay, v)};
+        }
+    };
 
     /**
      * Feed one poll.
@@ -244,13 +379,23 @@
      */
     Controller.prototype.update = function(snap) {
         let now = snap.time;
-        let sample = assess(this.prev, snap);
+        let path = this.pathDelay(now);
+        let sample = assess(this.prev, snap, path);
         this.prev = snap;
         let old = this.cap;
         if(this.startedAt === null && sample.state !== 'unknown')
             this.startedAt = now;
         let warming = this.startedAt === null ||
             now - this.startedAt < WARMUP;
+        // Evidence for pathDelay: what this cap left in the buffer.  Not
+        // while warming up, when the buffer has not settled.
+        if(!warming && sample.state !== 'unknown') {
+            if(this.cap !== null && now - this.changedAt >= SETTLE)
+                this.seen.push({time: now, cap: this.cap,
+                                audioDelay: sample.audioDelay,
+                                videoDelay: sample.videoDelay});
+            this.confirmPath(sample, now);
+        }
 
         // No video coming in at all -- the sender stopped it, or we stopped
         // asking for it: a cap we asked for is not ours to hold any more.
@@ -429,7 +574,8 @@
     }
 
     const api = {
-        CONGESTED, HEALTHY, MIN_CAP, MAX_CAP, RELEASE_AT, START_CAP,
+        CONGESTED, HEALTHY, EXCESS_CONGESTED, EXCESS_HEALTHY, PROVEN_BELOW,
+        PATH_MEMORY, PATH_LOWER_AFTER, SETTLE, MIN_CAP, MAX_CAP, RELEASE_AT, START_CAP,
         DECREASE, INCREASE,
         INCREASE_UNUSED, UNUSED_BELOW,
         BAD_TO_DECREASE, GOOD_TO_INCREASE, MIN_DECREASE_GAP, WARMUP,

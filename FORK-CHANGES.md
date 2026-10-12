@@ -450,6 +450,21 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     The sender still cannot check that the requester actually receives the
     stream -- only the SFU knows -- so this bounds, rather than prevents, what
     a hostile participant can do: at worst the 150 kbit/s floor.
+    **The path's own delay is not the sender's.** A path that delivers in
+    bursts (the TCP relay, a VPN, a mobile network) keeps the audio buffer
+    at 250–350 ms whatever the sender sends. Judged against the fixed
+    thresholds alone, such a call looked congested for good: on 2026-10-09
+    and twice on 2026-10-12 the cap fell to the 150 kbit/s floor within a
+    minute and stayed there to the end of the call, an hour in one of them.
+    So the receiver remembers the delay it saw at lower caps: whatever the
+    buffer held even at a cap 30% or more below the current one, or at the
+    floor, is the path's. Congested and healthy are then measured from that
+    (sender's share: 150 / 50 ms of audio, 200 / 80 ms of video), never
+    tighter than the fixed thresholds. The path's delay is kept while it
+    still explains what the buffer shows, and lowered when the path is seen
+    to improve; with no such evidence, as at the start of a stream, the fixed
+    thresholds apply alone. Each request in the connection log now carries
+    it too (`path audio 280ms path video 50ms`).
 
 ### Localisation
 
