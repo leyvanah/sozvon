@@ -145,12 +145,12 @@ test('sustained lag caps below what was arriving, and says so', () => {
     assert.ok(last.changed && last.send);
 });
 
-test('lag that persists keeps shrinking, but not below the floor', () => {
+test('lag that persists keeps shrinking, down to the floor', () => {
     let ctl = new b.Controller();
     let rx = receiver();
     feed(ctl, rx, WARM);
     let caps = [];
-    for(let i = 0; i < 100; i++) {
+    for(let i = 0; i < 100 && ctl.cap !== b.MIN_CAP; i++) {
         // The sender obeys: what arrives is the cap.
         let bps = ctl.cap === null ? 4000000 : ctl.cap;
         caps.push(ctl.update(rx.next({audioDelay: 0.5, bps})).cap);
@@ -158,10 +158,129 @@ test('lag that persists keeps shrinking, but not below the floor', () => {
     let distinct = [...new Set(caps.filter(c => c !== null))];
     for(let i = 1; i < distinct.length; i++)
         assert.ok(distinct[i] < distinct[i - 1], 'caps only go down');
-    assert.strictEqual(caps[caps.length - 1], b.MIN_CAP);
+    assert.strictEqual(ctl.cap, b.MIN_CAP);
     // Decreases are spaced out, not one per poll.
     let changes = caps.filter((c, i) => i > 0 && c !== caps[i - 1]).length;
-    assert.ok(changes <= Math.ceil(100 * STEP / b.MIN_DECREASE_GAP) + 1);
+    assert.ok(changes <= Math.ceil(caps.length * STEP / b.MIN_DECREASE_GAP) + 1);
+    // And never below it, however bad it gets.
+    let out = feed(ctl, rx, 3, {audioDelay: 0.9, bps: b.MIN_CAP});
+    assert.ok(out.every(o => o.cap === b.MIN_CAP));
+});
+
+// tasks#62: the calls of 2026-10-09 and 2026-10-12.  The buffer sat at
+// 260-330 ms whatever the sender sent, and the cap stayed at the floor for
+// the rest of the call -- an hour in one of them.
+test("delay the floor does not cure is the path's: the cap climbs back", () => {
+    let ctl = new b.Controller(b.START_CAP);
+    let rx = receiver();
+    let caps = [];
+    for(let i = 0; i < 600; i++) {   // 20 minutes
+        let bps = ctl.cap === null ? 4000000 : ctl.cap;
+        caps.push(ctl.update(rx.next({audioDelay: 0.3, bps})).cap);
+    }
+    let floor = caps.indexOf(b.MIN_CAP);
+    assert.ok(floor >= 0, 'cut to the floor first: nothing yet says it is the path');
+    let atFloor = caps.slice(floor).filter(c => c === b.MIN_CAP).length;
+    assert.ok(atFloor * STEP <= 60000,
+              `${atFloor * STEP / 1000} s at the floor in 20 minutes`);
+    assert.ok(caps.lastIndexOf(b.MIN_CAP) - floor < 60,
+              'and does not fall back to it once the path is known');
+    assert.strictEqual(ctl.cap, null, 'full quality once proven harmless');
+});
+
+test('a path with its own delay still caps what the sender adds', () => {
+    // The path holds 0.3 s; past 600 kbit/s the sender queues on top of it
+    // (as the TCP relay does), a little more each interval it stays there.
+    let ctl = new b.Controller(b.START_CAP);
+    let rx = receiver();
+    let queue = 0;
+    let caps = [];
+    for(let i = 0; i < 900; i++) {   // 30 minutes
+        let bps = ctl.cap === null ? 4000000 : ctl.cap;
+        queue = bps > 600000 ? queue + 0.05 * (bps / 600000) :
+            Math.max(0, queue - 0.1);
+        caps.push(ctl.update(rx.next({audioDelay: 0.3 + queue, bps})).cap);
+    }
+    let late = caps.slice(300);          // after the first 10 minutes
+    let over = late.filter(c => c === null || c > 600000).length;
+    let floor = late.filter(c => c === b.MIN_CAP).length;
+    assert.ok(over / late.length < 0.3,
+              `above what the path carries ${Math.round(over / late.length * 100)}% of the time`);
+    assert.ok(floor / late.length < 0.3,
+              `at the floor ${Math.round(floor / late.length * 100)}% of the time`);
+    let avg = late.reduce((a, c) => a + (c === null ? 4000000 : c), 0) / late.length;
+    assert.ok(avg > 300000, `settles near what the path carries, not the floor: ${Math.round(avg / 1000)} kbit/s`);
+});
+
+test('without a lower cap to compare with, the fixed thresholds stand', () => {
+    let ctl = new b.Controller(b.START_CAP);
+    let rx = receiver();
+    // a delay that has been there since the stream started, at the start
+    // cap: it may well be the sender's, so it is cut
+    feed(ctl, rx, WARM + b.BAD_TO_DECREASE, {audioDelay: 0.3, bps: b.START_CAP});
+    assert.ok(ctl.cap < b.START_CAP);
+    assert.strictEqual(ctl.pathEvidence(1e9), null, 'and forgotten in time');
+});
+
+test("the path's delay is the least seen well below the current cap", () => {
+    let ctl = new b.Controller();
+    let at = (time, cap, a, v) => ctl.seen.push(
+        {time, cap, audioDelay: a, videoDelay: v});
+    at(1000, 1000000, 0.1, 0.05);
+    at(2000, 600000, 0.3, 0.2);
+    at(3000, b.MIN_CAP, 0.35, 0.25);
+    at(4000, b.MIN_CAP, 0.28, 0.3);
+    ctl.cap = 1000000;
+    assert.deepStrictEqual(ctl.pathDelay(5000), {audioDelay: 0.28, videoDelay: 0.2});
+    ctl.cap = 800000;            // 600k is not well below 800k
+    assert.deepStrictEqual(ctl.pathDelay(5000), {audioDelay: 0.28, videoDelay: 0.25});
+    ctl.cap = b.MIN_CAP;         // at the floor, the floor counts
+    assert.deepStrictEqual(ctl.pathDelay(5000), {audioDelay: 0.28, videoDelay: 0.25});
+    ctl.cap = null;              // uncapped: every capped sample is lower
+    assert.deepStrictEqual(ctl.pathDelay(5000), {audioDelay: 0.1, videoDelay: 0.05});
+    assert.strictEqual(ctl.pathEvidence(4000 + b.PATH_MEMORY + 1), null);
+});
+
+test('a known path delay holds while it explains the delay, and goes when not', () => {
+    let ctl = new b.Controller();
+    ctl.path = {audioDelay: 0.3, videoDelay: 0.03};
+    ctl.pathUntil = 10000;
+    ctl.confirmPath({state: 'good', audioDelay: 0.31, videoDelay: 0.03}, 9000);
+    let t = 9000 + b.PATH_MEMORY - 1;
+    assert.strictEqual(ctl.pathDelay(t).audioDelay, 0.3);
+    // a delay it no longer explains does not keep it alive
+    ctl.confirmPath({state: 'bad', audioDelay: 0.9, videoDelay: 0.03}, t);
+    assert.strictEqual(ctl.pathDelay(9000 + b.PATH_MEMORY), null);
+});
+
+test('a path that gets better is followed down, not on one interval', () => {
+    let ctl = new b.Controller();
+    ctl.path = {audioDelay: 0.3, videoDelay: 0.2};
+    ctl.pathUntil = 1e9;
+    let s = a => ({state: 'good', audioDelay: a, videoDelay: 0.05});
+    ctl.confirmPath(s(0.3), 0);
+    ctl.confirmPath(s(0.3), 1);
+    ctl.confirmPath(s(0.05), 2);
+    assert.strictEqual(ctl.path.audioDelay, 0.3, 'one low interval is not enough');
+    ctl.confirmPath(s(0.06), 3);
+    ctl.confirmPath(s(0.05), 4);
+    assert.strictEqual(ctl.path.audioDelay, 0.06);
+    assert.strictEqual(ctl.path.videoDelay, 0.05);
+});
+
+test('a path delay raises the thresholds, never lowers them', () => {
+    let rx = receiver();
+    let p = rx.next();
+    let deep = rx.next({audioDelay: 0.3});
+    assert.strictEqual(b.assess(p, deep).state, 'bad');
+    let path = {audioDelay: 0.28, videoDelay: 0.03};
+    assert.strictEqual(b.assess(p, deep, path).state, 'good');
+    let more = rx.next({audioDelay: 0.5});
+    assert.strictEqual(b.assess(deep, more, path).state, 'bad', 'sender adds 0.22 s');
+    // a shallow path changes nothing
+    let q = rx.next();
+    let r = rx.next({audioDelay: 0.18});
+    assert.strictEqual(b.assess(q, r, {audioDelay: 0, videoDelay: 0}).state, 'hold');
 });
 
 test('once the link recovers the cap rises step by step and is lifted', () => {

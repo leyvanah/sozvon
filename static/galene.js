@@ -2288,6 +2288,9 @@ function feedBitrate(c, report) {
             cap: r.cap, audioDelay: s.audioDelay, videoDelay: s.videoDelay,
             jitter: s.jitter, processing: s.processing, freeze: s.freeze,
             concealed: s.concealed,
+            // the delay judged to be the path's own, if any (tasks#62)
+            pathAudio: s.path ? s.path.audioDelay : null,
+            pathVideo: s.path ? s.path.videoDelay : null,
         });
     }
     if(!r.send || !c.source || !serverConnection ||
