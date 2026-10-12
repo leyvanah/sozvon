@@ -254,3 +254,44 @@ test('a direct UDP path that breaks gives UDP up; a TCP one does not', () => {
     w.update('b', {ice: 'connected', path: {type: 'host', relay: 'tcp'}}, 0);
     assert.strictEqual(w.update('b', {ice: 'failed', path: null}, 1), null);
 });
+
+// tasks#61: on 2026-10-12 a decision taken under a VPN outlived the VPN,
+// and the call went on over the TCP relay for an hour on a network where UDP
+// worked.
+test('the decision is about the network it was taken on', () => {
+    const s = memoryStorage();
+    f.remember(s, 1000, 'vpn');
+    assert.ok(f.remembered(s, 2000, 'vpn'));
+    assert.ok(!f.remembered(s, 2000, 'home'), 'another network tries UDP');
+    assert.ok(!f.remembered(s, 2000), 'nor does a server that tags none');
+    f.remember(s, 3000, 'home');
+    assert.ok(f.remembered(s, 4000, 'vpn') && f.remembered(s, 4000, 'home'),
+              'each network keeps its own');
+    assert.ok(!f.remembered(s, 1000 + f.REMEMBER, 'vpn'));
+    assert.ok(f.remembered(s, 1000 + f.REMEMBER, 'home'));
+});
+
+test('a decision from before networks were told apart is not believed', () => {
+    const s = memoryStorage();
+    s.setItem(f.STORAGE_KEY, '1000');
+    assert.ok(!f.remembered(s, 2000));
+    assert.ok(!f.remembered(s, 2000, 'x'));
+    f.remember(s, 2000, 'x');
+    assert.ok(f.remembered(s, 3000, 'x'));
+    s.setItem(f.STORAGE_KEY, '{"x": "soon", "y": [1]}');
+    assert.ok(!f.remembered(s, 3000, 'x') && !f.remembered(s, 3000, 'y'));
+    s.setItem(f.STORAGE_KEY, '{not json');
+    assert.ok(!f.remembered(s, 3000, 'x'));
+    f.remember(s, 3000, 'x');
+    assert.ok(f.remembered(s, 3000, 'x'), 'garbage is replaced, not kept');
+});
+
+test('only so many networks are remembered, the latest ones', () => {
+    const s = memoryStorage();
+    for (let i = 0; i < f.NETWORKS + 5; i++)
+        f.remember(s, 1000 + i, 'n' + i);
+    const kept = Object.keys(JSON.parse(s.getItem(f.STORAGE_KEY)));
+    assert.strictEqual(kept.length, f.NETWORKS);
+    assert.ok(f.remembered(s, 2000, 'n' + (f.NETWORKS + 4)));
+    assert.ok(!f.remembered(s, 2000, 'n0'));
+});

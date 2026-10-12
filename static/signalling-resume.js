@@ -64,7 +64,7 @@
      */
     function counted(type) {
         return type !== 'handshake' && type !== 'sozvon-session' &&
-            type !== 'sozvon-resumed';
+            type !== 'sozvon-resumed' && type !== 'sozvon-network';
     }
 
     /**

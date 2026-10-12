@@ -410,9 +410,17 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		return fmt.Sprintf("%v %v=%v client path relay via %v",
 			who, dir, connTag(id), relay)
 	case "transport":
-		// the client gave up TURN over UDP (static/turn-fallback.js)
-		if udp, ok := v["udp"].(bool); !ok || udp {
+		// the client gave up TURN over UDP (static/turn-fallback.js),
+		// or takes it up again on a new network
+		udp, ok := v["udp"].(bool)
+		if !ok {
 			return ""
+		}
+		if udp {
+			if v["reason"] != "network" {
+				return ""
+			}
+			return who + " tries UDP again on a new network"
 		}
 		reason, ok := word(v["reason"], fallbackReasons)
 		if !ok {
