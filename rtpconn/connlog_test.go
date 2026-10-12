@@ -156,6 +156,9 @@ func TestQualityLine(t *testing.T) {
 		{"path", "u1", m("type", "evil"), ""},
 		{"transport", "", m("udp", false, "reason", "because"), ""},
 		{"transport", "", m("udp", true, "reason", "loss"), ""},
+		{"transport", "", m("udp", true, "reason", "network"),
+			who + " tries UDP again on a new network"},
+		{"transport", "", m("udp", "yes", "reason", "network"), ""},
 
 		// malformed or foreign: nothing
 		{"level", "nope", m("level", "weak", "previous", "good"), ""},

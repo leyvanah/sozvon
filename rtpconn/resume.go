@@ -36,6 +36,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
+	"net"
 	"sync"
 	"time"
 
@@ -73,7 +74,7 @@ var (
 // The client counts the same set.
 func countedType(t string) bool {
 	switch t {
-	case "handshake", "sozvon-session", "sozvon-resumed":
+	case "handshake", "sozvon-session", "sozvon-resumed", "sozvon-network":
 		return false
 	}
 	return true
@@ -216,7 +217,7 @@ func refuseResume(conn *websocket.Conn, why string) {
 
 // resumeClient serves a handshake asking to resume session m.Id.  The
 // connection is either handed over to that session or refused.
-func resumeClient(conn *websocket.Conn, m clientMessage) error {
+func resumeClient(conn *websocket.Conn, addr net.Addr, m clientMessage) error {
 	secret, received, ok := parseResume(m.Value)
 	var c *webClient
 	if ok {
@@ -235,6 +236,15 @@ func resumeClient(conn *websocket.Conn, m clientMessage) error {
 		Type:    "handshake",
 		Version: []string{protocolVersion},
 	})
+	if err == nil {
+		// the new connection may come from a new network
+		if tag := networkTag(addr); tag != "" {
+			err = conn.WriteJSON(clientMessage{
+				Type:  "sozvon-network",
+				Value: tag,
+			})
+		}
+	}
 	if err != nil {
 		conn.Close()
 		return nil

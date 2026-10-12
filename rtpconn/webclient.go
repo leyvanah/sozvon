@@ -902,7 +902,7 @@ func StartClient(conn *websocket.Conn, addr net.Addr) (err error) {
 
 	// Sozvon: a client carrying on a session over a new connection.
 	if m.Kind == "sozvon-resume" {
-		return resumeClient(conn, m)
+		return resumeClient(conn, addr, m)
 	}
 
 	versionError := true
@@ -1057,6 +1057,17 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 		err := c.write(clientMessage{
 			Type:  "sozvon-session",
 			Value: c.resumeSecret,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	// Sozvon: which network the client is on (see network.go).
+	if tag := networkTag(c.addr); tag != "" {
+		err := c.write(clientMessage{
+			Type:  "sozvon-network",
+			Value: tag,
 		})
 		if err != nil {
 			return err
