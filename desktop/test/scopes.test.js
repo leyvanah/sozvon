@@ -48,7 +48,7 @@ const STORED_CONFIG = {
  * stubbed.  Returns the stubs, so a test can call a channel the way a page
  * would and see what the app did about it.
  */
-function loadMain() {
+function loadMain({modules = {}} = {}) {
   const invokes = new Map();   // channel -> handler registered with handle()
   const sends = new Map();     // channel -> [listener] registered with on()
   const written = [];          // what saveConfig wrote
@@ -145,6 +145,7 @@ function loadMain() {
       // this is about them.
       if (name === './tray') return {createTray: () => null};
       if (name === './knocks') return {createKnocks: () => ({})};
+      if (name in modules) return modules[name];
       return require(name);
     },
     __dirname: srcDir,
@@ -590,4 +591,45 @@ test('the deploy result waits for the onboarding and is handed over once', async
   assert.strictEqual((await call('takeDeployResult')).result.admin_password, 'pw');
   assert.strictEqual((await call('takeDeployResult')).cancelled, true,
     'the password was kept after it was taken');
+});
+
+// ---- what a deploy hands the installer --------------------------------------
+
+// Not a matter of scope, but main.js can only be reached through the stubbed
+// Electron above, so the test lives with it.
+
+/**
+ * Run deploy:start against the real Deployer with the SSH work stubbed out,
+ * and return the --ip it would start the installer with, or null for none.
+ */
+async function installerIp(opts) {
+  const real = require(path.join(srcDir, 'deploy', 'deployer'));
+  let ip;
+  class Deployer extends real.Deployer {
+    async connect() {}
+    disconnect() {}
+    async checkPrivileges() {}
+    async uploadScript() {}
+    async start(o) { ip = o.ip || null; }
+    async waitForCompletion() { return {origin: 'https://x.example'}; }
+  }
+  const app = loadMain({modules: {'./deploy/deployer': {...real, Deployer}}});
+  const r = await app.invokes.get('deploy:start')(from(OUR_DEPLOY),
+    {tlsMode: 'letsencrypt-sslip', ...opts});
+  assert.ok(r.ok, `deploy failed: ${r.message}`);
+  return ip;
+}
+
+// The installer takes --ip only as an IPv4 literal: a server typed in by name
+// used to be passed through as one, and sslip.io refused it (tasks#39).
+test('a deploy hands the installer an IPv4 address, never a name', async () => {
+  assert.strictEqual(await installerIp({host: '203.0.113.7'}), '203.0.113.7',
+    'the address the server was reached at was not passed on');
+  assert.strictEqual(await installerIp({host: 'localhost'}), '127.0.0.1',
+    'a name was not resolved');
+  assert.strictEqual(await installerIp({host: 'unresolvable.invalid'}), null,
+    'a name that does not resolve was passed on instead of left to the installer');
+  assert.strictEqual(
+    await installerIp({host: 'localhost', ip: '198.51.100.9'}), '198.51.100.9',
+    'an address the user gave was overridden');
 });

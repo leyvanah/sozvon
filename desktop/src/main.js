@@ -1404,12 +1404,11 @@ handleOurs('deploy:start', async (_e, opts) => {
     const result = await d.deploy({
       tlsMode: opts.tlsMode,
       domain: opts.domain,
-      // The address we reached the server at is, by definition, one that
-      // works from here.  Left to guess, the installer asks an outside
-      // service for "your public IP" and gets whatever the server's traffic
-      // exits through -- a VPN endpoint, a NAT gateway -- which is not where
-      // this server answers.
-      ip: opts.ip || opts.host,
+      // Only an address the user gave as such.  Without one the deployer
+      // falls back to the address we reached the server at -- resolved, if
+      // what was typed is a name, since the installer takes --ip only as an
+      // IPv4 literal and refuses a name, which broke sslip.io (tasks#39).
+      ip: opts.ip,
       group: opts.group,
       adminUser: opts.adminUser,
       version: opts.version,
