@@ -26,7 +26,11 @@ package rtpconn
 // the client to come back: the participant is still in the call.  Once its
 // media is gone too, it is dropped within 15 to 25 seconds -- sooner than the
 // 45 seconds of old -- so a participant who has really gone does not linger
-// as a phantom.  A socket closed normally (leaving, closing the page) ends
+// as a phantom.  Those seconds count from whichever came last, the last
+// message or the last moment its media was seen alive: on 2026-10-13 a
+// client's media outlived its signalling by twenty seconds, and the session
+// was dropped one second after the media went, eight seconds before the
+// client got through to resume it (sozvon-tasks#66).  A socket closed normally (leaving, closing the page) ends
 // the session at once, as before.  Clients that do not opt in keep the old
 // rules unchanged.
 
@@ -294,6 +298,21 @@ func (c *webClient) mediaAlive() bool {
 		}
 	}
 	return false
+}
+
+// sessionExpired reports whether a resumable client has been gone too long,
+// and why: it last sent something at readTime, its media was last seen
+// alive at mediaTime (zero if never), and now its socket is gone or not
+// (detached) and its media alive or not.  Without media the limit counts
+// from the later of the two, so a session whose media outlived its
+// signalling waits the full limit from when the media went.
+func sessionExpired(now, readTime, mediaTime time.Time, detached, media bool) (bool, error) {
+	limit, err := silenceLimit(detached, media)
+	from := readTime
+	if !media && mediaTime.After(from) {
+		from = mediaTime
+	}
+	return now.Sub(from) > limit, err
 }
 
 // silenceLimit is how long a resumable client may go without sending

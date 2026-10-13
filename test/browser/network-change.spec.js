@@ -38,19 +38,27 @@ const RECOVERY = 12_000;
 /**
  * A TCP proxy.  drop() closes every open connection; blackhole() makes them
  * silent for good without closing them.  New connections pass either way.
+ * freeze() holds everything -- bytes, closes and new connections -- and
+ * thaw() lets it all through, as a path that stalls and recovers does.
  */
 function proxy(listenHost, listenPort, host, port) {
     const pairs = new Set();
-    const server = net.createServer(client => {
+    let frozen = false;
+    const held = [];        // connections made while frozen
+    const deferred = [];    // closes and bytes held while frozen
+    function link(client) {
         const up = net.connect(port, host);
         const pair = {client, up, dead: false};
         pairs.add(pair);
         const fwd = (from, to) => from.on('data', d => {
-            if (!pair.dead) to.write(d);
+            if (pair.dead) return;
+            if (frozen) { deferred.push(() => to.write(d)); return; }
+            to.write(d);
         });
         fwd(client, up);
         fwd(up, client);
         const end = () => {
+            if (frozen && !pair.dead) { deferred.push(end); return; }
             pairs.delete(pair);
             if (pair.dead) return;
             client.destroy(); up.destroy();
@@ -59,6 +67,10 @@ function proxy(listenHost, listenPort, host, port) {
             s.on('close', end);
             s.on('error', end);
         }
+    }
+    const server = net.createServer(client => {
+        if (frozen) held.push(client);
+        else link(client);
     });
     return {
         listen: () => new Promise((r, j) => {
@@ -75,6 +87,13 @@ function proxy(listenHost, listenPort, host, port) {
         },
         blackhole() {
             for (const p of pairs) p.dead = true;
+        },
+        freeze() { frozen = true; },
+        thaw() {
+            frozen = false;
+            for (const f of deferred.splice(0)) f();
+            for (const c of held.splice(0))
+                if (!c.destroyed) link(c);
         },
     };
 }
@@ -203,6 +222,76 @@ test('network change: media comes back without a reload', async ({browser}) => {
                'the same session, no reload').toBe(id);
         expect(took, 'media back within seconds, not after ' +
                'Chrome gives the path up').toBeLessThan(RECOVERY);
+    } catch (e) {
+        for (const p of browser.contexts().flatMap(c => c.pages()))
+            if (p.log) console.log(p.log.slice(-40).join('\n'));
+        throw e;
+    } finally {
+        await signal.close();
+        await relay.close();
+    }
+});
+
+// The call of 2026-10-13 (sozvon-tasks#66).  A participant's signalling went
+// quiet; twenty seconds later the media went too; the client got through to
+// resume eight seconds after that -- and the server had dropped the session
+// one second after the media went, counting its 25 s from the last message.
+// The participant came back as a new session, and the other side saw them
+// leave and join again.  The wait now counts from when the media went.
+test('a session whose media outlives its signalling waits for the client',
+     async ({browser}) => {
+    test.setTimeout(240_000);
+    const B = await join(browser, 'bob', UPSTREAM, null);
+    const conf = await B.evaluate(() => serverConnection.rtcConfiguration);
+    test.skip(!conf || conf.iceTransportPolicy !== 'relay',
+              'the server does not force relaying: run it with -relay-only');
+    const tcp = (conf.iceServers || [])
+        .flatMap(s => Array.isArray(s.urls) ? s.urls : [s.urls])
+        .find(u => /^turn:/i.test(u) && /transport=tcp/i.test(u));
+    test.skip(!tcp, 'the server offers no TURN relay over TCP: run it with ' +
+              '-relay-only -turn <lan-ip>:1194');
+    const m = /^turn:([^:?]+):(\d+)/i.exec(tcp);
+
+    const signal = proxy('localhost', SIGNAL_PORT, 'localhost', UPSTREAM);
+    const relay = proxy(m[1], RELAY_PORT, m[1], Number(m[2]));
+    await signal.listen();
+    await relay.listen();
+    try {
+        const A = await join(browser, 'alice', SIGNAL_PORT, RELAY_PORT);
+        for (const p of [A, B])
+            await expect.poll(async () => await p.locator('#peers video').count(),
+                {timeout: 30_000}).toBe(2);
+        await flowing(A, 30_000);
+        await flowing(B, 30_000);
+        const id = await A.evaluate(() => serverConnection.id);
+        // Bob notes every user that comes and goes.
+        await B.evaluate(() => {
+            window.__seen = [];
+            const prev = serverConnection.onuser;
+            serverConnection.onuser = function(uid, kind) {
+                window.__seen.push(kind + ':' + uid);
+                if (prev) prev.call(this, uid, kind);
+            };
+        });
+
+        // The signalling stalls; fifteen seconds on, the media goes too.
+        signal.freeze();
+        await new Promise(r => setTimeout(r, 15_000));
+        relay.blackhole();
+        // Old server: dropped at about 25-30 s.  The path recovers at 38 s.
+        await new Promise(r => setTimeout(r, 23_000));
+        signal.thaw();
+
+        await expect.poll(() => A.evaluate(() =>
+            !!(serverConnection && serverConnection.group &&
+               !serverConnection.resuming)), {timeout: 30_000}).toBe(true);
+        expect(await A.evaluate(() => serverConnection.id),
+               'the same session, resumed rather than joined again').toBe(id);
+        const seen = await B.evaluate(() => window.__seen);
+        expect(seen.filter(e => e === 'delete:' + id),
+               'bob never saw alice leave').toEqual([]);
+        await flowing(A, 30_000);
+        await flowing(B, 30_000);
     } catch (e) {
         for (const p of browser.contexts().flatMap(c => c.pages()))
             if (p.log) console.log(p.log.slice(-40).join('\n'));

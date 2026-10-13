@@ -1066,6 +1066,15 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     log records each step (`signalling lost`, `media alive: keeping the
     session`, `signalling resumed over a new connection, N message(s)
     replayed`, `timeout (no signalling, media gone)`).
+    Those 15 or 25 seconds count from whichever came last: the last message,
+    or the last moment the session's media was seen alive. On 2026-10-13 a
+    participant's media outlived their signalling by twenty seconds, and the
+    server dropped the session one second after the media went -- eight
+    seconds before the client got through to resume it -- so they came back
+    as a new session and the other side saw them leave and join again. A
+    client that goes altogether, socket and media at once, still goes as
+    fast as before (`media gone too after … of silence: waiting for the
+    client` in the connection log marks the new wait).
   * **Media back after a network change** (`static/ice-recovery.js`).
     Upstream restarts ICE only once a connection has failed, and Chrome
     says so 20–30 s after its path went away. When the path went away
