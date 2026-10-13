@@ -238,7 +238,8 @@ test('network change: media comes back without a reload', async ({browser}) => {
 // one second after the media went, counting its 25 s from the last message.
 // The participant came back as a new session, and the other side saw them
 // leave and join again.  The wait now counts from when the media went.
-test('a session whose media outlives its signalling waits for the client',
+test('network change: a session whose media outlives its signalling waits ' +
+     'for the client',
      async ({browser}) => {
     test.setTimeout(240_000);
     const B = await join(browser, 'bob', UPSTREAM, null);
