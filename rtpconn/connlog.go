@@ -383,6 +383,31 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		}
 		return fmt.Sprintf("%v up=%v sends video at %v",
 			who, connTag(id), limit)
+	case "picture":
+		// the picture a down stream delivered over the last minutes
+		dir, ok := streamKind(c, id)
+		if !ok || dir != "down" {
+			return ""
+		}
+		w, ok1 := number(v["width"], 100000)
+		h, ok2 := number(v["height"], 100000)
+		fps, ok3 := number(v["fps"], 1000)
+		minFps, ok4 := number(v["minFps"], 1000)
+		if !ok1 || !ok2 || !ok3 || !ok4 {
+			return ""
+		}
+		line := fmt.Sprintf("%v down=%v receives %dx%d at %.0f fps "+
+			"(worst %.0f)", who, connTag(id), int64(w), int64(h),
+			fps, minFps)
+		if rate, ok := kbps(v["rate"]); ok && v["rate"] != nil {
+			line += ", " + rate
+		}
+		if v["cap"] == nil {
+			line += ", no cap"
+		} else if limit, ok := kbps(v["cap"]); ok {
+			line += ", cap " + limit
+		}
+		return line
 	case "path":
 		// the path the client's side of a connection uses, which the
 		// server cannot see: how the client reaches its relay
