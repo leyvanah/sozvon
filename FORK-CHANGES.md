@@ -447,9 +447,14 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     (stream closed, or no inbound video), and the sender drops every
     request of someone who leaves; it accepts requests only from people in
     the group and only as finite numbers, clamped to 150 kbit/s-100 Mbit/s.
-    The sender still cannot check that the requester actually receives the
-    stream -- only the SFU knows -- so this bounds, rather than prevents, what
-    a hostile participant can do: at worst the 150 kbit/s floor.
+    The sender cannot check that the requester actually receives the
+    stream, but the SFU can (`rtpconn/bitrateask.go`): a request that
+    tightens a cap is relayed only to the stream's owner, and only while the
+    requester is subscribed to that stream; lifting needs no such proof.
+    Before this, anyone with the `message` permission could unsubscribe from
+    everything and still hold someone's video at the floor for every viewer.
+    What remains is a subscriber who lies about its playback: that is
+    bounded, not prevented -- at worst the 150 kbit/s floor.
     **The path's own delay is not the sender's.** A path that delivers in
     bursts (the TCP relay, a VPN, a mobile network) keeps the audio buffer
     at 250–350 ms whatever the sender sends. Judged against the fixed

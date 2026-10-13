@@ -1836,6 +1836,12 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 			return c.error(group.UserError("not authorised"))
 		}
 
+		// see bitrateask.go (Sozvon)
+		if m.Type == "usermessage" && m.Kind == bitrateAskKind &&
+			!bitrateAskAllowed(c, m.Dest, m.Value) {
+			return nil
+		}
+
 		id := m.Id
 		if m.Type == "chat" && m.Dest == "" && id == "" {
 			buf := make([]byte, 8)
