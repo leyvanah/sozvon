@@ -153,6 +153,18 @@ func TestQualityLine(t *testing.T) {
 			who + " down=" + down + " restarts ICE after staying disconnected"},
 		{"restart", "d1", m("reason", "<b>"), ""},
 		{"restart", "nope", m("reason", "resumed"), ""},
+		{"picture", "d1", m("width", 640.0, "height", 480.0, "fps", 29.6,
+			"minFps", 24.2, "rate", 2412000.0, "cap", 2500000.0),
+			who + " down=" + down + " receives 640x480 at 30 fps (worst 24), " +
+				"2412 kbit/s, cap 2500 kbit/s"},
+		{"picture", "d1", m("width", 640.0, "height", 480.0, "fps", 30.0,
+			"minFps", 30.0, "rate", 900000.0, "cap", nil),
+			who + " down=" + down + " receives 640x480 at 30 fps (worst 30), " +
+				"900 kbit/s, no cap"},
+		{"picture", "u1", m("width", 640.0, "height", 480.0, "fps", 30.0,
+			"minFps", 30.0), ""},
+		{"picture", "d1", m("width", "wide", "height", 480.0, "fps", 30.0,
+			"minFps", 30.0), ""},
 		{"path", "u1", m("type", "evil"), ""},
 		{"transport", "", m("udp", false, "reason", "because"), ""},
 		{"transport", "", m("udp", true, "reason", "loss"), ""},
