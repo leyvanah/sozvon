@@ -13,6 +13,8 @@ require (
 	github.com/pion/rtcp v1.2.17
 	github.com/pion/rtp v1.10.4
 	github.com/pion/sdp/v3 v3.0.19
+	github.com/pion/stun/v3 v3.1.6
+	github.com/pion/transport/v4 v4.0.2
 	github.com/pion/turn/v5 v5.0.12
 	github.com/pion/webrtc/v4 v4.2.17
 	golang.org/x/crypto v0.53.0
@@ -29,8 +31,6 @@ require (
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/sctp v1.11.0 // indirect
 	github.com/pion/srtp/v3 v3.0.12 // indirect
-	github.com/pion/stun/v3 v3.1.6 // indirect
-	github.com/pion/transport/v4 v4.0.2 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/text v0.39.0 // indirect

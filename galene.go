@@ -125,6 +125,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("UDP: %v", err)
 			}
+			group.LogOversized = rtpconn.LogConnections
 			err = group.SetUDPMux(port)
 			if err != nil {
 				log.Fatalf("UDP: %v", err)

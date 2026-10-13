@@ -1100,6 +1100,20 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     over UDP is offered to clients only, and the SFU keeps reaching it over
     TLS. The client-side fallback above cannot see the server's side, which
     is why this has to be decided on the server.
+  * **Datagrams over 1500 bytes are read whole** (`group/udpsize.go`).
+    pion's ICE layer reads UDP into 8192-byte buffers, but its WebRTC layer
+    read each datagram into 1500 bytes and dropped one that did not fit
+    (`mux: failed to read from packetio.Buffer short buffer`). On 2026-10-12
+    a participant under a VPN produced 126 of those in ten seconds while the
+    server measured 15.6% loss on their stream. The WebRTC layer now reads
+    as much as the ICE layer (`SetReceiveMTU(8192)`). Browsers do not send
+    RTP that large, so something on that path glued or grew the datagrams,
+    and which is not known yet: with `-log-connections` the server logs, every
+    ten seconds that saw any, how many datagrams over 1500 bytes arrived and
+    their commonest sizes, with no addresses (`udp: 12 datagram(s) over 1500
+    bytes in 10s, largest 2456, commonest 2456×5 …`). Sizes in multiples of a
+    browser's packet would point at coalescing on the way; others at
+    datagrams sent that large.
   * **Static files are compressed** (`webserver/compress.go`). Upstream serves
     them uncompressed through its own file handler; the client's first load was
     808 KB, of which ~500 KB was text. A room now loads in 160 KB. Compressing
