@@ -1038,9 +1038,10 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 
 	// Sozvon: signalling resume state, see resume.go.
 	resumable := c.attach != nil
-	var received uint64 // numbered messages received from the client
-	detached := false   // the client's connection is gone
-	keptAlive := false  // logged that its media keeps a silent session
+	var received uint64     // numbered messages received from the client
+	detached := false       // the client's connection is gone
+	keptAlive := false      // logged that its media keeps a silent session
+	var mediaTime time.Time // when its media was last seen alive
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -1148,8 +1149,20 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 				// Sozvon: see resume.go.
 				silent := time.Since(readTime)
 				media := c.mediaAlive()
-				limit, err := silenceLimit(detached, media)
-				if silent > limit {
+				if media {
+					mediaTime = time.Now()
+				} else if keptAlive {
+					// the media that kept a silent session
+					// has gone: the client gets the full
+					// limit from now to come back
+					keptAlive = false
+					connLogf("c=%v media gone too after %v "+
+						"of silence: waiting for the client",
+						connTag(c.id), since(readTime))
+				}
+				expired, err := sessionExpired(time.Now(),
+					readTime, mediaTime, detached, media)
+				if expired {
 					return err
 				}
 				if media && !keptAlive && silent > silentNoMedia {

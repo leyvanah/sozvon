@@ -91,6 +91,51 @@ func TestSilenceLimit(t *testing.T) {
 	}
 }
 
+func TestSessionExpired(t *testing.T) {
+	t0 := time.Date(2026, 10, 13, 11, 59, 54, 0, time.UTC)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	var never time.Time
+
+	// The call of 2026-10-13: signalling silent from 11:59:54, media
+	// alive until 12:00:18, the client back at 12:00:27.  The session was
+	// dropped at 12:00:19; now it waits for the client.
+	if exp, _ := sessionExpired(at(25), t0, at(24), false, false); exp {
+		t.Error("dropped one second after the media went")
+	}
+	if exp, _ := sessionExpired(at(33), t0, at(24), false, false); exp {
+		t.Error("dropped before the client could come back")
+	}
+	if exp, err := sessionExpired(at(24+26), t0, at(24), false, false); !exp ||
+		!errors.Is(err, errNoSignalling) {
+		t.Errorf("never dropped once silentNoMedia has passed: %v %v",
+			exp, err)
+	}
+
+	// A client that went altogether -- socket and media at once -- goes
+	// as fast as before.
+	if exp, _ := sessionExpired(at(16), t0, t0, true, false); !exp {
+		t.Error("a client gone altogether lingers")
+	}
+	if exp, _ := sessionExpired(at(26), t0, never, false, false); !exp {
+		t.Error("a client that never had media lingers")
+	}
+	// Media seen alive before the last message changes nothing.
+	if exp, _ := sessionExpired(at(16), t0, t0.Add(-time.Minute), true, false); !exp {
+		t.Error("old media extends the limit")
+	}
+
+	// Live media keeps a silent session for resumeGrace, as before.
+	if exp, _ := sessionExpired(t0.Add(resumeGrace-time.Second), t0, at(100),
+		true, true); exp {
+		t.Error("dropped while its media is alive")
+	}
+	if exp, err := sessionExpired(t0.Add(resumeGrace+time.Second), t0,
+		t0.Add(resumeGrace), true, true); !exp ||
+		!errors.Is(err, errResumeExpired) {
+		t.Errorf("live media keeps it beyond resumeGrace: %v %v", exp, err)
+	}
+}
+
 // wsServer serves sessions the way the web server does.
 func wsServer(t *testing.T) string {
 	upgrader := websocket.Upgrader{}
