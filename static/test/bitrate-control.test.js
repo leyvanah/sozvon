@@ -36,6 +36,7 @@ function receiver() {
          * @param {number} [o.concealed] - fraction concealed
          * @param {number} [o.bps] - video arriving
          * @param {boolean} [o.video] - false: no inbound video at all
+         * @param {number} [o.height] - lines of the picture arriving
          */
         next(o = {}) {
             t += STEP;
@@ -48,7 +49,10 @@ function receiver() {
             c.vDelay += 60 * 0.03;
             c.vFreeze += o.freeze ?? 0;
             c.vBytes += (o.bps ?? 4000000) * STEP / 1000 / 8;
-            return {time: t, audio: true, video: o.video ?? true, ...c};
+            c.vDecoded = (c.vDecoded || 0) + 60;
+            let h = o.height ?? 480;
+            return {time: t, audio: true, video: o.video ?? true, ...c,
+                    vHeight: h, vWidth: Math.round(h * 4 / 3)};
         },
     };
 }
@@ -456,4 +460,92 @@ test('a start cap from the wire is sanitised like any other', () => {
     assert.strictEqual(new b.Controller(NaN).startCap, null);
     assert.strictEqual(new b.Controller(1).startCap, b.MIN_CAP);
     assert.strictEqual(new b.Controller().startCap, null);
+});
+
+// tasks#65: on 2026-10-13 a camera was lifted 26 times in an hour; each time
+// its sender went to 7-10 Mbit/s and the receiver lost audio.
+
+/** A call where the sender obeys the cap, uncapped meaning 8 Mbit/s. */
+function obeying(ctl, rx, n, o = {}) {
+    let caps = [];
+    for(let i = 0; i < n; i++) {
+        let bps = ctl.cap === null ? 8000000 : ctl.cap;
+        let extra = typeof o === 'function' ? o(bps) : o;
+        caps.push(ctl.update(rx.next({bps, ...extra})).cap);
+    }
+    return caps;
+}
+
+test('snapshot keeps the largest picture arriving', () => {
+    let s = b.snapshot([
+        {type: 'inbound-rtp', kind: 'video', frameWidth: 320, frameHeight: 240},
+        {type: 'inbound-rtp', kind: 'video', frameWidth: 640, frameHeight: 480},
+    ], 1);
+    assert.strictEqual(s.vWidth, 640);
+    assert.strictEqual(s.vHeight, 480);
+    let a = b.assess({...s, time: 0, vDecoded: 0}, {...s, time: 2000, vDecoded: 60});
+    assert.strictEqual(a.fps, 30);
+    assert.strictEqual(a.height, 480);
+});
+
+test('a camera rises to its ceiling and stays there', () => {
+    let ctl = new b.Controller(b.START_CAP, 'camera');
+    let caps = obeying(ctl, receiver(), 300);   // ten healthy minutes
+    assert.ok(caps.every(c => c !== null), 'never lifted');
+    assert.ok(caps.every(c => c <= 2500000), 'never above the ceiling');
+    assert.strictEqual(ctl.cap, 2500000);
+    assert.strictEqual(ctl.ceiling(), 2500000, '640x480 gets 2.5 Mbit/s');
+});
+
+test('the ceiling follows the tallest picture the camera has shown', () => {
+    let ctl = new b.Controller(b.START_CAP, 'camera');
+    let rx = receiver();
+    obeying(ctl, rx, 200, {height: 720});
+    assert.strictEqual(ctl.cap, 4000000);
+    obeying(ctl, rx, 200, {height: 1080});
+    assert.strictEqual(ctl.cap, 6000000);
+    // a picture the sender shrinks for a while does not lower it
+    obeying(ctl, rx, 50, {height: 540});
+    assert.strictEqual(ctl.ceiling(), 6000000);
+    assert.strictEqual(ctl.cap, 6000000);
+});
+
+test('a camera at its ceiling is still cut when playback suffers', () => {
+    let ctl = new b.Controller(b.START_CAP, 'camera');
+    let rx = receiver();
+    obeying(ctl, rx, 200);
+    obeying(ctl, rx, b.BAD_TO_DECREASE, {audioDelay: 0.5});
+    assert.ok(ctl.cap < 2500000);
+});
+
+test('a shared screen or a video file is still lifted', () => {
+    for(let label of ['screenshare', 'video', undefined]) {
+        let ctl = new b.Controller(b.START_CAP, label);
+        obeying(ctl, receiver(), 300);
+        assert.strictEqual(ctl.cap, null, String(label));
+        assert.strictEqual(ctl.ceiling(), null);
+    }
+});
+
+test('the call of 2026-10-13: a camera no longer breaks the audio', () => {
+    // The receiver copes up to 3.5 Mbit/s; above that, audio breaks up.
+    let link = bps => bps > 3500000 ? {concealed: 0.3} : {};
+    let breaks = label => {
+        let ctl = new b.Controller(b.START_CAP, label);
+        let rx = receiver();
+        let n = 0;
+        for(let i = 0; i < 1800; i++) {    // an hour
+            let bps = ctl.cap === null ? 8000000 : ctl.cap;
+            let o = link(bps);
+            // the first poll comes before any cap could be asked for
+            if(o.concealed && i > 0)
+                n++;
+            ctl.update(rx.next({bps, ...o}));
+        }
+        return n;
+    };
+    let before = breaks(undefined);
+    let after = breaks('camera');
+    assert.ok(before >= 10, `the old behaviour breaks up (${before} intervals)`);
+    assert.strictEqual(after, 0, 'a camera at its ceiling never gets there');
 });

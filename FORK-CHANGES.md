@@ -465,6 +465,18 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     to improve; with no such evidence, as at the start of a stream, the fixed
     thresholds apply alone. Each request in the connection log now carries
     it too (`path audio 280ms path video 50ms`).
+    **A camera rises to a ceiling, not past it.** Lifted entirely, a
+    sender's browser pushed a camera to 7–10 Mbit/s on 2026-10-13; within
+    minutes the receiver lost 15–44% of the audio in an interval or heard it
+    300 ms late, the cap came down and was lifted again -- 26 times in an hour,
+    14 audible breaks. A camera captures about 640×480 by default, which
+    looks its best at 1–1.5 Mbit/s, so a camera stream (by its label) now
+    stops at a ceiling set by the tallest picture it has shown: 2.5 Mbit/s up
+    to 540 lines, 4 Mbit/s up to 800, 6 Mbit/s above (1080p, the blackboard
+    mode). A shared screen or a video file is lifted as before. Every two
+    minutes the receiver also logs the picture each stream delivered
+    (`receives 640x480 at 30 fps (worst 24), 2412 kbit/s, cap 2500 kbit/s`),
+    so a call can be checked afterwards for what a cap did to it.
 
 ### Localisation
 

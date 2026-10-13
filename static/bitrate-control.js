@@ -54,6 +54,16 @@
 // and with no such evidence -- a stream that has never been cut -- the
 // fixed thresholds apply alone.
 //
+// A camera is not lifted all the way.  Uncapped, a sender's browser pushed
+// a camera to 7-10 Mbit/s on 2026-10-13, and within a minute or three the
+// receiver lost 15-44% of the audio in an interval, or heard it 300 ms late;
+// the cap came down, rose, was lifted again -- 26 times in an hour, 14 audible
+// breaks (tasks#65).  A camera's picture stops getting better long before
+// that: by default it captures about 640x480, which looks its best at 1-1.5
+// Mbit/s.  So a camera stream rises to a ceiling set by the largest picture
+// it has shown and stays there: CAMERA_CEILING.  A shared screen or a video
+// file is still lifted as before.
+//
 // Like connection-quality.js this has no DOM or WebRTC dependency, so the
 // control logic is tested under Node.
 
@@ -102,6 +112,14 @@
     // 2^32 it is not a valid maxBitrate at all).
     const MAX_CAP = 100000000;
     const RELEASE_AT = 3000000;     // a cap this high is lifted entirely
+    // ... except on a camera, which rises to a ceiling instead, by the
+    // tallest picture seen: [lines up to, ceiling].  About twice what each
+    // picture needs to look its best.
+    const CAMERA_CEILING = [
+        [540, 2500000],             // 640x480, the default capture
+        [800, 4000000],             // 720p
+        [Infinity, 6000000],        // 1080p and above (the blackboard mode)
+    ];
     const START_CAP = 1000000;      // what a new stream is first asked for
     const DECREASE = 0.6;           // new cap = DECREASE x what arrived
     const INCREASE = 1.3;
@@ -156,6 +174,8 @@
             // unevenly) from a receiver too busy to play on time (they
             // arrive evenly, decoding is slow).  tasks#32.
             aJitter: 0, vProcessing: 0, vDecoded: 0,
+            // the picture as it arrives: largest frame, current estimate
+            vWidth: 0, vHeight: 0,
         };
         for(let r of report) {
             if(r.type !== 'inbound-rtp')
@@ -178,6 +198,10 @@
                 s.vBytes += r.bytesReceived || 0;
                 s.vProcessing += r.totalProcessingDelay || 0;
                 s.vDecoded += r.framesDecoded || 0;
+                if((r.frameHeight || 0) > s.vHeight) {
+                    s.vHeight = r.frameHeight;
+                    s.vWidth = r.frameWidth || 0;
+                }
             }
         }
         return s;
@@ -193,6 +217,7 @@
      * @returns {{state: string, videoBps: number, audioDelay: number,
      *            videoDelay: number, concealed: number, freeze: number,
      *            jitter: number, processing: number,
+     *            width: number, height: number, fps: number,
      *            path: {audioDelay: number, videoDelay: number}|null}}
      *     state is 'bad', 'good', 'hold' (in between) or 'unknown';
      *     path is what it was judged against.
@@ -200,7 +225,8 @@
     function assess(prev, cur, path) {
         let r = {state: 'unknown', videoBps: 0, audioDelay: 0,
                  videoDelay: 0, concealed: 0, freeze: 0,
-                 jitter: 0, processing: 0, path: path || null};
+                 jitter: 0, processing: 0, width: 0, height: 0, fps: 0,
+                 path: path || null};
         if(!prev || cur.time <= prev.time)
             return r;
         let dt = (cur.time - prev.time) / 1000;
@@ -225,6 +251,9 @@
             r.processing = Math.max(0, (cur.vProcessing || 0) -
                                     (prev.vProcessing || 0)) / dd;
         if(cur.video) {
+            r.width = cur.vWidth || 0;
+            r.height = cur.vHeight || 0;
+            r.fps = Math.max(0, dd) / dt;
             r.freeze = Math.max(0, cur.vFreeze - prev.vFreeze);
             r.videoBps = Math.max(0, cur.vBytes - prev.vBytes) * 8 / dt;
         }
@@ -269,10 +298,15 @@
      * @constructor
      * @param {number|null} [startCap] - asked for as soon as video arrives,
      *     then opened while playback is healthy; none if omitted.
+     * @param {string} [label] - the stream's label; 'camera' rises to a
+     *     ceiling instead of being lifted
      */
-    function Controller(startCap) {
+    function Controller(startCap, label) {
         /** @type {number|null} */
         this.startCap = sanitizeCap(startCap);
+        this.camera = label === 'camera';
+        /** The tallest picture seen on the stream. */
+        this.maxHeight = 0;
         /** Whether video has arrived since the start or since it stopped. */
         this.started = false;
         /** @type {number|null} */
@@ -300,6 +334,21 @@
         /** @type {Array<{audioDelay: number, videoDelay: number}>} */
         this.recent = [];
     }
+
+    /**
+     * How far the cap may rise: for a camera, the ceiling for the tallest
+     * picture it has shown; null for anything else, which is lifted.
+     *
+     * @returns {number|null}
+     */
+    Controller.prototype.ceiling = function() {
+        if(!this.camera)
+            return null;
+        for(let [lines, ceiling] of CAMERA_CEILING)
+            if(this.maxHeight <= lines)
+                return ceiling;
+        return null;
+    };
 
     /**
      * The evidence of the path's delay at the current cap: the least delay
@@ -381,6 +430,8 @@
         let now = snap.time;
         let path = this.pathDelay(now);
         let sample = assess(this.prev, snap, path);
+        if(sample.height > this.maxHeight)
+            this.maxHeight = sample.height;
         this.prev = snap;
         let old = this.cap;
         if(this.startedAt === null && sample.state !== 'unknown')
@@ -463,8 +514,17 @@
             let factor = arriving > 0 && arriving < this.cap * UNUSED_BELOW ?
                 INCREASE_UNUSED : INCREASE;
             let cap = sanitizeCap(this.cap * factor);
-            this.cap = cap === null || cap >= RELEASE_AT ? null : cap;
-            this.changedAt = now;
+            let ceiling = this.ceiling();
+            if(ceiling !== null) {
+                // a camera stays at its ceiling once there
+                if(this.cap < ceiling) {
+                    this.cap = Math.min(cap === null ? ceiling : cap, ceiling);
+                    this.changedAt = now;
+                }
+            } else {
+                this.cap = cap === null || cap >= RELEASE_AT ? null : cap;
+                this.changedAt = now;
+            }
             this.good = 0;
         }
 
@@ -574,7 +634,7 @@
     }
 
     const api = {
-        CONGESTED, HEALTHY, EXCESS_CONGESTED, EXCESS_HEALTHY, PROVEN_BELOW,
+        CAMERA_CEILING, CONGESTED, HEALTHY, EXCESS_CONGESTED, EXCESS_HEALTHY, PROVEN_BELOW,
         PATH_MEMORY, PATH_LOWER_AFTER, SETTLE, MIN_CAP, MAX_CAP, RELEASE_AT, START_CAP,
         DECREASE, INCREASE,
         INCREASE_UNUSED, UNUSED_BELOW,

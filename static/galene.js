@@ -2331,8 +2331,9 @@ function feedBitrate(c, report) {
         return;
     }
     if(!c.userdata.bitrate)
-        c.userdata.bitrate = new B.Controller(B.START_CAP);
+        c.userdata.bitrate = new B.Controller(B.START_CAP, c.label);
     let r = c.userdata.bitrate.update(B.snapshot(report.values(), Date.now()));
+    notePicture(c, r.sample, r.cap);
     if(r.changed) {
         console.info('bitrate: asking', c.username || c.source,
                      'to cap', c.id, 'at', r.cap, r.sample);
@@ -2354,6 +2355,42 @@ function feedBitrate(c, report) {
         return;
     serverConnection.userMessage(B.MESSAGE_KIND, c.source,
                                  {stream: c.id, cap: r.cap}, true);
+}
+
+// How often the picture a down stream delivers goes to the connection log.
+const pictureInterval = 120000;
+
+/**
+ * Receiver side: keep track of the picture a stream delivers, and every
+ * pictureInterval report it to the connection log -- size, frame rate
+ * (average and worst interval) and rate -- so that a call can be checked
+ * afterwards for what a cap did to the picture (tasks#65).
+ *
+ * @param {Stream} c
+ * @param {any} sample - what bitrate-control.js made of the last interval
+ * @param {number|null} cap
+ */
+function notePicture(c, sample, cap) {
+    if(!sample || sample.state === 'unknown' || !(sample.fps > 0))
+        return;
+    let now = Date.now();
+    let p = c.userdata.picture;
+    if(!p)
+        p = c.userdata.picture = {since: now, n: 0, fps: 0, minFps: Infinity,
+                                  bps: 0, width: 0, height: 0};
+    p.n++;
+    p.fps += sample.fps;
+    p.minFps = Math.min(p.minFps, sample.fps);
+    p.bps += sample.videoBps;
+    p.width = sample.width;
+    p.height = sample.height;
+    if(now - p.since < pictureInterval)
+        return;
+    reportQuality('picture', c.id, {
+        width: p.width, height: p.height,
+        fps: p.fps / p.n, minFps: p.minFps, rate: p.bps / p.n, cap: cap,
+    });
+    delete c.userdata.picture;
 }
 
 /**

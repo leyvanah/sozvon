@@ -18,7 +18,6 @@ test.afterEach(async ({browser}) => {
 });
 
 const ROOM = process.env.SOZVON_ROOM || 'smoke';
-const UNLIMITED = 1000000000;
 
 async function join(context, name) {
     const page = await context.newPage();
@@ -155,16 +154,23 @@ test('lag at the receiver caps the sender, recovery lifts the cap', async ({brow
     console.log('capped at', capped);
     expect(capped).toBeGreaterThanOrEqual(150000);
 
-    // Lag gone: the cap starts rising.  Lifting it entirely takes a minute
-    // or more and is covered by static/test/bitrate-control.test.js; set
-    // SOZVON_FULL_BITRATE=1 to watch it happen here too.
+    // Lag gone: the cap starts rising.  Reaching the top takes a minute or
+    // more and is covered by static/test/bitrate-control.test.js; set
+    // SOZVON_FULL_BITRATE=1 to watch it happen here too.  A camera is not
+    // lifted but stops at its ceiling (camera-ceiling.spec.js).
     await B.evaluate(() => { window.__lag = 0; });
     await expect.poll(() => sendCap(A), {timeout: 30_000})
         .toBeGreaterThan(capped);
     if(process.env.SOZVON_FULL_BITRATE)
         await expect.poll(() => sendCap(A),
                           {timeout: 240_000, intervals: [2000]})
-            .toBe(UNLIMITED);
+            .toBe(await B.evaluate(() => {
+                for (const id in serverConnection.down) {
+                    const ctl = serverConnection.down[id].userdata.bitrate;
+                    if (ctl)
+                        return ctl.ceiling() ?? 1000000000;
+                }
+            }));
 
     console.log('bob:', B.logs.join('\n  '));
     console.log('alice:', A.logs.join('\n  '));
