@@ -556,14 +556,26 @@ func codecsFromName(name string) ([]webrtc.RTPCodecParameters, error) {
 }
 
 func SetUDPMux(port int) error {
-	var err error
-	udpMux, err = ice.NewMultiUDPMuxFromPort(port)
-	return err
+	// Sozvon: on a network that counts datagrams over 1500 bytes
+	// (udpsize.go).
+	n, err := newSizingNet()
+	if err != nil {
+		return err
+	}
+	udpMux, err = ice.NewMultiUDPMuxFromPort(port,
+		ice.UDPMuxFromPortWithNet(n))
+	if err != nil {
+		return err
+	}
+	go reportOversized(10 * time.Second)
+	return nil
 }
 
 func APIFromCodecs(codecs []webrtc.RTPCodecParameters) (*webrtc.API, error) {
 	s := webrtc.SettingEngine{}
 	s.SetSRTPReplayProtectionWindow(512)
+	// Sozvon: read whole whatever the ICE layer reads whole (udpsize.go).
+	s.SetReceiveMTU(ReceiveMTU)
 	s.DisableActiveTCP(true)
 	if !UseMDNS {
 		s.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
