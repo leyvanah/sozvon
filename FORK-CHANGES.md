@@ -869,6 +869,15 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     `/var/lib/sozvon-install/state.json` and reconnects rather than holding an
     SSH session open.
 
+    A failed install says **what happened and what to do now**, in the app's
+    language, instead of the installer's English line, which addresses
+    someone running the script by hand and can name flags the app does not
+    offer. `install.sh` writes a stable `code` for each kind of failure to its
+    state file (`port-in-use`, `version-unknown`, `public-ip-unknown`, …); the
+    Android and desktop apps turn it into a sentence and keep the original
+    line below it for a bug report. A test checks that both apps know every
+    code the installer can write (tasks#19).
+
     The **host key is confirmed explicitly** — the fingerprint is shown before
     anything is sent, a changed key is a louder prompt showing the old value,
     and accepted keys are remembered per host and port. Accepting silently

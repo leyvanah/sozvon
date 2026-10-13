@@ -117,6 +117,8 @@ class SshDeployer(
         message: String,
         val code: String = "error",
         val detail: String? = null,
+        // why the installer stopped, as its state file names it (tasks#19)
+        val reason: String? = null,
     ) : Exception(message)
 
     /** How the caller answers the host-key question. */
@@ -600,7 +602,8 @@ class SshDeployer(
                         state.optString("error").ifEmpty {
                             state.optString("message").ifEmpty { "The install failed." }
                         },
-                        "install", tail())
+                        "install", tail(),
+                        state.optString("code").ifEmpty { null })
                 }
             }
 
