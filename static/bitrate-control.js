@@ -113,8 +113,12 @@
     const MAX_CAP = 100000000;
     const RELEASE_AT = 3000000;     // a cap this high is lifted entirely
     // ... except on a camera, which rises to a ceiling instead, by the
-    // tallest picture seen: [lines up to, ceiling].  About twice what each
-    // picture needs to look its best.
+    // largest picture seen: [lines up to, ceiling].  About twice what each
+    // picture needs to look its best.  Lines are the short side of the
+    // picture, so a phone held upright (480x640) counts as the 640x480 it
+    // is, not as 720p: by its height it was given 4 Mbit/s, more than a
+    // mobile uplink carries, and the cap kept climbing into it and breaking
+    // the audio every few minutes (2026-10-14).
     const CAMERA_CEILING = [
         [540, 2500000],             // 640x480, the default capture
         [800, 4000000],             // 720p
@@ -305,8 +309,8 @@
         /** @type {number|null} */
         this.startCap = sanitizeCap(startCap);
         this.camera = label === 'camera';
-        /** The tallest picture seen on the stream. */
-        this.maxHeight = 0;
+        /** The largest picture seen on the stream, by its short side. */
+        this.maxLines = 0;
         /** Whether video has arrived since the start or since it stopped. */
         this.started = false;
         /** @type {number|null} */
@@ -336,7 +340,7 @@
     }
 
     /**
-     * How far the cap may rise: for a camera, the ceiling for the tallest
+     * How far the cap may rise: for a camera, the ceiling for the largest
      * picture it has shown; null for anything else, which is lifted.
      *
      * @returns {number|null}
@@ -345,7 +349,7 @@
         if(!this.camera)
             return null;
         for(let [lines, ceiling] of CAMERA_CEILING)
-            if(this.maxHeight <= lines)
+            if(this.maxLines <= lines)
                 return ceiling;
         return null;
     };
@@ -430,8 +434,10 @@
         let now = snap.time;
         let path = this.pathDelay(now);
         let sample = assess(this.prev, snap, path);
-        if(sample.height > this.maxHeight)
-            this.maxHeight = sample.height;
+        let lines = sample.width > 0 ?
+            Math.min(sample.width, sample.height) : sample.height;
+        if(lines > this.maxLines)
+            this.maxLines = lines;
         this.prev = snap;
         let old = this.cap;
         if(this.startedAt === null && sample.state !== 'unknown')

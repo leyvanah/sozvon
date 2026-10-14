@@ -476,9 +476,12 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     300 ms late, the cap came down and was lifted again -- 26 times in an hour,
     14 audible breaks. A camera captures about 640×480 by default, which
     looks its best at 1–1.5 Mbit/s, so a camera stream (by its label) now
-    stops at a ceiling set by the tallest picture it has shown: 2.5 Mbit/s up
+    stops at a ceiling set by the largest picture it has shown: 2.5 Mbit/s up
     to 540 lines, 4 Mbit/s up to 800, 6 Mbit/s above (1080p, the blackboard
-    mode). A shared screen or a video file is lifted as before. Every two
+    mode). Lines are the picture's short side, so a phone held upright
+    (480×640) gets the 640×480 ceiling, not 720p's: on 2026-10-14 its 4 Mbit/s
+    was more than a mobile uplink carried, and the cap climbed into it and
+    broke the audio seven times in an hour. A shared screen or a video file is lifted as before. Every two
     minutes the receiver also logs the picture each stream delivered
     (`receives 640x480 at 30 fps (worst 24), 2412 kbit/s, cap 2500 kbit/s`),
     so a call can be checked afterwards for what a cap did to it.
