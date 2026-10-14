@@ -37,6 +37,7 @@ function receiver() {
          * @param {number} [o.bps] - video arriving
          * @param {boolean} [o.video] - false: no inbound video at all
          * @param {number} [o.height] - lines of the picture arriving
+         * @param {number} [o.width] - its width; 4:3 if omitted
          */
         next(o = {}) {
             t += STEP;
@@ -52,7 +53,7 @@ function receiver() {
             c.vDecoded = (c.vDecoded || 0) + 60;
             let h = o.height ?? 480;
             return {time: t, audio: true, video: o.video ?? true, ...c,
-                    vHeight: h, vWidth: Math.round(h * 4 / 3)};
+                    vHeight: h, vWidth: o.width ?? Math.round(h * 4 / 3)};
         },
     };
 }
@@ -497,7 +498,7 @@ test('a camera rises to its ceiling and stays there', () => {
     assert.strictEqual(ctl.ceiling(), 2500000, '640x480 gets 2.5 Mbit/s');
 });
 
-test('the ceiling follows the tallest picture the camera has shown', () => {
+test('the ceiling follows the largest picture the camera has shown', () => {
     let ctl = new b.Controller(b.START_CAP, 'camera');
     let rx = receiver();
     obeying(ctl, rx, 200, {height: 720});
@@ -508,6 +509,19 @@ test('the ceiling follows the tallest picture the camera has shown', () => {
     obeying(ctl, rx, 50, {height: 540});
     assert.strictEqual(ctl.ceiling(), 6000000);
     assert.strictEqual(ctl.cap, 6000000);
+});
+
+test('a picture held upright gets the ceiling of its short side', () => {
+    // a phone held upright: 480x640 is the default capture, not 720p
+    let ctl = new b.Controller(b.START_CAP, 'camera');
+    let rx = receiver();
+    obeying(ctl, rx, 200, {width: 480, height: 640});
+    assert.strictEqual(ctl.ceiling(), 2500000);
+    assert.strictEqual(ctl.cap, 2500000);
+    // and 720p upright is still 720p
+    obeying(ctl, rx, 200, {width: 720, height: 1280});
+    assert.strictEqual(ctl.ceiling(), 4000000);
+    assert.strictEqual(ctl.cap, 4000000);
 });
 
 test('a camera at its ceiling is still cut when playback suffers', () => {
