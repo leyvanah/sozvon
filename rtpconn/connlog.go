@@ -289,9 +289,35 @@ func kbps(v interface{}) (string, bool) {
 	return fmt.Sprintf("%d kbit/s", int64(f/1000)), true
 }
 
+// playout formats a playout delay with what its jitter buffer aimed for
+// and the least it would have aimed for without synchronisation, as
+// "audio delay 300ms (target 290ms, minimum 40ms)": the minimum is the
+// arrival jitter's share, target minus minimum the synchronisation's,
+// delay minus target a backlog not yet played out.  "" without a delay;
+// the target and minimum are left out unless sane.
+func playout(v map[string]interface{}, name, delay, target, minimum string) string {
+	d, ok := number(v[delay], 3600)
+	if !ok {
+		return ""
+	}
+	line := fmt.Sprintf("%v %dms", name, int64(d*1000))
+	var why []string
+	if f, ok := number(v[target], 3600); ok {
+		why = append(why, fmt.Sprintf("target %dms", int64(f*1000)))
+	}
+	if f, ok := number(v[minimum], 3600); ok {
+		why = append(why, fmt.Sprintf("minimum %dms", int64(f*1000)))
+	}
+	if len(why) > 0 {
+		line += " (" + strings.Join(why, ", ") + ")"
+	}
+	return line
+}
+
 // askEvidence formats what a receiver's bitrate decision rested on: the
-// playout delays, the audio arrival jitter, the time to process a video
-// frame, freezes and concealment.  Jitter points at the network, processing
+// playout delays and what they are made of, the audio arrival jitter, the
+// time from a video frame's first packet to its decoding and the decoding
+// alone, freezes and concealment.  Jitter points at the network, decoding
 // time at a receiver too busy to keep up -- the controller cannot tell the
 // two apart yet, and this is what will tell (Sozvon).  Each figure is
 // optional and shown only if it is a sane number.
@@ -303,10 +329,17 @@ func askEvidence(v map[string]interface{}) string {
 				fmt.Sprintf("%v %dms", name, int64(f*1000)))
 		}
 	}
-	ms("audioDelay", "audio delay")
-	ms("videoDelay", "video delay")
+	for _, p := range []string{
+		playout(v, "audio delay", "audioDelay", "audioTarget", "audioMinimum"),
+		playout(v, "video delay", "videoDelay", "videoTarget", "videoMinimum"),
+	} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
 	ms("jitter", "jitter")
 	ms("processing", "processing")
+	ms("decode", "decode")
 	if f, ok := number(v["freeze"], 3600); ok {
 		parts = append(parts, fmt.Sprintf("freeze %.1fs", f))
 	}
@@ -406,6 +439,15 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 			line += ", no cap"
 		} else if limit, ok := kbps(v["cap"]); ok {
 			line += ", cap " + limit
+		}
+		// the playout delays over the same minutes, by cause
+		for _, p := range []string{
+			playout(v, "audio", "audioDelay", "audioTarget", "audioMinimum"),
+			playout(v, "video", "videoDelay", "videoTarget", "videoMinimum"),
+		} {
+			if p != "" {
+				line += ", " + p
+			}
 		}
 		return line
 	case "path":

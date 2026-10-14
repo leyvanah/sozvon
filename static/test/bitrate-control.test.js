@@ -95,6 +95,51 @@ test('assess reports arrival jitter and frame processing time (tasks#32)', () =>
     assert.strictEqual(b.assess(at(1, 0, 1, 30), at(3, 0, 1, 30)).processing, 0);
 });
 
+test('assess splits each playout delay into target and minimum, and times decoding', () => {
+    // t seconds in: audio at 300 ms aiming for 290 ms, of which 40 ms is
+    // the arrival jitter's; video at 320 ms aiming for 310, 90 of it jitter
+    let at = t => b.snapshot([
+        {type: 'inbound-rtp', kind: 'audio', jitterBufferEmittedCount: t * 48000,
+         jitterBufferDelay: t * 48000 * 0.3,
+         jitterBufferTargetDelay: t * 48000 * 0.29,
+         jitterBufferMinimumDelay: t * 48000 * 0.04},
+        {type: 'inbound-rtp', kind: 'video', jitterBufferEmittedCount: t * 30,
+         jitterBufferDelay: t * 30 * 0.32,
+         jitterBufferTargetDelay: t * 30 * 0.31,
+         jitterBufferMinimumDelay: t * 30 * 0.09,
+         framesDecoded: t * 30, totalDecodeTime: t * 30 * 0.002,
+         totalProcessingDelay: t * 30 * 0.322},
+    ], t * 1000);
+    let r = b.assess(at(10), at(12));
+    let near = (x, want, what) =>
+        assert.ok(Math.abs(x - want) < 1e-9, `${what}: ${x}`);
+    near(r.audioTarget, 0.29, 'audio target');
+    near(r.audioMinimum, 0.04, 'audio minimum');
+    near(r.videoTarget, 0.31, 'video target');
+    near(r.videoMinimum, 0.09, 'video minimum');
+    near(r.decode, 0.002, 'decoding alone');
+    near(r.processing, 0.322, 'first packet to decoded');
+});
+
+test('a browser that does not report target or minimum gets null, not zero', () => {
+    let at = (t, extra) => b.snapshot([
+        {type: 'inbound-rtp', kind: 'audio', jitterBufferEmittedCount: t * 100,
+         jitterBufferDelay: t * 10, ...extra},
+    ], t * 1000);
+    let r = b.assess(at(1, {}), at(3, {}));
+    assert.strictEqual(r.audioTarget, null);
+    assert.strictEqual(r.audioMinimum, null);
+    assert.strictEqual(r.videoTarget, null, 'no video at all');
+    assert.ok(Math.abs(r.audioDelay - 0.1) < 1e-9, 'the delay is still judged');
+    // reported at one end only: nothing to take a difference of
+    let half = b.assess(at(1, {}), at(3, {jitterBufferTargetDelay: 30}));
+    assert.strictEqual(half.audioTarget, null);
+    // nothing emitted in the interval: nothing to divide by
+    let still = b.assess(at(1, {jitterBufferTargetDelay: 5}),
+                         at(1, {jitterBufferTargetDelay: 5}));
+    assert.strictEqual(still.audioTarget, null);
+});
+
 test('assess separates bad, good and in-between intervals', () => {
     let rx = receiver();
     let p = rx.next();

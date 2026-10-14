@@ -125,6 +125,20 @@ func TestQualityLine(t *testing.T) {
 			"pathAudio", 0.28, "pathVideo", 0.05),
 			who + " down=" + down + " asks the sender for 195 kbit/s: " +
 				"audio delay 300ms path audio 280ms path video 50ms"},
+		// what each delay is made of, and the decoding alone
+		{"ask", "d1", m("cap", 150000.0, "audioDelay", 0.3,
+			"audioTarget", 0.29, "audioMinimum", 0.04,
+			"videoDelay", 0.32, "videoTarget", 0.31, "videoMinimum", 0.09,
+			"processing", 0.322, "decode", 0.002),
+			who + " down=" + down + " asks the sender for 150 kbit/s: " +
+				"audio delay 300ms (target 290ms, minimum 40ms) " +
+				"video delay 320ms (target 310ms, minimum 90ms) " +
+				"processing 322ms decode 2ms"},
+		// a browser that reports a target but no minimum; none without a delay
+		{"ask", "d1", m("cap", 150000.0, "audioDelay", 0.3,
+			"audioTarget", 0.29, "audioMinimum", nil, "videoTarget", 0.31),
+			who + " down=" + down + " asks the sender for 150 kbit/s: " +
+				"audio delay 300ms (target 290ms)"},
 		{"ask", "d1", m("cap", 195000.0, "pathAudio", nil),
 			who + " down=" + down + " asks the sender for 195 kbit/s"},
 		// evidence that is not a sane number is left out, not the line
@@ -161,6 +175,13 @@ func TestQualityLine(t *testing.T) {
 			"minFps", 30.0, "rate", 900000.0, "cap", nil),
 			who + " down=" + down + " receives 640x480 at 30 fps (worst 30), " +
 				"900 kbit/s, no cap"},
+		{"picture", "d1", m("width", 640.0, "height", 480.0, "fps", 30.0,
+			"minFps", 28.0, "rate", 300000.0, "cap", 329000.0,
+			"audioDelay", 0.3, "audioTarget", 0.29, "audioMinimum", 0.04,
+			"videoDelay", 0.32, "videoTarget", nil, "videoMinimum", "<b>"),
+			who + " down=" + down + " receives 640x480 at 30 fps (worst 28), " +
+				"300 kbit/s, cap 329 kbit/s, " +
+				"audio 300ms (target 290ms, minimum 40ms), video 320ms"},
 		{"picture", "u1", m("width", 640.0, "height", 480.0, "fps", 30.0,
 			"minFps", 30.0), ""},
 		{"picture", "d1", m("width", "wide", "height", 480.0, "fps", 30.0,

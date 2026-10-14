@@ -2343,8 +2343,12 @@ function feedBitrate(c, report) {
         let s = r.sample;
         reportQuality('ask', c.id, {
             cap: r.cap, audioDelay: s.audioDelay, videoDelay: s.videoDelay,
-            jitter: s.jitter, processing: s.processing, freeze: s.freeze,
-            concealed: s.concealed,
+            jitter: s.jitter, processing: s.processing, decode: s.decode,
+            freeze: s.freeze, concealed: s.concealed,
+            // what the jitter buffers aimed for, and the least they would
+            // have without synchronisation: where the delay comes from
+            audioTarget: s.audioTarget, audioMinimum: s.audioMinimum,
+            videoTarget: s.videoTarget, videoMinimum: s.videoMinimum,
             // the delay judged to be the path's own, if any (tasks#62)
             pathAudio: s.path ? s.path.audioDelay : null,
             pathVideo: s.path ? s.path.videoDelay : null,
@@ -2360,11 +2364,18 @@ function feedBitrate(c, report) {
 // How often the picture a down stream delivers goes to the connection log.
 const pictureInterval = 120000;
 
+// The playout delays averaged into each picture report: the delays
+// themselves, and what the jitter buffers aimed for with and without
+// synchronisation, which splits each delay by its cause.
+const pictureDelays = ['audioDelay', 'audioTarget', 'audioMinimum',
+                       'videoDelay', 'videoTarget', 'videoMinimum'];
+
 /**
  * Receiver side: keep track of the picture a stream delivers, and every
  * pictureInterval report it to the connection log -- size, frame rate
- * (average and worst interval) and rate -- so that a call can be checked
- * afterwards for what a cap did to the picture (tasks#65).
+ * (average and worst interval), rate and playout delays -- so that a call
+ * can be checked afterwards for what a cap did to the picture (tasks#65),
+ * and for where its delay came from when no cap changed.
  *
  * @param {Stream} c
  * @param {any} sample - what bitrate-control.js made of the last interval
@@ -2377,8 +2388,21 @@ function notePicture(c, sample, cap) {
     let p = c.userdata.picture;
     if(!p)
         p = c.userdata.picture = {since: now, n: 0, fps: 0, minFps: Infinity,
-                                  bps: 0, width: 0, height: 0};
+                                  bps: 0, width: 0, height: 0,
+                                  delays: {}};
     p.n++;
+    for(let k of pictureDelays) {
+        let v = sample[k];
+        if(typeof v !== 'number' || !Number.isFinite(v))
+            continue;
+        // a delay of exactly zero is nothing played out (a muted sender),
+        // not a buffer that holds nothing
+        if((k === 'audioDelay' || k === 'videoDelay') && !(v > 0))
+            continue;
+        let d = p.delays[k] || (p.delays[k] = {sum: 0, n: 0});
+        d.sum += v;
+        d.n++;
+    }
     p.fps += sample.fps;
     p.minFps = Math.min(p.minFps, sample.fps);
     p.bps += sample.videoBps;
@@ -2386,10 +2410,16 @@ function notePicture(c, sample, cap) {
     p.height = sample.height;
     if(now - p.since < pictureInterval)
         return;
-    reportQuality('picture', c.id, {
+    /** @type {Object<string,any>} */
+    let value = {
         width: p.width, height: p.height,
         fps: p.fps / p.n, minFps: p.minFps, rate: p.bps / p.n, cap: cap,
-    });
+    };
+    for(let k of pictureDelays) {
+        let d = p.delays[k];
+        value[k] = d ? d.sum / d.n : null;
+    }
+    reportQuality('picture', c.id, value);
     delete c.userdata.picture;
 }
 

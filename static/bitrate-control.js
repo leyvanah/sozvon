@@ -161,6 +161,35 @@
     }
 
     /**
+     * Add to a counter the browser may not report: null stays null until
+     * a number arrives.
+     *
+     * @param {number|null} sum
+     * @param {any} v
+     * @returns {number|null}
+     */
+    function addKnown(sum, v) {
+        if(typeof v !== 'number' || !Number.isFinite(v))
+            return sum;
+        return (sum || 0) + v;
+    }
+
+    /**
+     * The average per emitted sample of a cumulative counter over an
+     * interval; null unless it was reported at both ends.
+     *
+     * @param {number|null} before
+     * @param {number|null} after
+     * @param {number} emitted
+     * @returns {number|null}
+     */
+    function perEmitted(before, after, emitted) {
+        if(before == null || after == null || !(emitted > 0))
+            return null;
+        return Math.max(0, after - before) / emitted;
+    }
+
+    /**
      * Reduce a getStats() report of a receiving connection to cumulative
      * counters.
      *
@@ -176,8 +205,18 @@
             // Not used to decide anything yet: reported with each cap
             // asked for, to tell a congested network (packets arrive
             // unevenly) from a receiver too busy to play on time (they
-            // arrive evenly, decoding is slow).  tasks#32.
-            aJitter: 0, vProcessing: 0, vDecoded: 0,
+            // arrive evenly, decoding is slow).  tasks#32.  Processing
+            // runs from a frame's first packet to its decoding, so it
+            // includes the jitter buffer; the decoding alone is vDecode.
+            aJitter: 0, vProcessing: 0, vDecoded: 0, vDecode: 0,
+            // Also only reported: what each jitter buffer aimed for, and
+            // the least it would have aimed for without constraints from
+            // outside it -- audio/video synchronisation, a playout hint.
+            // Next to the delay itself they split it into the arrival
+            // jitter's share (minimum), the synchronisation's (target -
+            // minimum) and a backlog not yet played out (delay - target).
+            // null where the browser does not report them.
+            aTarget: null, aMinimum: null, vTarget: null, vMinimum: null,
             // the picture as it arrives: largest frame, current estimate
             vWidth: 0, vHeight: 0,
         };
@@ -194,6 +233,8 @@
                 s.aSamples += r.totalSamplesReceived || 0;
                 // the arrival jitter is a current estimate, not a counter
                 s.aJitter = Math.max(s.aJitter, r.jitter || 0);
+                s.aTarget = addKnown(s.aTarget, r.jitterBufferTargetDelay);
+                s.aMinimum = addKnown(s.aMinimum, r.jitterBufferMinimumDelay);
             } else if(kind === 'video') {
                 s.video = true;
                 s.vDelay += r.jitterBufferDelay || 0;
@@ -202,6 +243,9 @@
                 s.vBytes += r.bytesReceived || 0;
                 s.vProcessing += r.totalProcessingDelay || 0;
                 s.vDecoded += r.framesDecoded || 0;
+                s.vDecode += r.totalDecodeTime || 0;
+                s.vTarget = addKnown(s.vTarget, r.jitterBufferTargetDelay);
+                s.vMinimum = addKnown(s.vMinimum, r.jitterBufferMinimumDelay);
                 if((r.frameHeight || 0) > s.vHeight) {
                     s.vHeight = r.frameHeight;
                     s.vWidth = r.frameWidth || 0;
@@ -221,15 +265,22 @@
      * @returns {{state: string, videoBps: number, audioDelay: number,
      *            videoDelay: number, concealed: number, freeze: number,
      *            jitter: number, processing: number,
-     *            width: number, height: number, fps: number,
+     *            decode: number, width: number, height: number,
+     *            fps: number,
+     *            audioTarget: number|null, audioMinimum: number|null,
+     *            videoTarget: number|null, videoMinimum: number|null,
      *            path: {audioDelay: number, videoDelay: number}|null}}
      *     state is 'bad', 'good', 'hold' (in between) or 'unknown';
-     *     path is what it was judged against.
+     *     decode and the targets and minimums are only reported (the
+     *     latter null if unknown); path is what it was judged against.
      */
     function assess(prev, cur, path) {
         let r = {state: 'unknown', videoBps: 0, audioDelay: 0,
                  videoDelay: 0, concealed: 0, freeze: 0,
-                 jitter: 0, processing: 0, width: 0, height: 0, fps: 0,
+                 jitter: 0, processing: 0, decode: 0,
+                 width: 0, height: 0, fps: 0,
+                 audioTarget: null, audioMinimum: null,
+                 videoTarget: null, videoMinimum: null,
                  path: path || null};
         if(!prev || cur.time <= prev.time)
             return r;
@@ -241,6 +292,8 @@
             r.audioDelay = (cur.aDelay - prev.aDelay) / de;
             judged = true;
         }
+        r.audioTarget = perEmitted(prev.aTarget, cur.aTarget, de);
+        r.audioMinimum = perEmitted(prev.aMinimum, cur.aMinimum, de);
         let ds = cur.aSamples - prev.aSamples;
         if(ds > 0)
             r.concealed = Math.max(0, cur.aConcealed - prev.aConcealed) / ds;
@@ -249,11 +302,16 @@
             r.videoDelay = (cur.vDelay - prev.vDelay) / dv;
             judged = true;
         }
+        r.videoTarget = perEmitted(prev.vTarget, cur.vTarget, dv);
+        r.videoMinimum = perEmitted(prev.vMinimum, cur.vMinimum, dv);
         r.jitter = cur.aJitter || 0;
         let dd = (cur.vDecoded || 0) - (prev.vDecoded || 0);
-        if(dd > 0)
+        if(dd > 0) {
             r.processing = Math.max(0, (cur.vProcessing || 0) -
                                     (prev.vProcessing || 0)) / dd;
+            r.decode = Math.max(0, (cur.vDecode || 0) -
+                                (prev.vDecode || 0)) / dd;
+        }
         if(cur.video) {
             r.width = cur.vWidth || 0;
             r.height = cur.vHeight || 0;
