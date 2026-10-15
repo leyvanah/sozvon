@@ -217,6 +217,7 @@ write_state() {
 	_status="$1"
 	_message="$2"
 	_error="${3:-}"
+	_code="${4:-}"
 	mkdir -p "$STATE_DIR"
 	cat > "$STATE_DIR/state.json.tmp" <<EOF
 {
@@ -227,6 +228,7 @@ write_state() {
   "stage_total": $STAGE_TOTAL,
   "message": "$(json_escape "$_message")",
   "error": "$(json_escape "$_error")",
+  "code": "$(json_escape "$_code")",
   "version": "$(json_escape "$VERSION")",
   "updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -243,9 +245,18 @@ stage() {
 	write_state running "$2"
 }
 
+# fail CODE MESSAGE
+#
+# MESSAGE is for whoever reads the log; CODE is for a program driving this
+# script, which cannot show MESSAGE as it is: it is English, and it names
+# flags the program does not offer.  So each kind of failure has a stable
+# code in the state file, and the program says in its own words what
+# happened and what to do now.  A new code needs a sentence in every client
+# (desktop/src/renderer/deploy.js and the Android strings): a test compares
+# the lists.
 fail() {
-	echo "ERROR: $1" >&2
-	write_state failed "failed during $STAGE_NAME" "$1"
+	echo "ERROR: $2" >&2
+	write_state failed "failed during $STAGE_NAME" "$2" "$1"
 	# The state file now holds the real reason.  Mark it final so the EXIT
 	# trap below does not overwrite it with a bare exit status -- that
 	# message is all a program driving this script would have to show.
@@ -257,7 +268,7 @@ fail() {
 # stuck at "running" with no explanation.  Only fires when nothing has
 # already written a final state.
 trap 'rc=$?; [ $rc -ne 0 ] && [ "${FINISHED:-no}" = no ] && \
-    write_state failed "aborted during $STAGE_NAME" "exit status $rc"' EXIT
+    write_state failed "aborted during $STAGE_NAME" "exit status $rc" aborted' EXIT
 
 # --------------------------------------------------------------- detach ----
 
@@ -269,7 +280,7 @@ if [ "$DETACH" = yes ]; then
 	STAGE_NAME=starting
 	write_state running "starting in the background"
 	_self=$(mktemp /tmp/sozvon-install.XXXXXX.sh)
-	cat "$0" > "$_self" 2>/dev/null || fail "cannot copy the installer"
+	cat "$0" > "$_self" 2>/dev/null || fail internal "cannot copy the installer"
 	chmod +x "$_self"
 	# The password goes through the environment, never the command line:
 	# /proc/<pid>/cmdline is world-readable, so an --admin-password
@@ -329,7 +340,7 @@ if [ "$UNINSTALL" = yes ]; then
 		# root is not a mistake that can be walked back.
 		case "$PREFIX" in
 		""|/|/bin|/boot|/etc|/home|/lib|/opt|/root|/srv|/usr|/var)
-			fail "refusing to purge $PREFIX" ;;
+			fail internal "refusing to purge $PREFIX" ;;
 		esac
 		rm -rf "$PREFIX"
 		# The pre-rename tree, if this machine still has one: a purge that
@@ -359,19 +370,19 @@ fi
 
 stage preflight "checking the system"
 
-[ "$(id -u)" = 0 ] || fail "this script must run as root"
+[ "$(id -u)" = 0 ] || fail not-root "this script must run as root"
 
-command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
+command -v systemctl >/dev/null 2>&1 || fail no-systemd "systemd is required"
 
 case "$(uname -s)" in
 Linux) ;;
-*) fail "only Linux is supported (found $(uname -s))" ;;
+*) fail unsupported-os "only Linux is supported (found $(uname -s))" ;;
 esac
 
 case "$(uname -m)" in
 x86_64|amd64) ARCH=amd64 ;;
 aarch64|arm64) ARCH=arm64 ;;
-*) fail "unsupported architecture $(uname -m); build from source instead" ;;
+*) fail unsupported-arch "unsupported architecture $(uname -m); build from source instead" ;;
 esac
 
 if command -v apt-get >/dev/null 2>&1; then
@@ -399,7 +410,7 @@ if [ -n "$need" ]; then
 	echo "installing:$need"
 	[ "$PKG" = apt ] && apt-get update -qq
 	# shellcheck disable=SC2086
-	install_pkg $need || fail "could not install:$need"
+	install_pkg $need || fail packages "could not install:$need"
 fi
 
 # The project was called Oryn before it was called Sozvon, and the rename
@@ -419,7 +430,7 @@ if [ -e "$LEGACY_UNIT" ] || [ -d "$LEGACY_PREFIX" ]; then
 		# large, and two copies of the group files would be two answers
 		# to "what is the operator's password".
 		mv "$LEGACY_PREFIX" "$PREFIX" ||
-		    fail "could not move $LEGACY_PREFIX to $PREFIX"
+		    fail system-setup "could not move $LEGACY_PREFIX to $PREFIX"
 	elif [ -d "$LEGACY_PREFIX" ]; then
 		echo "note: $LEGACY_PREFIX left in place; this install uses $PREFIX"
 	fi
@@ -455,7 +466,7 @@ if [ "$UPGRADE" = no ]; then
 	for port in $ports; do
 		if command -v ss >/dev/null 2>&1 &&
 		   ss -ltn "sport = :$port" 2>/dev/null | grep -q LISTEN; then
-			fail "port $port is already in use; stop whatever is listening (a web server?) and re-run"
+			fail port-in-use "port $port is already in use; stop whatever is listening (a web server?) and re-run"
 		fi
 	done
 else
@@ -476,7 +487,7 @@ if ! id "$RUN_USER" >/dev/null 2>&1; then
 	    "$RUN_USER" 2>/dev/null ||
 	useradd --system --home-dir "$PREFIX" --shell /sbin/nologin \
 	    "$RUN_USER" ||
-	fail "could not create the $RUN_USER user"
+	fail system-setup "could not create the $RUN_USER user"
 fi
 
 mkdir -p "$PREFIX/versions" "$PREFIX/data" "$PREFIX/groups" \
@@ -495,12 +506,12 @@ if [ "$VERSION" = latest ]; then
 		# asking GitHub what "latest" means would defeat it.  The mirror
 		# says so itself, in a one-line file next to the archives.
 		VERSION=$(curl -fsSL "$MIRROR/latest" 2>/dev/null | tr -d ' \t\r\n')
-		[ -n "$VERSION" ] || fail "the mirror has no 'latest' file; pass --version explicitly"
+		[ -n "$VERSION" ] || fail version-unknown "the mirror has no 'latest' file; pass --version explicitly"
 	else
 		VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null |
 		    sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1) ||
-		    fail "could not reach GitHub to resolve the latest version; pass --version, or --mirror"
-		[ -n "$VERSION" ] || fail "could not determine the latest version; pass --version explicitly"
+		    fail version-unknown "could not reach GitHub to resolve the latest version; pass --version, or --mirror"
+		[ -n "$VERSION" ] || fail version-unknown "could not determine the latest version; pass --version explicitly"
 	fi
 fi
 
@@ -519,11 +530,11 @@ cleanup_tmp() { rm -rf "$TMP" ${UNPACK:+"$UNPACK"}; }
 
 curl -fsSL -o "$TMP/$ARCHIVE" "$URL" || {
 	cleanup_tmp
-	fail "download failed: $URL"
+	fail download-failed "download failed: $URL"
 }
 curl -fsSL -o "$TMP/SHA256SUMS" "$SUMS_URL" || {
 	cleanup_tmp
-	fail "could not download SHA256SUMS from $SUMS_URL"
+	fail download-failed "could not download SHA256SUMS from $SUMS_URL"
 }
 
 # Refuse to install something whose checksum we cannot confirm: this archive
@@ -531,7 +542,7 @@ curl -fsSL -o "$TMP/SHA256SUMS" "$SUMS_URL" || {
 ( cd "$TMP" && grep " [ *]\{0,1\}$ARCHIVE\$" SHA256SUMS > expected.txt &&
   sha256sum -c expected.txt >/dev/null 2>&1 ) || {
 	cleanup_tmp
-	fail "checksum mismatch for $ARCHIVE -- refusing to install"
+	fail checksum-mismatch "checksum mismatch for $ARCHIVE -- refusing to install"
 }
 
 DEST="$PREFIX/versions/$VERSION"
@@ -541,20 +552,20 @@ DEST="$PREFIX/versions/$VERSION"
 # is replaced only once the new one is complete.  Same filesystem, so the
 # swap below is two renames rather than a copy.
 UNPACK=$(mktemp -d "$PREFIX/versions/.unpack-$VERSION.XXXXXX") ||
-	{ cleanup_tmp; fail "cannot create a directory under $PREFIX/versions"; }
-tar -xzf "$TMP/$ARCHIVE" -C "$UNPACK" || { cleanup_tmp; fail "could not unpack $ARCHIVE"; }
+	{ cleanup_tmp; fail unpack-failed "cannot create a directory under $PREFIX/versions"; }
+tar -xzf "$TMP/$ARCHIVE" -C "$UNPACK" || { cleanup_tmp; fail unpack-failed "could not unpack $ARCHIVE"; }
 NEW="$UNPACK/sozvon_${VERSION}_linux_${ARCH}"
 [ -f "$NEW/sozvon" ] && [ -d "$NEW/static" ] ||
-	{ cleanup_tmp; fail "unexpected archive layout"; }
+	{ cleanup_tmp; fail unpack-failed "unexpected archive layout"; }
 if [ -e "$DEST" ]; then
 	mv "$DEST" "$UNPACK/old" ||
-		{ cleanup_tmp; fail "cannot move the existing $DEST aside"; }
+		{ cleanup_tmp; fail unpack-failed "cannot move the existing $DEST aside"; }
 fi
 if ! mv "$NEW" "$DEST"; then
 	# Put the working copy back before giving up.
 	[ -e "$UNPACK/old" ] && mv "$UNPACK/old" "$DEST"
 	cleanup_tmp
-	fail "cannot move the new version into $DEST"
+	fail unpack-failed "cannot move the new version into $DEST"
 fi
 rm -rf "$UNPACK"
 UNPACK=
@@ -640,9 +651,9 @@ CERT_FINGERPRINT=
 case "$TLS_MODE" in
 letsencrypt-sslip)
 	IP=$(detect_ip)
-	[ -n "$IP" ] || fail "could not determine this server's public IP; pass --ip"
+	[ -n "$IP" ] || fail public-ip-unknown "could not determine this server's public IP; pass --ip"
 	case "$IP" in
-	*[!0-9.]*|"") fail "detected an implausible public IP: '$IP'; pass --ip" ;;
+	*[!0-9.]*|"") fail public-ip-unknown "detected an implausible public IP: '$IP'; pass --ip" ;;
 	esac
 	HOSTNAME=$(echo "$IP" | tr '.' '-').sslip.io
 	SOZVON_ARGS="-http :$HTTPS_PORT -letsencrypt $HOSTNAME -turn-tls $HOSTNAME:$TURNS_PORT"
@@ -665,7 +676,7 @@ letsencrypt-domain)
 self-signed)
 	IP=$(detect_ip)
 	HOSTNAME=${DOMAIN:-$IP}
-	[ -n "$HOSTNAME" ] || fail "could not determine a name or IP for the certificate; pass --ip or --domain"
+	[ -n "$HOSTNAME" ] || fail public-ip-unknown "could not determine a name or IP for the certificate; pass --ip or --domain"
 	if [ ! -f "$PREFIX/data/cert.pem" ]; then
 		# The SAN has to match however the client will address this
 		# server.  With no IP detected, "IP:" alone is a syntax error
@@ -683,13 +694,13 @@ self-signed)
 			*) SAN="${SAN}IP:$IP" ;;
 			esac
 		fi
-		[ -n "$SAN" ] || fail "no name or IP for the certificate; pass --ip or --domain"
+		[ -n "$SAN" ] || fail public-ip-unknown "no name or IP for the certificate; pass --ip or --domain"
 		openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
 		    -subj "/CN=$HOSTNAME" \
 		    -addext "subjectAltName=$SAN" \
 		    -keyout "$PREFIX/data/key.pem" \
 		    -out "$PREFIX/data/cert.pem" >/dev/null 2>&1 ||
-		    fail "could not generate a self-signed certificate"
+		    fail certificate-failed "could not generate a self-signed certificate"
 		chmod 600 "$PREFIX/data/key.pem"
 	fi
 	CERT_FINGERPRINT=$(openssl x509 -in "$PREFIX/data/cert.pem" \
@@ -726,7 +737,7 @@ else
 	# stays readable to anyone who gets the file, and this way that is not
 	# enough to log in.
 	HASHED=$("$DEST/galenectl" hash-password -password "$ADMIN_PASSWORD" 2>/dev/null) ||
-	    fail "could not hash the operator password"
+	    fail internal "could not hash the operator password"
 
 	# Encryption is on unless it was turned off.  A server people install
 	# for themselves should not relay conversations it could just as well
@@ -857,8 +868,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable sozvon >/dev/null 2>&1 || fail "could not enable the service"
-systemctl restart sozvon || fail "could not start the service"
+systemctl enable sozvon >/dev/null 2>&1 || fail service-failed "could not enable the service"
+systemctl restart sozvon || fail service-failed "could not start the service"
 
 # --------------------------------------------------------------- verify ----
 
@@ -901,9 +912,9 @@ if [ "$ok" != yes ]; then
 		echo "rolling back to $PREVIOUS" >&2
 		ln -sfn "$PREVIOUS" "$PREFIX/current"
 		systemctl restart sozvon || true
-		fail "the new version did not come up; rolled back to $(basename "$PREVIOUS")"
+		fail rolled-back "the new version did not come up; rolled back to $(basename "$PREVIOUS")"
 	fi
-	fail "the server did not answer on $PROBE_URL"
+	fail not-answering "the server did not answer on $PROBE_URL"
 fi
 
 if [ "$TLS_MODE" != self-signed ]; then
