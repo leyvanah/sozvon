@@ -368,6 +368,15 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     renegotiation, E2EE untouched. If it cannot be reopened the call goes on
     with video alone and the microphone button shows "off". Screen sharing
     still ends with its track, which there means "stop sharing".
+  * **A change to the sound never reopens the camera.** Upstream publishes
+    the camera stream anew for any change of media, closing the camera and
+    opening it again; turning the microphone on mid-call is added to the
+    stream in place, but when that cannot be done, and for a change of
+    microphone or of the audio settings, the stream was still republished
+    that way. A gap in the picture at best: on 2026-10-14 a guest's camera
+    came back white and stayed white. Now the running camera track is carried
+    over to the new stream and only the microphone is opened; a microphone
+    that cannot be added in place falls back to this instead of failing.
   * **State-reflecting mic/camera icons**: each colours by what is live right
     now — **blue + upright** when the device is on, **red + slashed** when off.
     The old neutral-grey in-between state is gone.
