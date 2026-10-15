@@ -289,18 +289,44 @@ func kbps(v interface{}) (string, bool) {
 	return fmt.Sprintf("%d kbit/s", int64(f/1000)), true
 }
 
+// millis formats a duration given in seconds, as the client sends them.
+func millis(f float64) string {
+	return fmt.Sprintf("%dms", int64(f*1000))
+}
+
+// playout lists, as "audio delay 300ms audio target 290ms audio minimum
+// 40ms", one kind's playout delay with what its jitter buffer aimed for
+// and what it would aim for with constraints from outside it taken away,
+// mainly audio/video synchronisation.  Each figure is left out unless it
+// is a sane number.
+func playout(v map[string]interface{}, kind string) []string {
+	var parts []string
+	for _, f := range []struct{ key, name string }{
+		{kind + "Delay", kind + " delay"},
+		{kind + "Target", kind + " target"},
+		{kind + "Minimum", kind + " minimum"},
+	} {
+		if x, ok := number(v[f.key], 3600); ok {
+			parts = append(parts, f.name+" "+millis(x))
+		}
+	}
+	return parts
+}
+
 // askEvidence formats what a receiver's bitrate decision rested on: the
-// playout delays, the audio arrival jitter, the time to process a video
-// frame, freezes and concealment.  Jitter points at the network, processing
-// time at a receiver too busy to keep up -- the controller cannot tell the
-// two apart yet, and this is what will tell (Sozvon).  Each figure is
-// optional and shown only if it is a sane number.
+// playout delays, the audio arrival jitter, the time from a video frame's
+// first packet to its decoding, freezes, concealment and the path's own
+// delay, then the decoding alone and what each jitter buffer aimed for.
+// Jitter points at the network, decoding time at a receiver too busy to
+// keep up -- the controller cannot tell the two apart yet, and this is
+// what will tell (Sozvon).  The later figures come last so that the
+// earlier ones keep their places in the line.  Each figure is optional
+// and shown only if it is a sane number.
 func askEvidence(v map[string]interface{}) string {
 	var parts []string
 	ms := func(key, name string) {
 		if f, ok := number(v[key], 3600); ok {
-			parts = append(parts,
-				fmt.Sprintf("%v %dms", name, int64(f*1000)))
+			parts = append(parts, name+" "+millis(f))
 		}
 	}
 	ms("audioDelay", "audio delay")
@@ -316,6 +342,11 @@ func askEvidence(v map[string]interface{}) string {
 	// what the receiver takes to be the path's own delay (static/bitrate-control.js)
 	ms("pathAudio", "path audio")
 	ms("pathVideo", "path video")
+	ms("decode", "decode")
+	ms("audioTarget", "audio target")
+	ms("audioMinimum", "audio minimum")
+	ms("videoTarget", "video target")
+	ms("videoMinimum", "video minimum")
 	if len(parts) == 0 {
 		return ""
 	}
@@ -406,6 +437,12 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 			line += ", no cap"
 		} else if limit, ok := kbps(v["cap"]); ok {
 			line += ", cap " + limit
+		}
+		// the playout delays over the same minutes, by cause
+		for _, kind := range []string{"audio", "video"} {
+			if parts := playout(v, kind); len(parts) > 0 {
+				line += ", " + strings.Join(parts, " ")
+			}
 		}
 		return line
 	case "path":

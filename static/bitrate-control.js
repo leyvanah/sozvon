@@ -161,6 +161,36 @@
     }
 
     /**
+     * Add to a counter the browser may not report: null stays null until
+     * a number arrives.
+     *
+     * @param {number|null} sum
+     * @param {any} v
+     * @returns {number|null}
+     */
+    function addKnown(sum, v) {
+        if(typeof v !== 'number' || !Number.isFinite(v))
+            return sum;
+        return (sum || 0) + v;
+    }
+
+    /**
+     * The average per item (sample emitted, frame decoded) of a cumulative
+     * counter over an interval; null unless it was reported at both ends
+     * and some item passed.
+     *
+     * @param {number|null} before
+     * @param {number|null} after
+     * @param {number} items
+     * @returns {number|null}
+     */
+    function perItem(before, after, items) {
+        if(before == null || after == null || !(items > 0))
+            return null;
+        return Math.max(0, after - before) / items;
+    }
+
+    /**
      * Reduce a getStats() report of a receiving connection to cumulative
      * counters.
      *
@@ -176,8 +206,21 @@
             // Not used to decide anything yet: reported with each cap
             // asked for, to tell a congested network (packets arrive
             // unevenly) from a receiver too busy to play on time (they
-            // arrive evenly, decoding is slow).  tasks#32.
-            aJitter: 0, vProcessing: 0, vDecoded: 0,
+            // arrive evenly, decoding is slow).  tasks#32.  Processing
+            // runs from a frame's first packet to its decoding, so it
+            // includes the jitter buffer; the decoding alone is vDecode,
+            // null where the browser does not report it.
+            aJitter: 0, vProcessing: 0, vDecoded: 0, vDecode: null,
+            // Also only reported: what each jitter buffer aimed for, and
+            // what it would aim for with constraints from outside it taken
+            // away -- mainly audio/video synchronisation, a playout hint.
+            // The latter shows what the arrival jitter alone needs, and
+            // delay minus target a backlog not yet played out.  Target
+            // minus minimum is the outside share only roughly: the
+            // buffer's own ceiling holds the target down and not the
+            // minimum, which can then exceed it.  null where the browser
+            // does not report them.
+            aTarget: null, aMinimum: null, vTarget: null, vMinimum: null,
             // the picture as it arrives: largest frame, current estimate
             vWidth: 0, vHeight: 0,
         };
@@ -194,6 +237,8 @@
                 s.aSamples += r.totalSamplesReceived || 0;
                 // the arrival jitter is a current estimate, not a counter
                 s.aJitter = Math.max(s.aJitter, r.jitter || 0);
+                s.aTarget = addKnown(s.aTarget, r.jitterBufferTargetDelay);
+                s.aMinimum = addKnown(s.aMinimum, r.jitterBufferMinimumDelay);
             } else if(kind === 'video') {
                 s.video = true;
                 s.vDelay += r.jitterBufferDelay || 0;
@@ -202,6 +247,9 @@
                 s.vBytes += r.bytesReceived || 0;
                 s.vProcessing += r.totalProcessingDelay || 0;
                 s.vDecoded += r.framesDecoded || 0;
+                s.vDecode = addKnown(s.vDecode, r.totalDecodeTime);
+                s.vTarget = addKnown(s.vTarget, r.jitterBufferTargetDelay);
+                s.vMinimum = addKnown(s.vMinimum, r.jitterBufferMinimumDelay);
                 if((r.frameHeight || 0) > s.vHeight) {
                     s.vHeight = r.frameHeight;
                     s.vWidth = r.frameWidth || 0;
@@ -221,15 +269,25 @@
      * @returns {{state: string, videoBps: number, audioDelay: number,
      *            videoDelay: number, concealed: number, freeze: number,
      *            jitter: number, processing: number,
-     *            width: number, height: number, fps: number,
+     *            decode: number|null, width: number, height: number,
+     *            fps: number, audioPlayed: boolean, videoPlayed: boolean,
+     *            audioTarget: number|null, audioMinimum: number|null,
+     *            videoTarget: number|null, videoMinimum: number|null,
      *            path: {audioDelay: number, videoDelay: number}|null}}
      *     state is 'bad', 'good', 'hold' (in between) or 'unknown';
-     *     path is what it was judged against.
+     *     audioPlayed and videoPlayed say whether anything was played
+     *     out, without which a delay of 0 means nothing; decode and the
+     *     targets and minimums are only reported, null if unknown; path is
+     *     what it was judged against.
      */
     function assess(prev, cur, path) {
         let r = {state: 'unknown', videoBps: 0, audioDelay: 0,
                  videoDelay: 0, concealed: 0, freeze: 0,
-                 jitter: 0, processing: 0, width: 0, height: 0, fps: 0,
+                 jitter: 0, processing: 0, decode: null,
+                 width: 0, height: 0, fps: 0,
+                 audioPlayed: false, videoPlayed: false,
+                 audioTarget: null, audioMinimum: null,
+                 videoTarget: null, videoMinimum: null,
                  path: path || null};
         if(!prev || cur.time <= prev.time)
             return r;
@@ -239,21 +297,28 @@
         let de = cur.aEmitted - prev.aEmitted;
         if(de > 0) {
             r.audioDelay = (cur.aDelay - prev.aDelay) / de;
+            r.audioPlayed = true;
             judged = true;
         }
+        r.audioTarget = perItem(prev.aTarget, cur.aTarget, de);
+        r.audioMinimum = perItem(prev.aMinimum, cur.aMinimum, de);
         let ds = cur.aSamples - prev.aSamples;
         if(ds > 0)
             r.concealed = Math.max(0, cur.aConcealed - prev.aConcealed) / ds;
         let dv = cur.vEmitted - prev.vEmitted;
         if(dv > 0) {
             r.videoDelay = (cur.vDelay - prev.vDelay) / dv;
+            r.videoPlayed = true;
             judged = true;
         }
+        r.videoTarget = perItem(prev.vTarget, cur.vTarget, dv);
+        r.videoMinimum = perItem(prev.vMinimum, cur.vMinimum, dv);
         r.jitter = cur.aJitter || 0;
         let dd = (cur.vDecoded || 0) - (prev.vDecoded || 0);
         if(dd > 0)
             r.processing = Math.max(0, (cur.vProcessing || 0) -
                                     (prev.vProcessing || 0)) / dd;
+        r.decode = perItem(prev.vDecode, cur.vDecode, dd);
         if(cur.video) {
             r.width = cur.vWidth || 0;
             r.height = cur.vHeight || 0;
@@ -639,6 +704,114 @@
         return Math.min(setting, cap);
     }
 
+    /**
+     * What a cap asked for rested on, for the connection log: whether a
+     * cap follows network trouble or a receiver too busy to keep up is not
+     * settled yet (tasks#32), and this is the evidence.
+     *
+     * @param {number|null} cap
+     * @param {ReturnType<typeof assess>} sample
+     * @returns {Object<string, number|null>}
+     */
+    function askReport(cap, sample) {
+        let s = sample;
+        return {
+            cap: cap, audioDelay: s.audioDelay, videoDelay: s.videoDelay,
+            jitter: s.jitter, processing: s.processing, decode: s.decode,
+            freeze: s.freeze, concealed: s.concealed,
+            // what the jitter buffers aimed for, and the least they would
+            // have aimed for without constraints from outside them
+            audioTarget: s.audioTarget, audioMinimum: s.audioMinimum,
+            videoTarget: s.videoTarget, videoMinimum: s.videoMinimum,
+            // the delay judged to be the path's own, if any (tasks#62)
+            pathAudio: s.path ? s.path.audioDelay : null,
+            pathVideo: s.path ? s.path.videoDelay : null,
+        };
+    }
+
+    // The playout figures averaged into a picture report, each with the
+    // flag that says whether the interval played out anything to have it.
+    const PICTURE_DELAYS = [
+        ['audioDelay', 'audioPlayed'], ['audioTarget', 'audioPlayed'],
+        ['audioMinimum', 'audioPlayed'],
+        ['videoDelay', 'videoPlayed'], ['videoTarget', 'videoPlayed'],
+        ['videoMinimum', 'videoPlayed'],
+    ];
+
+    /**
+     * Receiver side, one incoming stream: the picture it delivers and its
+     * playout delays, gathered over an interval and reported once it has
+     * passed -- size, frame rate (average and worst poll), rate and the
+     * delays with what each is made of -- so that a call can be checked
+     * afterwards for what a cap did to the picture (tasks#65), and for
+     * where its delay came from when no cap changed.
+     *
+     * @constructor
+     * @param {number} interval - milliseconds between two reports
+     */
+    function Picture(interval) {
+        this.interval = interval;
+        this.reset(null);
+    }
+
+    /** @param {number|null} now */
+    Picture.prototype.reset = function(now) {
+        this.since = now;
+        this.n = 0;
+        this.fps = 0;
+        this.minFps = Infinity;
+        this.bps = 0;
+        this.width = 0;
+        this.height = 0;
+        /** @type {Object<string, {sum: number, n: number}>} */
+        this.delays = {};
+    };
+
+    /**
+     * Feed one poll.  Polls that show no picture are left out.
+     *
+     * @param {ReturnType<typeof assess>} sample
+     * @param {number|null} cap - the cap standing now
+     * @param {number} now - milliseconds
+     * @returns {Object<string, number|null>|null} the report, once the
+     *     interval has passed; then gathering starts again
+     */
+    Picture.prototype.add = function(sample, cap, now) {
+        if(!sample || sample.state === 'unknown' || !(sample.fps > 0))
+            return null;
+        if(this.since === null)
+            this.since = now;
+        this.n++;
+        this.fps += sample.fps;
+        this.minFps = Math.min(this.minFps, sample.fps);
+        this.bps += sample.videoBps;
+        this.width = sample.width;
+        this.height = sample.height;
+        for(let [k, played] of PICTURE_DELAYS) {
+            let v = sample[k];
+            if(!sample[played] || typeof v !== 'number' ||
+               !Number.isFinite(v))
+                continue;
+            let d = this.delays[k] || (this.delays[k] = {sum: 0, n: 0});
+            d.sum += v;
+            d.n++;
+        }
+        if(now - this.since < this.interval)
+            return null;
+        /** @type {Object<string, number|null>} */
+        let report = {
+            width: this.width, height: this.height,
+            fps: this.fps / this.n, minFps: this.minFps,
+            rate: this.bps / this.n, cap: cap,
+        };
+        for(let [k] of PICTURE_DELAYS) {
+            let d = this.delays[k];
+            report[k] = d ? d.sum / d.n : null;
+        }
+        this.reset(null);
+        return report;
+    };
+
     const api = {
         CAMERA_CEILING, CONGESTED, HEALTHY, EXCESS_CONGESTED, EXCESS_HEALTHY, PROVEN_BELOW,
         PATH_MEMORY, PATH_LOWER_AFTER, SETTLE, MIN_CAP, MAX_CAP, RELEASE_AT, START_CAP,
@@ -647,6 +820,7 @@
         BAD_TO_DECREASE, GOOD_TO_INCREASE, MIN_DECREASE_GAP, WARMUP,
         MIN_INCREASE_GAP, REFRESH, TTL, MESSAGE_KIND,
         sanitizeCap, snapshot, assess, Controller, Caps, combine,
+        askReport, Picture,
     };
 
     global.SozvonBitrate = api;
