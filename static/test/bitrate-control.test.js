@@ -121,7 +121,7 @@ test('assess splits each playout delay into target and minimum, and times decodi
     near(r.processing, 0.322, 'first packet to decoded');
 });
 
-test('a browser that does not report target or minimum gets null, not zero', () => {
+test('a browser that does not report target, minimum or decoding gets null, not zero', () => {
     let at = (t, extra) => b.snapshot([
         {type: 'inbound-rtp', kind: 'audio', jitterBufferEmittedCount: t * 100,
          jitterBufferDelay: t * 10, ...extra},
@@ -131,6 +131,17 @@ test('a browser that does not report target or minimum gets null, not zero', () 
     assert.strictEqual(r.audioMinimum, null);
     assert.strictEqual(r.videoTarget, null, 'no video at all');
     assert.ok(Math.abs(r.audioDelay - 0.1) < 1e-9, 'the delay is still judged');
+    assert.strictEqual(r.audioPlayed, true);
+    assert.strictEqual(r.videoPlayed, false);
+    // frames decoded but no decoding time: unknown, not instant
+    let video = (t, extra) => b.snapshot([
+        {type: 'inbound-rtp', kind: 'video', jitterBufferEmittedCount: t * 30,
+         jitterBufferDelay: t, framesDecoded: t * 30,
+         totalProcessingDelay: t * 3, ...extra},
+    ], t * 1000);
+    let v = b.assess(video(1, {}), video(3, {}));
+    assert.strictEqual(v.decode, null);
+    assert.ok(v.processing > 0, 'what is reported still is');
     // reported at one end only: nothing to take a difference of
     let half = b.assess(at(1, {}), at(3, {jitterBufferTargetDelay: 30}));
     assert.strictEqual(half.audioTarget, null);
@@ -607,4 +618,94 @@ test('the call of 2026-10-13: a camera no longer breaks the audio', () => {
     let after = breaks('camera');
     assert.ok(before >= 10, `the old behaviour breaks up (${before} intervals)`);
     assert.strictEqual(after, 0, 'a camera at its ceiling never gets there');
+});
+
+test('a cap asked for carries every figure the interval measured', () => {
+    let at = t => b.snapshot([
+        {type: 'inbound-rtp', kind: 'audio', jitterBufferEmittedCount: t * 48000,
+         jitterBufferDelay: t * 48000 * 0.3,
+         jitterBufferTargetDelay: t * 48000 * 0.29,
+         jitterBufferMinimumDelay: t * 48000 * 0.04,
+         jitter: 0.02, totalSamplesReceived: t * 48000},
+        {type: 'inbound-rtp', kind: 'video', jitterBufferEmittedCount: t * 30,
+         jitterBufferDelay: t * 30 * 0.32,
+         jitterBufferTargetDelay: t * 30 * 0.31,
+         jitterBufferMinimumDelay: t * 30 * 0.09,
+         framesDecoded: t * 30, totalDecodeTime: t * 30 * 0.002,
+         totalProcessingDelay: t * 30 * 0.322, bytesReceived: t * 50000},
+    ], t * 1000);
+    let sample = b.assess(at(10), at(12), {audioDelay: 0.28, videoDelay: 0.05});
+    let r = b.askReport(150000, sample);
+    assert.strictEqual(r.cap, 150000);
+    for(let k of ['audioDelay', 'videoDelay', 'jitter', 'processing', 'decode',
+                  'audioTarget', 'audioMinimum', 'videoTarget', 'videoMinimum',
+                  'freeze', 'concealed'])
+        assert.strictEqual(r[k], sample[k], k);
+    assert.ok(r.audioTarget > 0 && r.videoMinimum > 0 && r.decode > 0,
+              'the figures themselves, not placeholders');
+    assert.strictEqual(r.pathAudio, 0.28);
+    assert.strictEqual(r.pathVideo, 0.05);
+    assert.strictEqual(b.askReport(null, b.assess(null, at(1))).pathAudio, null);
+});
+
+/**
+ * A sample as assess() makes it: one poll that showed a picture.
+ */
+function shown(o = {}) {
+    return {state: 'good', fps: 30, videoBps: 300000, width: 640, height: 480,
+            audioPlayed: true, videoPlayed: true,
+            audioDelay: 0.3, audioTarget: 0.29, audioMinimum: 0.04,
+            videoDelay: 0.32, videoTarget: 0.31, videoMinimum: 0.09, ...o};
+}
+
+test('a picture report comes once the interval has passed, then starts over', () => {
+    let p = new b.Picture(10000);
+    assert.strictEqual(p.add(shown(), 500000, 1000), null);
+    assert.strictEqual(p.add(shown({fps: 20, videoBps: 100000}), 500000, 6000), null);
+    let r = p.add(shown({fps: 25, videoBps: 200000}), 400000, 11000);
+    assert.ok(r, 'reported at 10 s');
+    assert.strictEqual(r.fps, 25);
+    assert.strictEqual(r.minFps, 20);
+    assert.strictEqual(r.rate, 200000);
+    assert.strictEqual(r.cap, 400000, 'the cap standing when reported');
+    assert.strictEqual(r.width, 640);
+    // gathering starts again from the next poll
+    assert.strictEqual(p.add(shown(), null, 12000), null);
+    assert.strictEqual(p.add(shown(), null, 21000), null);
+    assert.ok(p.add(shown(), null, 22000));
+});
+
+test('a picture report averages each delay over the polls that played it', () => {
+    let p = new b.Picture(4000);
+    p.add(shown({audioDelay: 0.2, audioTarget: 0.2, audioMinimum: 0.1}), null, 0);
+    // a muted sender: nothing played out, so its zero is no delay at all
+    p.add(shown({audioPlayed: false, audioDelay: 0,
+                 audioTarget: null, audioMinimum: null}), null, 2000);
+    let r = p.add(shown({audioDelay: 0.4, audioTarget: 0.3, audioMinimum: 0.5,
+                         videoMinimum: null}), null, 4000);
+    let near = (x, want, what) =>
+        assert.ok(Math.abs(x - want) < 1e-9, `${what}: ${x}`);
+    near(r.audioDelay, 0.3, 'audio delay over the two polls that played');
+    near(r.audioTarget, 0.25, 'audio target');
+    // the minimum may exceed the target when the buffer's own ceiling
+    // holds the target down: reported as measured, not corrected
+    near(r.audioMinimum, 0.3, 'audio minimum');
+    near(r.videoDelay, 0.32, 'video delay');
+    near(r.videoMinimum, 0.09, 'video minimum over the polls that had one');
+});
+
+test('a picture report leaves out what no poll measured, and polls with no picture', () => {
+    let p = new b.Picture(2000);
+    assert.strictEqual(p.add(shown({fps: 0}), null, 0), null);
+    assert.strictEqual(p.add({state: 'unknown', fps: 30}, null, 0), null);
+    assert.strictEqual(p.add(null, null, 0), null);
+    p.add(shown({audioPlayed: false, audioTarget: null, audioMinimum: null,
+                 videoTarget: null, videoMinimum: null}), null, 10000);
+    let r = p.add(shown({audioPlayed: false, audioTarget: null, audioMinimum: null,
+                         videoTarget: null, videoMinimum: null}), null, 12000);
+    assert.ok(r, 'the interval runs from the first poll with a picture');
+    assert.strictEqual(r.audioDelay, null);
+    assert.strictEqual(r.audioTarget, null);
+    assert.strictEqual(r.videoTarget, null);
+    assert.ok(Math.abs(r.videoDelay - 0.32) < 1e-9);
 });

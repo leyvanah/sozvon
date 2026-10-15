@@ -491,13 +491,19 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     shorten it, so the delay was not the sender's -- but nothing in the log
     said whose it was. Requests and the two-minute picture reports now carry
     the jitter buffers' target and minimum delay next to each delay
-    (`audio delay 300ms (target 290ms, minimum 40ms)`): the minimum is what
-    the arrival jitter needs, target minus minimum what audio/video
-    synchronisation adds, delay minus target a backlog not yet played out.
+    (`audio delay 300ms … audio target 290ms audio minimum 40ms`). The
+    minimum is the target with constraints from outside the buffer taken
+    away -- mainly audio/video synchronisation, also a playout hint -- so it
+    shows what the arrival jitter alone would need; delay minus target is a
+    backlog not yet played out. Target minus minimum is the outside share
+    only roughly: the buffer's own ceiling holds the target down and not the
+    minimum, so on a very uneven path the minimum can exceed the target.
     Requests also log the video decoding time alone (`decode 2ms`): the
     `processing` figure runs from a frame's first packet, so it includes the
-    jitter buffer and cannot show a receiver too busy to decode. Only
-    reported; nothing is decided on them yet.
+    jitter buffer and cannot show a receiver too busy to decode. A figure
+    the browser does not report is left out, never logged as zero, and the
+    new figures come at the end of a request's line so that the earlier
+    ones keep their places. Only reported; nothing is decided on them yet.
 
 ### Localisation
 

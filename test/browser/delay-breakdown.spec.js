@@ -5,14 +5,19 @@
 // 15-30 ms of arrival jitter, no loss -- and cutting the video to the floor
 // did not shorten it.  Where the 300 ms came from the log could not say.
 // The jitter buffer's target and minimum delay split it: the minimum is
-// what the arrival jitter needs, target minus minimum what audio/video
-// synchronisation adds, delay minus target a backlog not yet played out.
+// the target with constraints from outside the buffer taken away -- mainly
+// audio/video synchronisation -- so it shows what the arrival jitter alone
+// would need; delay minus target is a backlog not yet played out.  The
+// minimum may exceed the target: the buffer's own ceiling holds the target
+// down and not the minimum, so no order between them is assumed here.
 //
 // They are only worth logging if the browser fills them in.  A field it
 // does not report reads as null, and a log full of nulls would look like
 // evidence while being none -- so this checks, in a real Chromium, with and
-// without end-to-end encryption, that every figure arrives and is sane.  It
-// prints them too: a local baseline to set a real call against.
+// without end-to-end encryption, that every figure arrives and is sane, and
+// that what the client sends with a cap is what bitrate-control.js builds
+// from them.  It prints them too: a local baseline to set a real call
+// against.
 
 import {test, expect} from '@playwright/test';
 import {chooseDevices} from './lib.js';
@@ -68,15 +73,18 @@ const interval = (B, seconds) => B.evaluate(async seconds => {
     await new Promise(r => setTimeout(r, seconds * 1000));
     const last = S.snapshot((await c.pc.getStats()).values(), Date.now());
     const r = S.assess(first, last);
-    const ms = v => v === null ? null : Math.round(v * 1000);
+    // in milliseconds, decoding to a tenth
+    const ms = (v, d = 1) => v === null ? null : Math.round(v * 1000 * d) / d;
     return {
         audioDelay: ms(r.audioDelay), audioTarget: ms(r.audioTarget),
         audioMinimum: ms(r.audioMinimum),
         videoDelay: ms(r.videoDelay), videoTarget: ms(r.videoTarget),
         videoMinimum: ms(r.videoMinimum),
         jitter: ms(r.jitter), processing: ms(r.processing),
-        decode: Math.round(r.decode * 10000) / 10,
+        decode: ms(r.decode, 10),
         fps: Math.round(r.fps),
+        // what the client would send with a cap asked for now
+        ask: S.askReport(150000, r),
     };
 }, seconds);
 
@@ -94,27 +102,32 @@ for (const room of ['smoke', 'e2ee-strict']) {
         // past the controller's warm-up, with the buffers settled
         await B.waitForTimeout(15_000);
         const r = await interval(B, 10);
-        console.log(`${room}: ${JSON.stringify(r)}`);
-
         expect(r, 'Bob receives a camera').not.toBeNull();
+        const {ask, ...figures} = r;
+        console.log(`${room}: ${JSON.stringify(figures)}`);
+
         expect(r.fps, 'frames are decoded').toBeGreaterThan(0);
+        // each figure is there and is a delay a buffer could hold: more
+        // than nothing, less than the ten seconds measured over
         for (const k of ['audioTarget', 'audioMinimum',
-                         'videoTarget', 'videoMinimum'])
+                         'videoTarget', 'videoMinimum', 'decode']) {
             expect(r[k], `${k} is reported`).not.toBeNull();
-        // the minimum ignores synchronisation, the target does not
-        expect(r.audioMinimum).toBeLessThanOrEqual(r.audioTarget + 1);
-        expect(r.videoMinimum).toBeLessThanOrEqual(r.videoTarget + 1);
+            expect(r[k], k).toBeGreaterThan(0);
+            expect(r[k], k).toBeLessThan(10_000);
+        }
         // decoding alone is part of the time from first packet to decoded
-        expect(r.decode).toBeGreaterThan(0);
         expect(r.decode).toBeLessThanOrEqual(r.processing);
 
-        // and the client hands them to the server with a cap it asks for
-        const asked = await B.evaluate(() => window.qualityReports
+        // what goes with a cap carries those figures themselves ...
+        for (const k of ['audioTarget', 'audioMinimum',
+                         'videoTarget', 'videoMinimum', 'decode'])
+            expect(ask[k], `${k} goes with a cap`).toBeGreaterThan(0);
+        // ... and the client sends what bitrate-control.js builds, field
+        // for field (the values are its unit tests' business)
+        const sent = await B.evaluate(() => window.qualityReports
             .filter(m => m.kind === 'ask').map(m => Object.keys(m.value)));
-        expect(asked.length, 'the start cap was asked for').toBeGreaterThan(0);
-        for (const k of ['audioTarget', 'audioMinimum', 'videoTarget',
-                         'videoMinimum', 'decode'])
-            expect(asked[0]).toContain(k);
+        expect(sent.length, 'the start cap was asked for').toBeGreaterThan(0);
+        expect([...sent[0]].sort()).toEqual(Object.keys(ask).sort());
 
         expect(A.errors).toEqual([]);
         expect(B.errors).toEqual([]);
