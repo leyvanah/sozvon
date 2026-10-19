@@ -33,6 +33,7 @@ val INSTALL_ERRORS: Map<String, Int> = mapOf(
     "service-failed" to R.string.install_error_service_failed,
     "rolled-back" to R.string.install_error_rolled_back,
     "not-answering" to R.string.install_error_not_answering,
+    "port-forward" to R.string.install_error_port_forward,
     "internal" to R.string.install_error_internal,
     "aborted" to R.string.install_error_aborted,
 )

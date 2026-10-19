@@ -37,6 +37,7 @@ ANDROID_APK=yes
 APK_INSTALLED=no
 UDP_PORT=8443
 HTTPS_PORT=443
+PUBLIC_PORT=
 DETACH=no
 UNINSTALL=no
 PURGE=no
@@ -82,6 +83,10 @@ Usage: $0 [option...]
   --admin-password-env  take the operator password from \$SOZVON_ADMIN_PASSWORD
   --port PORT           HTTPS port to listen on (default: $HTTPS_PORT).
                         Let's Encrypt only works on 443 -- see below.
+  --public-port PORT    HTTPS port the internet reaches this server at, when
+                        a router forwards it to a different --port here
+                        (default: the same as --port).  See "Behind a
+                        router" below.
   --udp-port PORT       UDP port for media (default: $UDP_PORT)
   --prefix DIR          install directory (default: $PREFIX)
   --detach              run in the background and print the state file path
@@ -106,6 +111,16 @@ TLS modes:
                       the Sozvon app can connect, by pinning the fingerprint
                       this script reports.
 
+Behind a router:
+  A home server with a public IPv4 address on its router, rather than on
+  the server itself, works too.  The script notices (the server's own
+  address is a private one), tells Sozvon the router's address, and lists
+  the ports to forward on the router -- which it cannot do for you.  The
+  Let's Encrypt modes need the router's 443 forwarded here; if 443 on this
+  machine is taken by another web server, listen elsewhere and forward to
+  that: --port 8444 --public-port 443.  A provider-side NAT (an address in
+  100.64.0.0/10 on the router) cannot be forwarded through at all.
+
 State and results are written to $STATE_DIR, the full log to $LOG.
 EOF
 }
@@ -126,6 +141,7 @@ while [ $# -gt 0 ]; do
 	--admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
 	--admin-password-env) ADMIN_PASSWORD="${SOZVON_ADMIN_PASSWORD:-}"; shift ;;
 	--port) HTTPS_PORT="$2"; shift 2 ;;
+	--public-port) PUBLIC_PORT="$2"; shift 2 ;;
 	--udp-port) UDP_PORT="$2"; shift 2 ;;
 	--prefix) PREFIX="$2"; shift 2 ;;
 	--detach) DETACH=yes; shift ;;
@@ -179,15 +195,23 @@ if [ "$TLS_MODE" = letsencrypt-domain ] && [ -z "$DOMAIN" ]; then
 	exit 2
 fi
 
+# What the internet connects to.  Without a router in between that is simply
+# the port we listen on; behind one it is whatever the router forwards here.
+PUBLIC_PORT=${PUBLIC_PORT:-$HTTPS_PORT}
+
 # Let's Encrypt validates over the standard ports; on anything else the
 # challenge cannot reach us and the certificate would never be issued.  Say so
-# now rather than after a five-minute install.
+# now rather than after a five-minute install.  It is the port the internet
+# sees that counts: a router forwarding its 443 to another port here still
+# gets the TLS-ALPN-01 challenge to us.
 case "$TLS_MODE" in
 letsencrypt-*)
-	if [ "$HTTPS_PORT" != 443 ]; then
-		echo "--tls $TLS_MODE needs --port 443: Let's Encrypt validates on" >&2
-		echo "443 (TLS-ALPN-01) or 80 (HTTP-01) and cannot reach port $HTTPS_PORT." >&2
-		echo "On a host where 443 is taken, use --tls self-signed instead." >&2
+	if [ "$PUBLIC_PORT" != 443 ]; then
+		echo "--tls $TLS_MODE needs the internet to reach this server on 443:" >&2
+		echo "Let's Encrypt validates on 443 (TLS-ALPN-01) or 80 (HTTP-01) and" >&2
+		echo "cannot reach port $PUBLIC_PORT.  Behind a router that forwards its 443" >&2
+		echo "to another port here, say so with --public-port 443.  Otherwise, on" >&2
+		echo "a host where 443 is taken, use --tls self-signed instead." >&2
 		exit 2
 	fi
 	;;
@@ -195,10 +219,10 @@ esac
 
 # URLs carry the port only when it is not the default, so the common case
 # stays a clean https://host/.
-if [ "$HTTPS_PORT" = 443 ]; then
+if [ "$PUBLIC_PORT" = 443 ]; then
 	PORT_SUFFIX=
 else
-	PORT_SUFFIX=":$HTTPS_PORT"
+	PORT_SUFFIX=":$PUBLIC_PORT"
 fi
 
 # ---------------------------------------------------------------- state ----
@@ -453,6 +477,26 @@ if [ -e /etc/systemd/system/sozvon.service ] || [ -L "$PREFIX/current" ]; then
 	UPGRADE=yes
 fi
 
+# Is there a router between us and the internet?  The address the kernel
+# would use to reach the internet says so without asking anybody: on a VPS
+# it is the public one, behind a router a private one.  A home server, and
+# the cloud providers that map a public address onto a private interface,
+# both land here -- and both need Sozvon told the outside address, and the
+# ports forwarded, or media never arrives.
+is_private() {
+	case "$1" in
+	10.*|127.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
+	esac
+	return 1
+}
+LAN_IP=$(ip route get 1.1.1.1 2>/dev/null |
+    sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1)
+BEHIND_NAT=no
+if is_private "$LAN_IP"; then
+	BEHIND_NAT=yes
+	echo "this server is behind a router (its own address is $LAN_IP)"
+fi
+
 # A port already in use is the most common reason a fresh install appears to
 # work and then silently does not, so say so now rather than at the verify
 # stage.  On an upgrade the listener on 443 is our own service, so the check
@@ -460,9 +504,15 @@ fi
 # it restarts the service and then actually asks it for /healthz.
 if [ "$UPGRADE" = no ]; then
 	# 80 matters only for the Let's Encrypt HTTP-01 challenge and the
-	# http->https redirect; a self-signed install never touches it.
+	# http->https redirect; a self-signed install never touches it.  Behind
+	# a router it does not matter here at all: what the internet reaches on
+	# 80 is up to the router, and TLS-ALPN-01 on the forwarded 443 is
+	# enough for a certificate.  A home server often has a web server of
+	# its own on 80 already.
 	ports="$HTTPS_PORT"
-	case "$TLS_MODE" in letsencrypt-*) ports="80 $HTTPS_PORT" ;; esac
+	case "$TLS_MODE" in
+	letsencrypt-*) [ "$BEHIND_NAT" = yes ] || ports="80 $HTTPS_PORT" ;;
+	esac
 	for port in $ports; do
 		if command -v ss >/dev/null 2>&1 &&
 		   ss -ltn "sport = :$port" 2>/dev/null | grep -q LISTEN; then
@@ -615,22 +665,22 @@ stage tls "working out the certificate"
 detect_ip() {
 	# An address supplied by the caller always wins.  A client that reached
 	# this server to run the installer knows an address that demonstrably
-	# works; guessing is only for when nobody told us.
-	if [ -n "$PUBLIC_IP" ]; then
+	# works; guessing is only for when nobody told us.  Except a private
+	# one: a client on the same LAN as a home server reached it at an
+	# address nobody outside can, and a certificate or a media address
+	# built on that would work for no one else.
+	if [ -n "$PUBLIC_IP" ] && ! is_private "$PUBLIC_IP"; then
 		printf '%s' "$PUBLIC_IP"
 		return 0
 	fi
 	# Prefer the address the kernel would use to reach the internet: on a
 	# normal VPS that is the public one, and it asks nobody.
-	_ip=$(ip route get 1.1.1.1 2>/dev/null |
-	    sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1)
-	case "$_ip" in
-	""|10.*|127.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+	_ip=$LAN_IP
+	if [ -z "$_ip" ] || is_private "$_ip"; then
 		# Behind NAT (or unknown): fall back to asking an outside
 		# service what it sees.
 		_ip=$(curl -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)
-		;;
-	esac
+	fi
 	printf '%s' "$_ip"
 }
 
@@ -683,6 +733,12 @@ self-signed)
 		# openssl rejects, so build the list from what we actually have.
 		SAN=
 		[ -n "$DOMAIN" ] && SAN="DNS:$DOMAIN"
+		# Behind a router the server is reached at two addresses: the
+		# public one from outside, its own from the same LAN.
+		if [ "$BEHIND_NAT" = yes ] && [ "$LAN_IP" != "$IP" ]; then
+			[ -n "$SAN" ] && SAN="$SAN,"
+			SAN="${SAN}IP:$LAN_IP"
+		fi
 		if [ -n "$IP" ]; then
 			[ -n "$SAN" ] && SAN="$SAN,"
 			# --ip may carry a name rather than an address (a caller
@@ -709,6 +765,26 @@ self-signed)
 	SOZVON_ARGS="-http :$HTTPS_PORT"
 	;;
 esac
+
+# Behind a router, Sozvon has to be told the address the internet reaches it
+# at: it offers peers the addresses it finds on its interfaces, and there it
+# finds only the private one.  Without this the page loads -- the router
+# forwards that -- but no call ever gets any media.
+NAT_IP=
+if [ "$BEHIND_NAT" = yes ]; then
+	case "$TLS_MODE" in
+	letsencrypt-domain) NAT_IP=${myip:-$resolved} ;;
+	*) NAT_IP=$IP ;;
+	esac
+	case "$NAT_IP" in
+	*[!0-9.]*|"")
+		fail public-ip-unknown "this server is behind a router and its public IP could not be determined; pass --ip" ;;
+	esac
+	is_private "$NAT_IP" &&
+	    fail public-ip-unknown "this server is behind a router and $NAT_IP is not a public IP; pass --ip"
+	SOZVON_ARGS="$SOZVON_ARGS -public-ip $NAT_IP"
+	echo "the internet reaches it at $NAT_IP"
+fi
 
 # --------------------------------------------------------------- config ----
 
@@ -829,6 +905,29 @@ else
 	echo "$UDP_PORT/udp are reachable if your provider filters ports"
 fi
 
+# Behind a router the same ports have to be forwarded to us, and that is the
+# router's configuration, not ours to change.  Work out the list once: it is
+# printed now, again at the end, and written to the result for a program
+# driving this script.  Each line is "public port/protocol -> where to".
+# 80 is listed only when this machine's web ports are ours to take: with
+# --port moved off 443, another web server here owns 80 as well, and the
+# certificate does without it (TLS-ALPN-01 on the forwarded 443).
+FORWARDS=
+if [ "$BEHIND_NAT" = yes ]; then
+	add_forward() { FORWARDS="$FORWARDS$1/$2 -> $LAN_IP:$3
+"; }
+	add_forward "$PUBLIC_PORT" tcp "$HTTPS_PORT"
+	add_forward "$UDP_PORT" udp "$UDP_PORT"
+	add_forward 1194 tcp 1194
+	add_forward 1194 udp 1194
+	[ -n "$turns_rule" ] && add_forward "$turns_rule" tcp "$turns_rule"
+	case "$TLS_MODE" in
+	letsencrypt-*) [ "$HTTPS_PORT" = 443 ] && add_forward 80 tcp 80 ;;
+	esac
+	echo "forward these ports on the router to this server:"
+	printf '%s' "$FORWARDS" | sed 's/^/  /'
+fi
+
 # -------------------------------------------------------------- service ----
 
 stage service "installing the systemd service"
@@ -914,17 +1013,44 @@ if [ "$ok" != yes ]; then
 		systemctl restart sozvon || true
 		fail rolled-back "the new version did not come up; rolled back to $(basename "$PREVIOUS")"
 	fi
+	# Behind a router, a Let's Encrypt install that is running and
+	# listening but will not complete a handshake has no certificate, and
+	# the usual reason is that the challenge never reached us: 443 is not
+	# forwarded yet.  Nothing is wrong with this machine, so say what to do
+	# on the router rather than that the server is dead.  Running the
+	# script again once the forwards are in place finishes the job.
+	case "$TLS_MODE" in
+	letsencrypt-*)
+		if [ "$BEHIND_NAT" = yes ] &&
+		   systemctl is-active --quiet sozvon &&
+		   ss -ltn "sport = :$HTTPS_PORT" 2>/dev/null | grep -q LISTEN; then
+			echo "forward these ports on the router to this server, then run this again:" >&2
+			printf '%s' "$FORWARDS" | sed 's/^/  /' >&2
+			fail port-forward "Sozvon is running, but Let's Encrypt could not reach it on $NAT_IP:443 -- forward the ports above on the router and re-run"
+		fi
+		;;
+	esac
 	fail not-answering "the server did not answer on $PROBE_URL"
 fi
 
 if [ "$TLS_MODE" != self-signed ]; then
 	# The local check above accepts any certificate (-k).  Confirm the real
 	# one was issued, so we do not report success on a name that browsers
-	# will reject.
+	# will reject.  Behind a router this goes out to the public address and
+	# back in through the router, so it also finds a missing forward -- or
+	# a router that will not loop its own address back to the LAN, which
+	# the internet does not mind but people at home will.
 	if ! curl -fsS --max-time 20 "https://$HOSTNAME$PORT_SUFFIX/healthz" >/dev/null 2>&1; then
 		echo "warning: https://$HOSTNAME$PORT_SUFFIX/healthz is not answering with a valid"
-		echo "         certificate yet.  Let's Encrypt may still be issuing it;"
-		echo "         check 'journalctl -u sozvon' in a minute."
+		if [ "$BEHIND_NAT" = yes ]; then
+			echo "         certificate from here.  Check the port forwards on the router;"
+			echo "         if they are in place, the router may not loop its public"
+			echo "         address back to the LAN (\"NAT loopback\" or \"hairpin\"), and"
+			echo "         people at home will not reach the server by its name."
+		else
+			echo "         certificate yet.  Let's Encrypt may still be issuing it;"
+			echo "         check 'journalctl -u sozvon' in a minute."
+		fi
 	fi
 fi
 
@@ -943,6 +1069,14 @@ else
 	HUB_JSON=false
 fi
 
+# The forwards as a JSON array of the same lines, empty when no router is in
+# the way.
+FORWARDS_JSON=$(printf '%s' "$FORWARDS" | while IFS= read -r f; do
+	printf '"%s",' "$(json_escape "$f")"
+done)
+FORWARDS_JSON="[${FORWARDS_JSON%,}]"
+if [ "$BEHIND_NAT" = yes ]; then BEHIND_NAT_JSON=true; else BEHIND_NAT_JSON=false; fi
+
 cat > "$STATE_DIR/result.json" <<EOF
 {
   "schema": 1,
@@ -956,7 +1090,11 @@ cat > "$STATE_DIR/result.json" <<EOF
   "tls_mode": "$(json_escape "$TLS_MODE")",
   "cert_sha256": "$(json_escape "$CERT_FINGERPRINT")",
   "version": "$(json_escape "$VERSION")",
-  "prefix": "$(json_escape "$PREFIX")"
+  "prefix": "$(json_escape "$PREFIX")",
+  "behind_nat": $BEHIND_NAT_JSON,
+  "public_ip": "$(json_escape "$NAT_IP")",
+  "lan_ip": "$(json_escape "$LAN_IP")",
+  "forwards": $FORWARDS_JSON
 }
 EOF
 chmod 600 "$STATE_DIR/result.json"
@@ -1029,6 +1167,18 @@ it.  Connect with the Sozvon app and pin this fingerprint:
 
   SHA-256: $CERT_FINGERPRINT
 EOF
+fi
+
+if [ "$BEHIND_NAT" = yes ]; then
+	cat <<EOF
+
+This server is behind a router: the internet reaches it at $NAT_IP, and
+the router passes that on to $LAN_IP.  These ports must stay forwarded on
+the router, or calls from outside will load the page and then get no sound
+or picture:
+
+EOF
+	printf '%s' "$FORWARDS" | sed 's/^/  /'
 fi
 
 echo

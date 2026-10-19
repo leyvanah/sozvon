@@ -95,6 +95,7 @@
     <string name="install_error_service_failed">Sozvon is installed, but its service did not start. Details are in the log below.</string>
     <string name="install_error_rolled_back">The new version did not start, so the server went back to the previous one. It works as before.</string>
     <string name="install_error_not_answering">Sozvon is installed but does not answer. Most often Let\'s Encrypt did not issue a certificate: check that ports 80 and 443 are open from outside and that your domain points at this server.</string>
+    <string name="install_error_port_forward">Sozvon is installed and running, but the server is behind a router and cannot be reached from outside: the ports are not forwarded on the router. Forward the ports listed below to this server and run the install again.</string>
     <string name="install_error_internal">The installer hit an internal error. Send us the text below; it will help us find out why.</string>
     <string name="install_error_aborted">The install stopped unexpectedly. Details are in the log below; you can try again.</string>
     <string name="deploy_done_title">Your server is ready</string>
