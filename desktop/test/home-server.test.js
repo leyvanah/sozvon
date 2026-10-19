@@ -91,3 +91,133 @@ test('the result lists the forwards the same way the state does', () => {
   const result = installer.slice(installer.indexOf('result.json" <<EOF'));
   assert.match(result, /"forwards": \$\(forwards_json\)/);
 });
+
+// ------------------------------------------------------------- the app ---
+
+const HomeServer = require('../src/renderer/home-server.js');
+const { Deployer, originOf } = require('../src/deploy/deployer');
+
+/** result.json as install.sh writes it for a home server. */
+const NAT_RESULT = {
+  schema: 1,
+  url: 'https://203-0-113-7.sslip.io/',
+  origin: 'https://203-0-113-7.sslip.io',
+  hostname: '203-0-113-7.sslip.io',
+  group: 'meet', hub: true,
+  admin_user: 'operator', admin_password: 'pw',
+  tls_mode: 'letsencrypt-sslip', cert_sha256: '', version: 'v0.4.0',
+  prefix: '/opt/sozvon',
+  behind_nat: true,
+  public_ip: '203.0.113.7',
+  lan_ip: '192.168.0.60',
+  forwards: [
+    '443/tcp -> 192.168.0.60:8444',
+    '8443/udp -> 192.168.0.60:8443',
+    '1194/tcp -> 192.168.0.60:1194',
+    '1194/udp -> 192.168.0.60:1194',
+    '5349/tcp -> 192.168.0.60:5349',
+  ],
+};
+
+test('a LAN address is recognised as a home server, by the installer\'s ranges', () => {
+  for (const a of ['192.168.0.60', '10.0.0.5', '172.16.0.1', '172.31.255.254', '127.0.0.1',
+    ' 192.168.1.2 '])
+    assert.ok(HomeServer.isPrivateIPv4(a), a);
+  for (const a of ['203.0.113.7', '172.15.0.1', '172.32.0.1', '100.64.0.1', '192.169.0.1',
+    '192.168.0.256', 'server.lan', 'meet.example.com', '', undefined, '::1', '192.168.0'])
+    assert.ok(!HomeServer.isPrivateIPv4(a), String(a));
+  // The same ranges as install.sh's is_private(): the app calls a server a
+  // home server exactly where the installer would.
+  const m = installer.match(/^is_private\(\) \{\n\tcase "\$1" in\n\t(.*?)\) return 0/m);
+  assert.ok(m, 'install.sh has no is_private()');
+  assert.strictEqual(m[1],
+    '10.*|127.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*');
+});
+
+test('a forward line becomes a table row', () => {
+  assert.deepStrictEqual(HomeServer.parseForward('443/tcp -> 192.168.0.60:8444'), {
+    port: 443, proto: 'tcp', toHost: '192.168.0.60', toPort: 8444,
+    line: '443/tcp -> 192.168.0.60:8444',
+  });
+  assert.strictEqual(HomeServer.parseForward('  8443/udp -> 10.0.0.2:8443 ').proto, 'udp');
+  // Anything else is left out rather than shown half parsed.
+  for (const bad of ['', 'forward these ports', '443/sctp -> 1.2.3.4:443',
+    '443 -> 1.2.3.4:443', '443/tcp -> 1.2.3.4', null, 42])
+    assert.strictEqual(HomeServer.parseForward(bad), null, String(bad));
+  assert.deepStrictEqual(HomeServer.parseForwards(['junk', '80/tcp -> 1.2.3.4:80'])
+    .map((f) => f.port), [80]);
+  assert.deepStrictEqual(HomeServer.parseForwards(undefined), []);
+  assert.deepStrictEqual(HomeServer.parseForwards('443/tcp -> 1.2.3.4:443'), []);
+});
+
+test('a home server\'s result gives the router, the LAN address and the forwards', () => {
+  const h = HomeServer.homeServerOf(NAT_RESULT);
+  assert.strictEqual(h.behindNat, true);
+  assert.strictEqual(h.publicIp, '203.0.113.7');
+  assert.strictEqual(h.lanIp, '192.168.0.60');
+  assert.deepStrictEqual(h.forwards.map((f) => `${f.port}/${f.proto}`),
+    ['443/tcp', '8443/udp', '1194/tcp', '1194/udp', '5349/tcp']);
+  assert.strictEqual(h.forwards[0].toPort, 8444);
+  assert.match(HomeServer.forwardsText(h.forwards), /^443\/tcp → 192\.168\.0\.60:8444\n/);
+});
+
+test('a result with no router in it, or from an older installer, is not a home server', () => {
+  const vps = { ...NAT_RESULT, behind_nat: false, public_ip: '', lan_ip: '', forwards: [] };
+  assert.deepStrictEqual(HomeServer.homeServerOf(vps),
+    { behindNat: false, publicIp: '', lanIp: '', forwards: [] });
+  const old = { url: 'https://203-0-113-7.sslip.io/', hostname: '203-0-113-7.sslip.io' };
+  assert.strictEqual(HomeServer.homeServerOf(old).behindNat, false);
+  assert.strictEqual(HomeServer.homeServerOf(null).behindNat, false);
+  // A state file carries the forwards but not behind_nat: forwards alone
+  // mean a router.
+  assert.strictEqual(HomeServer.homeServerOf({ forwards: NAT_RESULT.forwards }).behindNat, true);
+});
+
+test('the server saved is the router\'s public address, not the LAN one', () => {
+  const origin = originOf(NAT_RESULT);
+  assert.strictEqual(origin, 'https://203-0-113-7.sslip.io');
+  assert.ok(!origin.includes(NAT_RESULT.lan_ip));
+});
+
+test('"443 is taken here" listens elsewhere and has the router forward 443', () => {
+  assert.deepStrictEqual(HomeServer.portOptions('8444'), { httpsPort: 8444, publicPort: 443 });
+  assert.deepStrictEqual(HomeServer.portOptions(8444), { httpsPort: 8444, publicPort: 443 });
+  for (const bad of ['', '0', '443', '65536', 'abc', '84.5', undefined])
+    assert.strictEqual(HomeServer.portOptions(bad), null, String(bad));
+
+  const d = new Deployer({ host: '192.168.0.60' });
+  const args = d.buildArgs({ tlsMode: 'letsencrypt-sslip', port: 8444, publicPort: 443 });
+  assert.match(args, /'--port' '8444' '--public-port' '443'/);
+  assert.doesNotMatch(d.buildArgs({ tlsMode: 'self-signed' }), /--public-port/);
+});
+
+test('a port-forward failure hands on the forwards from the state file', async () => {
+  class Stub extends Deployer {
+    async readState() {
+      return { status: 'failed', stage: 'verify', code: 'port-forward',
+        error: 'Let\'s Encrypt did not issue its certificate',
+        forwards: NAT_RESULT.forwards };
+    }
+    async tail() { return 'the log'; }
+  }
+  const d = new Stub({ host: '192.168.0.60', onEvent() {} });
+  await assert.rejects(d.waitForCompletion({ intervalMs: 1 }), (e) => {
+    assert.strictEqual(e.reason, 'port-forward');
+    assert.deepStrictEqual(e.forwards, NAT_RESULT.forwards);
+    return true;
+  });
+});
+
+test('a failure from an installer that lists no forwards hands on none', async () => {
+  class Stub extends Deployer {
+    async readState() {
+      return { status: 'failed', stage: 'preflight', code: 'not-root', error: 'x' };
+    }
+    async tail() { return ''; }
+  }
+  const d = new Stub({ host: '203.0.113.7', onEvent() {} });
+  await assert.rejects(d.waitForCompletion({ intervalMs: 1 }), (e) => {
+    assert.deepStrictEqual(e.forwards, []);
+    return true;
+  });
+});
