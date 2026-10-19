@@ -176,6 +176,11 @@
     'done.open': 'Открыть пульт оператора',
     'done.open.room': 'Открыть комнату',
     'done.share.text': 'Приглашаю в звонок Sozvon: {url}',
+    'done.forwards': 'Порты на роутере',
+    'done.forwards.text': 'Сервер стоит за роутером: снаружи его видно по адресу {public}, а роутер передаёт подключения на {lan}. Эти порты должны оставаться проброшенными, иначе собеседники снаружи откроют страницу, но не услышат и не увидят друг друга.',
+    'done.forwards.port': 'Порт роутера',
+    'done.forwards.proto': 'Протокол',
+    'done.forwards.to': 'Куда передавать',
   };
 
   const en = {
@@ -339,6 +344,11 @@
     'done.open': 'Open the operator dashboard',
     'done.open.room': 'Open the room',
     'done.share.text': 'Join me on a Sozvon call: {url}',
+    'done.forwards': 'Ports on the router',
+    'done.forwards.text': 'The server is behind a router: the internet reaches it at {public}, and the router passes connections on to {lan}. These ports must stay forwarded, or people calling from outside will load the page and then get no sound or picture.',
+    'done.forwards.port': 'Router port',
+    'done.forwards.proto': 'Protocol',
+    'done.forwards.to': 'Forward to',
   };
 
   const tables = { ru, en };

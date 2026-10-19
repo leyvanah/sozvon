@@ -94,6 +94,24 @@ test('a deployed server is reached at the origin the installer reported', () => 
   assert.strictEqual(Flow.deployOrigin({ hostname: 'h.example' }), 'https://h.example');
 });
 
+test('a home server\'s forwards become table rows; a VPS has none', () => {
+  const r = {
+    behind_nat: true, public_ip: '203.0.113.7', lan_ip: '192.168.0.60',
+    forwards: ['443/tcp -> 192.168.0.60:8444', 'not a forward', '8443/udp -> 192.168.0.60:8443'],
+  };
+  assert.deepStrictEqual(Flow.forwardsOf(r), {
+    publicIp: '203.0.113.7', lanIp: '192.168.0.60',
+    rows: [
+      { port: 443, proto: 'tcp', to: '192.168.0.60:8444' },
+      { port: 8443, proto: 'udp', to: '192.168.0.60:8443' },
+    ],
+  });
+  assert.strictEqual(Flow.forwardsOf({ ...r, behind_nat: false }), null);
+  // An installer from before home servers reports nothing about a router.
+  assert.strictEqual(Flow.forwardsOf({ origin: 'https://h.example' }), null);
+  assert.deepStrictEqual(Flow.forwardsOf({ behind_nat: true }).rows, []);
+});
+
 test('a client room name is random and from the readable alphabet', () => {
   const a = Flow.randomSlug();
   const b = Flow.randomSlug();

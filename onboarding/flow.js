@@ -144,6 +144,27 @@
     return 'https://' + result.hostname;
   }
 
+  /**
+   * Behind a router, the ports it has to forward to the server the deploy
+   * wizard just installed, as table rows -- or null for a server with no
+   * router in the way.  The installer lists each as one line,
+   * "443/tcp -> 192.168.0.60:8444"; a line in any other shape is left out
+   * rather than shown half parsed.  The desktop's deploy page reads the same
+   * lines (desktop/src/renderer/home-server.js).
+   *
+   * @param {{behind_nat?: boolean, public_ip?: string, lan_ip?: string,
+   *          forwards?: string[]}} result
+   */
+  function forwardsOf(result) {
+    if (!result || !result.behind_nat) return null;
+    const rows = [];
+    for (const line of Array.isArray(result.forwards) ? result.forwards : []) {
+      const m = /^\s*(\d+)\/(tcp|udp)\s*->\s*([^\s:]+):(\d+)\s*$/.exec(String(line));
+      if (m) rows.push({ port: Number(m[1]), proto: m[2], to: m[3] + ':' + m[4] });
+    }
+    return { publicIp: String(result.public_ip || ''), lanIp: String(result.lan_ip || ''), rows };
+  }
+
   const SLUG_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';
 
   /**
@@ -248,7 +269,7 @@
   }
 
   return {
-    findAddress, parseInvite, parseServer, roomUrl, deployOrigin,
+    findAddress, parseInvite, parseServer, roomUrl, deployOrigin, forwardsOf,
     randomSlug, inviteUrl, PATHS, GUIDE, progress, visibleSteps, nextStep,
     shouldShow,
   };
