@@ -34,6 +34,7 @@ val INSTALL_ERRORS: Map<String, Int> = mapOf(
     "rolled-back" to R.string.install_error_rolled_back,
     "not-answering" to R.string.install_error_not_answering,
     "port-forward" to R.string.install_error_port_forward,
+    "certificate-rate-limited" to R.string.install_error_certificate_rate_limited,
     "internal" to R.string.install_error_internal,
     "aborted" to R.string.install_error_aborted,
 )

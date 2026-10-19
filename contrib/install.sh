@@ -367,6 +367,9 @@ if [ "$UNINSTALL" = yes ]; then
 			fail internal "refusing to purge $PREFIX" ;;
 		esac
 		rm -rf "$PREFIX"
+		# A password the last run never got to show belongs to the
+		# group just deleted.
+		rm -f "$STATE_DIR/unshown-password"
 		# The pre-rename tree, if this machine still has one: a purge that
 		# left it behind would keep the rooms and the operator's password
 		# on a machine whose owner asked for everything to be gone.
@@ -797,9 +800,20 @@ if [ -z "$ADMIN_PASSWORD" ]; then
 fi
 
 GROUP_FILE="$PREFIX/groups/$GROUP_NAME.json"
+# The password is shown once, at the end of a successful run, and the group
+# file keeps only its hash.  A run that creates the group and then fails --
+# behind a router, typically because the ports are not forwarded yet -- would
+# leave a password nobody has ever seen, and the run that follows, finding
+# the group already there, would have none to show.  So it waits here, root
+# only, until a run has reported it.
+UNSHOWN="$STATE_DIR/unshown-password"
 if [ -f "$GROUP_FILE" ]; then
 	echo "$GROUP_FILE already exists, keeping it"
 	ADMIN_PASSWORD=
+	if [ -s "$UNSHOWN" ]; then
+		ADMIN_PASSWORD=$(cat "$UNSHOWN")
+		echo "an earlier run created it and never got to show its password; it will be shown at the end"
+	fi
 	# What we report at the end depends on the shape of the group, so read
 	# it back rather than assuming the mode asked for on the command line:
 	# an upgrade must not tell the operator to open a hub that is not there.
@@ -814,6 +828,8 @@ else
 	# enough to log in.
 	HASHED=$("$DEST/galenectl" hash-password -password "$ADMIN_PASSWORD" 2>/dev/null) ||
 	    fail internal "could not hash the operator password"
+	(umask 077 && printf '%s' "$ADMIN_PASSWORD" > "$UNSHOWN") ||
+	    fail internal "could not write $UNSHOWN"
 
 	# Encryption is on unless it was turned off.  A server people install
 	# for themselves should not relay conversations it could just as well
@@ -975,7 +991,6 @@ systemctl restart sozvon || fail service-failed "could not start the service"
 stage verify "waiting for the server to answer"
 
 ok=no
-i=0
 # Ask for the server's real name, but pin that name to the loopback.
 #
 # Probing https://127.0.0.1 directly does not work in the Let's Encrypt
@@ -987,25 +1002,33 @@ i=0
 # needs no working DNS or return path through the provider's network, while
 # still presenting the name the certificate is for.
 PROBE_URL="https://$HOSTNAME:$HTTPS_PORT/healthz"
-# Let's Encrypt issuance can take a little while on first start.
-while [ $i -lt 60 ]; do
-	# shellcheck disable=SC2086
-	if curl -fsk --max-time 5 \
+# Let's Encrypt issuance can take a little while on first start, and while it
+# is under way the server holds every handshake until it has a certificate.
+# So a probe that times out (curl's 28) means "still issuing", not "stuck",
+# and is worth waiting for well past the usual two minutes: issuance behind a
+# router has been seen to take five.  The server's ACME client gives up on its
+# own after five minutes, and from then on refuses handshakes at once -- which
+# is what bounds this wait, not a guess of ours.
+start=$(date +%s)
+rc=0
+while :; do
+	rc=0
+	body=$(curl -fsk --max-time 5 \
 	    --resolve "$HOSTNAME:$HTTPS_PORT:127.0.0.1" \
-	    "$PROBE_URL" 2>/dev/null | grep -q ok; then
-		ok=yes
-		break
-	fi
+	    "$PROBE_URL" 2>/dev/null) || rc=$?
+	case "$body" in *ok*) ok=yes; break ;; esac
 	if ! systemctl is-active --quiet sozvon; then
 		break
 	fi
-	i=$((i + 1))
+	limit=120
+	case "$TLS_MODE" in letsencrypt-*) [ "$rc" = 28 ] && limit=400 ;; esac
+	[ $(($(date +%s) - start)) -lt $limit ] || break
 	sleep 2
 done
 
 if [ "$ok" != yes ]; then
 	echo "--- last 40 lines of the service log ---" >&2
-	journalctl -u sozvon -n 40 --no-pager 2>/dev/null >&2 || true
+	journalctl -u sozvon -n 40 --no-pager >&2 2>/dev/null || true
 	# An upgrade that does not come up goes back to what was working.
 	if [ -n "$PREVIOUS" ] && [ -d "$PREVIOUS" ] && [ "$PREVIOUS" != "$DEST" ]; then
 		echo "rolling back to $PREVIOUS" >&2
@@ -1013,20 +1036,40 @@ if [ "$ok" != yes ]; then
 		systemctl restart sozvon || true
 		fail rolled-back "the new version did not come up; rolled back to $(basename "$PREVIOUS")"
 	fi
-	# Behind a router, a Let's Encrypt install that is running and
-	# listening but will not complete a handshake has no certificate, and
-	# the usual reason is that the challenge never reached us: 443 is not
-	# forwarded yet.  Nothing is wrong with this machine, so say what to do
-	# on the router rather than that the server is dead.  Running the
-	# script again once the forwards are in place finishes the job.
+	# Let's Encrypt allows only a handful of failed validations per name
+	# an hour.  Every run made before the ports were forwarded spends two
+	# (TLS-ALPN-01, then HTTP-01), so the run made once they are can be the
+	# one that is turned away -- after waiting out the five minutes the
+	# server's ACME client spends hoping the limit lifts.  Telling that
+	# person to check the forwards again would send them looking for a
+	# fault that is not there; the server's log says what it really was,
+	# and until when.
 	case "$TLS_MODE" in
 	letsencrypt-*)
-		if [ "$BEHIND_NAT" = yes ] &&
+		limited=$(journalctl -u sozvon --since "@$start" --no-pager 2>/dev/null |
+		    grep rateLimited | tail -1)
+		if [ -n "$limited" ]; then
+			until=$(printf '%s' "$limited" |
+			    sed -n 's/.*retry after \([0-9: -]*UTC\).*/\1/p')
+			fail certificate-rate-limited "Let's Encrypt is refusing $HOSTNAME for now: too many failed attempts in the last hour.  Run this again after ${until:-an hour}"
+		fi
+		;;
+	esac
+	# Behind a router, a Let's Encrypt install that is running, listening,
+	# and refusing handshakes outright -- not holding them, which is
+	# issuance still under way -- has been turned down for a certificate,
+	# and the usual reason is that the challenge never reached us: 443 is
+	# not forwarded yet.  Nothing is wrong with this machine, so say what
+	# to do on the router rather than that the server is dead.  Running
+	# the script again once the forwards are in place finishes the job.
+	case "$TLS_MODE" in
+	letsencrypt-*)
+		if [ "$BEHIND_NAT" = yes ] && [ "$rc" != 28 ] &&
 		   systemctl is-active --quiet sozvon &&
 		   ss -ltn "sport = :$HTTPS_PORT" 2>/dev/null | grep -q LISTEN; then
 			echo "forward these ports on the router to this server, then run this again:" >&2
 			printf '%s' "$FORWARDS" | sed 's/^/  /' >&2
-			fail port-forward "Sozvon is running, but Let's Encrypt could not reach it on $NAT_IP:443 -- forward the ports above on the router and re-run"
+			fail port-forward "Sozvon is running, but Let's Encrypt did not issue its certificate; behind a router that usually means $NAT_IP:443 is not forwarded here -- check the forwards above and re-run"
 		fi
 		;;
 	esac
@@ -1098,6 +1141,9 @@ cat > "$STATE_DIR/result.json" <<EOF
 }
 EOF
 chmod 600 "$STATE_DIR/result.json"
+
+# Reported now: in result.json for a program, and below for a person.
+rm -f "$UNSHOWN"
 
 write_state done "installed $VERSION"
 FINISHED=yes

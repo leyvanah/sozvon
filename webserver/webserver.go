@@ -115,8 +115,9 @@ func Serve(address string, dataDir string) error {
 		}
 		if _, port, err := net.SplitHostPort(address); err == nil &&
 			port != "443" {
-			log.Printf("Note: -letsencrypt usually needs -http :443 so the "+
-				"ACME TLS-ALPN-01 challenge is reachable (got port %v)",
+			log.Printf("Note: -letsencrypt needs the internet to reach "+
+				"port %v on 443 for the ACME TLS-ALPN-01 challenge: "+
+				"listen on :443, or have a router forward its 443 here",
 				port)
 		}
 		challengeServer = &http.Server{
