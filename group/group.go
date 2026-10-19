@@ -580,6 +580,13 @@ func APIFromCodecs(codecs []webrtc.RTPCodecParameters) (*webrtc.API, error) {
 	if !UseMDNS {
 		s.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 	}
+	if PublicIP != nil {
+		// Sozvon: behind NAT (publicip.go).
+		err := s.SetICEAddressRewriteRules(publicIPRule())
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	m := webrtc.MediaEngine{}
 

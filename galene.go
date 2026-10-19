@@ -50,7 +50,7 @@ func buildVersion() string {
 
 func main() {
 	var cpuprofile, memprofile, mutexprofile, httpAddr string
-	var udpRange, trustedProxies string
+	var udpRange, trustedProxies, publicIP string
 	var showVersion bool
 
 	flag.StringVar(&httpAddr, "http", ":8443", "web server `address`")
@@ -86,6 +86,9 @@ func main() {
 	flag.StringVar(&turnserver.TLSAddress, "turn-tls", "",
 		"offer TURN over TLS at `hostname`[:port], "+
 			"using the web server's certificate (default port 5349)")
+	flag.StringVar(&publicIP, "public-ip", "",
+		"public IPv4 `address` the server is reached at when it is behind "+
+			"a router that forwards ports to it")
 	flag.StringVar(&trustedProxies, "trusted-proxy", "",
 		"comma-separated `addresses` or CIDR prefixes of reverse "+
 			"proxies whose X-Forwarded-For header is trusted")
@@ -107,6 +110,15 @@ func main() {
 	}
 
 	log.Printf("Sozvon %v starting", buildVersion())
+
+	if publicIP != "" {
+		ip, err := group.ParsePublicIP(publicIP)
+		if err != nil {
+			log.Fatalf("public-ip: %v", err)
+		}
+		group.PublicIP = ip
+		turnserver.PublicIP = ip
+	}
 
 	if udpRange != "" {
 		if strings.ContainsRune(udpRange, '-') {

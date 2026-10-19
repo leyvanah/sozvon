@@ -251,3 +251,68 @@ func TestTLSListenerNoCertificate(t *testing.T) {
 		t.Errorf("tls.Dial: succeeded with no certificate")
 	}
 }
+
+// TestPublicIP runs the server the way a home server behind a router does:
+// no public address on any interface, the public one given with
+// -public-ip.  It must listen on every interface -- the router forwards to
+// the LAN address -- and tell clients, and the relays it allocates, the
+// public one; the interfaces alone would offer nothing at all.
+func TestPublicIP(t *testing.T) {
+	oldAddress, oldTLS, oldPublic := Address, TLSAddress, PublicIP
+	t.Cleanup(func() {
+		Stop()
+		Address, TLSAddress, PublicIP = oldAddress, oldTLS, oldPublic
+	})
+
+	port := freePort(t)
+	Address = ":" + strconv.Itoa(port)
+	TLSAddress = ""
+	PublicIP = net.IPv4(203, 0, 113, 7).To4()
+
+	err := Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	servers := ICEServers()
+	if len(servers) != 1 {
+		t.Fatalf("ICEServers: got %v", servers)
+	}
+	public := "203.0.113.7:" + strconv.Itoa(port)
+	expect := []string{"turn:" + public, "turn:" + public + "?transport=tcp"}
+	if strings.Join(servers[0].URLs, " ") != strings.Join(expect, " ") {
+		t.Errorf("ICEServers: got %v, expected %v",
+			servers[0].URLs, expect)
+	}
+
+	conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	client, err := turn.NewClient(&turn.ClientConfig{
+		TURNServerAddr: net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
+		Username:       servers[0].Username,
+		Password:       servers[0].Credential.(string),
+		Realm:          "galene.org",
+		Conn:           conn,
+	})
+	if err != nil {
+		t.Fatalf("turn.NewClient: %v", err)
+	}
+	defer client.Close()
+	if err := client.Listen(); err != nil {
+		t.Fatalf("client.Listen: %v", err)
+	}
+	relayed, err := client.Allocate()
+	if err != nil {
+		t.Fatalf("client.Allocate: %v", err)
+	}
+	defer relayed.Close()
+
+	a, ok := relayed.LocalAddr().(*net.UDPAddr)
+	if !ok || !a.IP.Equal(PublicIP) {
+		t.Errorf("relayed address %v, expected one on %v",
+			relayed.LocalAddr(), PublicIP)
+	}
+}
