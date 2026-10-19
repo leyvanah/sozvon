@@ -44,6 +44,14 @@ object ServerStore {
         /** null means the installer's default, 443. */
         val httpsPort: Int? = null,
         val mirror: String = "",
+        /**
+         * The address SSH reached the server at, when it is not the one the
+         * server is used at.  Behind a router that is a LAN address, and the
+         * server's public name leads to the router, not to its SSH.
+         */
+        val sshHost: String = "",
+        /** The port the router forwards to [httpsPort]; null for none. */
+        val publicPort: Int? = null,
     )
 
     /**
@@ -103,6 +111,8 @@ object ServerStore {
             group = o.optString("group", "meet"),
             httpsPort = if (o.has("httpsPort")) o.optInt("httpsPort") else null,
             mirror = o.optString("mirror"),
+            sshHost = o.optString("sshHost"),
+            publicPort = if (o.has("publicPort")) o.optInt("publicPort") else null,
         )
     }
 
@@ -118,7 +128,9 @@ object ServerStore {
                     .put("domain", d.domain)
                     .put("group", d.group)
                     .apply { d.httpsPort?.let { put("httpsPort", it) } }
-                    .put("mirror", d.mirror))
+                    .put("mirror", d.mirror)
+                    .put("sshHost", d.sshHost)
+                    .apply { d.publicPort?.let { put("publicPort", it) } })
             }
             array.put(o)
         }

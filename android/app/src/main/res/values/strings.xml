@@ -159,4 +159,18 @@
         <item>password</item>
         <item>key</item>
     </string-array>
+    <!-- A home server behind a router (Sozvon) -->
+    <string name="home_title">This is a home server</string>
+    <string name="home_text">An address from your local network means the server sits behind a router. For people outside to reach it, two things are needed:\n\n• the router must have a public IPv4 address of its own. An address in 100.64.0.0/10, or any other shared address from your provider, will not do: ports cannot be forwarded through it.\n• a few ports must be forwarded on the router to this server. The app lists them after the install.</string>
+    <string name="home_port_taken">Port 443 on this server is already taken, by another web server for instance</string>
+    <string name="home_local_port_label">Sozvon\'s port on the server</string>
+    <string name="home_local_port_hint">The router takes connections on its own port 443 and passes them on to this one. The address needs no port number, and Let\'s Encrypt issues the certificate as usual.</string>
+    <string name="home_forwards_title">Ports on the router</string>
+    <string name="home_forwards_text">The server is behind a router: the internet reaches it at %1$s, and the router passes connections on to %2$s. These ports must stay forwarded, or people calling from outside will load the page and then get no sound or picture.</string>
+    <string name="home_forwards_needed">Forward these ports on the router</string>
+    <string name="home_rerun_hint">Once they are forwarded, run the install again: it finishes what it started and shows the operator password.</string>
+    <string name="home_rerun">Run again</string>
+    <string name="home_col_port">Router port</string>
+    <string name="home_col_proto">Protocol</string>
+    <string name="home_col_to">Forward to</string>
 </resources>

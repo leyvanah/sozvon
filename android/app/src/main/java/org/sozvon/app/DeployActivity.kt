@@ -8,7 +8,9 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.PersistableBundle
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -18,11 +20,14 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.Spinner
+import android.widget.TableLayout
+import android.widget.TableRow
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 import org.sozvon.app.deploy.CertPins
+import org.sozvon.app.deploy.HomeServer
 import org.sozvon.app.deploy.INSTALL_ERRORS
 import org.sozvon.app.deploy.SshDeployer
 import java.util.concurrent.CountDownLatch
@@ -84,6 +89,9 @@ class DeployActivity : AppCompatActivity() {
     private var worker: Thread? = null
     private var result: JSONObject? = null
 
+    /** The install just tried, again, for "Run again" after a port-forward stop. */
+    private var rerun: (() -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         Theming.applyStored(this)
         super.onCreate(savedInstanceState)
@@ -138,6 +146,16 @@ class DeployActivity : AppCompatActivity() {
         wireReveal(R.id.ssh_password, R.id.ssh_password_reveal)
         wireReveal(R.id.ssh_passphrase, R.id.ssh_passphrase_reveal)
 
+        // A LAN address is a home server behind a router.  The notice says
+        // what the router needs before anything is installed; the forwards
+        // themselves come from the installer, which is the one that knows.
+        findViewById<EditText>(R.id.ssh_host).addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) = syncHome()
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+        })
+        findViewById<CheckBox>(R.id.port_taken).setOnCheckedChangeListener { _, _ -> syncHome() }
+
         // The bundled-release choice only exists if this build has one to
         // offer.  Showing an unchecked, unusable box would be worse than
         // showing nothing: it would suggest the app could do something it
@@ -158,10 +176,12 @@ class DeployActivity : AppCompatActivity() {
         }
         applyMode()
         prefillFromLastDeploy()
+        syncHome()
 
         findViewById<Button>(R.id.deploy_go).setOnClickListener { start() }
         findViewById<Button>(R.id.deploy_back).setOnClickListener { finish() }
         findViewById<Button>(R.id.deploy_retry).setOnClickListener { show(viewForm) }
+        findViewById<Button>(R.id.deploy_rerun).setOnClickListener { rerun?.invoke() }
         findViewById<Button>(R.id.deploy_open).setOnClickListener { openInstalled() }
 
         show(viewForm)
@@ -236,6 +256,11 @@ class DeployActivity : AppCompatActivity() {
         findViewById<EditText>(R.id.room_name).setText(d.group)
         findViewById<EditText>(R.id.https_port).setText(d.httpsPort?.toString() ?: "")
         findViewById<EditText>(R.id.mirror_url).setText(d.mirror)
+        // A home server whose router forwards its 443 to another port here.
+        if (d.publicPort != null && d.httpsPort != null) {
+            findViewById<CheckBox>(R.id.port_taken).isChecked = true
+            findViewById<EditText>(R.id.local_port).setText(d.httpsPort.toString())
+        }
 
         // Say that the fields describe this server, not a new one: otherwise
         // they look like defaults and editing one looks harmless.
@@ -269,6 +294,27 @@ class DeployActivity : AppCompatActivity() {
             button.contentDescription =
                 getString(if (hidden) R.string.password_hide else R.string.password_show)
         }
+    }
+
+    /** The home-server notice, for a LAN address; not when only removing. */
+    private fun syncHome() {
+        val home = mode != MODE_REMOVE && HomeServer.isPrivateIPv4(text(R.id.ssh_host))
+        findViewById<View>(R.id.home_box).visibility = if (home) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.local_port_row).visibility =
+            if (findViewById<CheckBox>(R.id.port_taken).isChecked) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * "443 is taken here": listen on another port, and the router forwards
+     * its own 443 there -- only offered for a home server, where there is a
+     * router to do that.  Null when it does not apply; a port of 0 when it
+     * does but the one typed cannot be used.
+     */
+    private fun homeLocalPort(): Int? {
+        if (findViewById<View>(R.id.home_box).visibility != View.VISIBLE) return null
+        if (!findViewById<CheckBox>(R.id.port_taken).isChecked) return null
+        val p = text(R.id.local_port).toIntOrNull() ?: return 0
+        return if (p in 1..65535 && p != 443) p else 0
     }
 
     private fun show(v: View) {
@@ -334,6 +380,10 @@ class DeployActivity : AppCompatActivity() {
             findViewById<EditText>(R.id.ssh_domain).requestFocus()
             return
         }
+        if (homeLocalPort() == 0) {
+            findViewById<EditText>(R.id.local_port).requestFocus()
+            return
+        }
         if (mode == MODE_CLEAN) {
             AlertDialog.Builder(this)
                 .setTitle(R.string.clean_title)
@@ -358,7 +408,7 @@ class DeployActivity : AppCompatActivity() {
                 .setMessage(getString(
                     R.string.reinstall_confirm, host, tlsLabel,
                     text(R.id.room_name).ifEmpty { "meet" },
-                    text(R.id.https_port).ifEmpty { "443" }))
+                    homeLocalPort()?.toString() ?: text(R.id.https_port).ifEmpty { "443" }))
                 .setPositiveButton(R.string.reinstall_go) { _, _ ->
                     runInstall(host, port, user, password, usingKey, keyText,
                         tlsMode, domain, wipeFirst = false)
@@ -384,7 +434,11 @@ class DeployActivity : AppCompatActivity() {
         tlsMode: String, domain: String, wipeFirst: Boolean,
     ) {
         val group = text(R.id.room_name).ifEmpty { "meet" }
-        val httpsPort = text(R.id.https_port).toIntOrNull()
+        // A home server whose 443 is taken listens elsewhere, and the router
+        // forwards its 443 there (--port N --public-port 443).
+        val homePort = homeLocalPort()
+        val httpsPort = homePort ?: text(R.id.https_port).toIntOrNull()
+        val publicPort = if (homePort != null) 443 else null
         val mirror = text(R.id.mirror_url)
         // Unchecked means "fetch the current release from GitHub instead",
         // which is what the installer does on its own.  The box is hidden
@@ -398,7 +452,16 @@ class DeployActivity : AppCompatActivity() {
             group = group,
             httpsPort = httpsPort,
             mirror = mirror,
+            sshHost = host,
+            publicPort = publicPort,
         )
+        // The same install again, for "Run again" once the router's forwards
+        // are in place.  Never wiping first a second time: that would delete
+        // the operator password the first run kept back for this one.
+        rerun = {
+            runInstall(host, port, user, password, usingKey, keyText,
+                tlsMode, domain, wipeFirst = false)
+        }
 
         buildSteps()
         findViewById<TextView>(R.id.progress_sub).setText(R.string.deploy_connecting)
@@ -430,6 +493,7 @@ class DeployActivity : AppCompatActivity() {
                         group = group,
                         adminUser = "operator",
                         httpsPort = httpsPort,
+                        publicPort = publicPort,
                         mirror = mirror.ifEmpty { null },
                         useBundled = useBundled,
                     ),
@@ -437,7 +501,7 @@ class DeployActivity : AppCompatActivity() {
                 ) { progress -> runOnUiThread { onProgress(progress) } }
                 runOnUiThread { onSuccess(res) }
             } catch (e: SshDeployer.DeployException) {
-                runOnUiThread { onFailure(e.message, e.detail, e.reason) }
+                runOnUiThread { onFailure(e.message, e.detail, e.reason, e.forwards) }
             } catch (e: Exception) {
                 runOnUiThread { onFailure(e.message, null) }
             } finally {
@@ -719,6 +783,20 @@ class DeployActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.result_fingerprint).text =
                 "SHA-256: " + res.optString("cert_sha256")
         }
+        // Behind a router the install is only half the job: the forwards stay
+        // the operator's to keep, or calls from outside load the page and then
+        // get no sound or picture.  The address above is already the public
+        // one -- the installer reports the router's, not the LAN's.
+        val home = HomeServer.behindNat(res)
+        findViewById<View>(R.id.result_home).visibility = if (home) View.VISIBLE else View.GONE
+        if (home) {
+            findViewById<TextView>(R.id.result_home_text).text = getString(
+                R.string.home_forwards_text,
+                res.optString("public_ip").ifEmpty { "—" },
+                res.optString("lan_ip").ifEmpty { "—" })
+            fillForwards(findViewById(R.id.result_forwards),
+                HomeServer.parseForwards(res.optJSONArray("forwards")))
+        }
         // Remember how this server was installed, so reinstalling it later
         // offers what it actually runs rather than the defaults for a new
         // machine.  Keyed by the origin, which is what the server list holds.
@@ -740,7 +818,45 @@ class DeployActivity : AppCompatActivity() {
         show(viewDone)
     }
 
-    private fun onFailure(message: String?, detail: String?, reason: String? = null) {
+    /** The router's forwards as rows: its port, the protocol, and the target. */
+    private fun fillForwards(table: TableLayout, forwards: List<HomeServer.Forward>) {
+        table.removeAllViews()
+        fun cell(text: String, head: Boolean) = TextView(this).apply {
+            this.text = text
+            textSize = if (head) 11f else 14f
+            setTextColor(getColor(if (head) R.color.sozvon_text3 else R.color.sozvon_text))
+            if (!head) typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(0, 8, 24, 8)
+        }
+        fun row(cells: List<String>, head: Boolean) = TableRow(this).apply {
+            for (c in cells) addView(cell(c, head))
+        }
+        table.addView(row(listOf(
+            getString(R.string.home_col_port),
+            getString(R.string.home_col_proto),
+            getString(R.string.home_col_to)), true))
+        for (f in forwards) {
+            table.addView(row(listOf(
+                f.port.toString(), f.proto.uppercase(), "${f.toHost}:${f.toPort}"), false))
+        }
+    }
+
+    private fun onFailure(
+        message: String?, detail: String?, reason: String? = null,
+        forwards: List<String> = emptyList(),
+    ) {
+        // Stopped for want of the router's forwards: the list is the one thing
+        // to act on, and running the install again is one tap -- the installer
+        // finishes what this run started and shows the operator password it
+        // kept back.  A rate-limited certificate is the same situation an
+        // hour later.
+        val homeFailure = reason == "port-forward" || reason == "certificate-rate-limited"
+        val rows = forwards.mapNotNull { HomeServer.parseForward(it) }
+        findViewById<View>(R.id.error_home).visibility =
+            if (homeFailure && rows.isNotEmpty()) View.VISIBLE else View.GONE
+        if (homeFailure && rows.isNotEmpty()) fillForwards(findViewById(R.id.error_forwards), rows)
+        findViewById<View>(R.id.deploy_rerun).visibility =
+            if (homeFailure && rerun != null) View.VISIBLE else View.GONE
         // What the installer itself said stays, below, for a bug report.
         val text = reason?.let { INSTALL_ERRORS[it] }?.let { getString(it) }
         findViewById<TextView>(R.id.error_message).text =
