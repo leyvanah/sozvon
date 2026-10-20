@@ -132,6 +132,34 @@ Certificates are the one decision you may want to make yourself, with
 | `letsencrypt-domain` | Uses a name you point at the server yourself (`--domain meet.example.com`) | You own a domain; the most self-contained option |
 | `self-signed` | Generates a certificate locally, and reports its fingerprint | No DNS, or no reachable certificate authority. Browsers refuse it — only the Sozvon app can connect, by pinning that fingerprint |
 
+### On a home server
+
+A machine at home works too, if your router has a public IPv4 address (not
+one from your provider's own NAT, `100.64.0.0/10`). The script notices that it
+is behind a router, tells Sozvon the router's public address, and lists the
+ports to forward to the server — that part is the router's configuration, and
+you do it there:
+
+| On the router | To the server | For |
+|---|---|---|
+| 443/tcp | `--port` (443 by default) | the web page, and Let's Encrypt |
+| 8443/udp | 8443/udp | sound and video |
+| 1194/tcp+udp | 1194 | the relay, for callers whose network blocks UDP |
+| 5349/tcp | 5349 | the same relay over TLS |
+
+If 443 on the server is already taken by another web server, let Sozvon
+listen elsewhere and forward the router's 443 there:
+
+```sh
+sudo sh install.sh --port 8444 --public-port 443
+```
+
+You can install first and forward afterwards: the script then stops with the
+list of ports, and running it again once they are forwarded finishes the job
+and shows the operator password then. People on your own network reach the
+server by the same address, through the router; most routers loop that back
+by themselves ("NAT loopback"), and the script warns when yours does not.
+
 `sh install.sh --help` lists the rest (mirror URL for when GitHub is
 blocked, group and operator names, ports, uninstall).
 

@@ -38,6 +38,14 @@ var TLSAddress string
 // (Sozvon)
 var Certificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
+// PublicIP is the address the internet reaches this server at when it is
+// on none of its interfaces (see group.PublicIP).  An "auto" or
+// unspecified-address server then listens on every interface and hands
+// out this address, both as its own and for the relays it allocates,
+// instead of looking for a public address among the interfaces and
+// finding none.  (Sozvon)
+var PublicIP net.IP
+
 // tlsAddr is the address of the TLS listener.  It is a type of its own so
 // that ICEServers can tell it apart from a cleartext TCP listener and
 // advertise a turns: URL, and it carries a hostname rather than an IP
@@ -253,8 +261,12 @@ func Start() error {
 			return err
 		}
 
-		if addr.IP != nil && !addr.IP.IsUnspecified() {
-			a := addr.IP.To4()
+		ip := addr.IP
+		if (ip == nil || ip.IsUnspecified()) && PublicIP != nil {
+			ip = PublicIP
+		}
+		if ip != nil && !ip.IsUnspecified() {
+			a := ip.To4()
 			if a == nil {
 				return errors.New("couldn't parse address")
 			}
@@ -349,6 +361,20 @@ func Start() error {
 	// was created with rather than whichever pair is current.
 	// (Sozvon)
 	user, pass := username, password
+
+	// Every listener, cleartext and TLS alike, relays only where
+	// peers.go allows.  (Sozvon)
+	for i := range pccs {
+		pccs[i].RelayAddressGenerator =
+			filteredRelay{pccs[i].RelayAddressGenerator}
+		pccs[i].PermissionHandler = permitPeer
+	}
+	for i := range lcs {
+		lcs[i].RelayAddressGenerator =
+			filteredRelay{lcs[i].RelayAddressGenerator}
+		lcs[i].PermissionHandler = permitPeer
+	}
+
 	server.server, err = turn.NewServer(turn.ServerConfig{
 		Realm: "galene.org",
 		AuthHandler: func(ra *turn.RequestAttributes) (string, []byte, bool) {

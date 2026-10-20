@@ -252,6 +252,21 @@ Galene has some support for running behind NAT without a helpful server,
 but this has not been exhaustively tested.  Please see the section
 "Connectivity issues and ICE servers" below.
 
+> **Sozvon:** a server behind a router that forwards ports to it -- a home
+> server, or a cloud machine whose public address is mapped onto a private
+> interface -- works without a separate host.  Forward the HTTPS port, a
+> single media port and the TURN port to the server, and tell Sozvon the
+> public address:
+>
+>     sozvon -http :443 -udp-range 8443 -public-ip 203.0.113.7
+>
+> Every local candidate is then advertised a second time under the public
+> address, on the same port, so the media port must be a single
+> multiplexed one that the router forwards as is.  The built-in TURN server
+> (`-turn auto`, port 1194) listens on every interface and hands out the
+> public address too.  `contrib/install.sh` notices the router and does all
+> of this itself; see the README.
+
 ### Running behind a reverse proxy
 
 Galene is designed to be directly exposed to the Internet.  In order to
