@@ -361,6 +361,20 @@ func Start() error {
 	// was created with rather than whichever pair is current.
 	// (Sozvon)
 	user, pass := username, password
+
+	// Every listener, cleartext and TLS alike, relays only where
+	// peers.go allows.  (Sozvon)
+	for i := range pccs {
+		pccs[i].RelayAddressGenerator =
+			filteredRelay{pccs[i].RelayAddressGenerator}
+		pccs[i].PermissionHandler = permitPeer
+	}
+	for i := range lcs {
+		lcs[i].RelayAddressGenerator =
+			filteredRelay{lcs[i].RelayAddressGenerator}
+		lcs[i].PermissionHandler = permitPeer
+	}
+
 	server.server, err = turn.NewServer(turn.ServerConfig{
 		Realm: "galene.org",
 		AuthHandler: func(ra *turn.RequestAttributes) (string, []byte, bool) {

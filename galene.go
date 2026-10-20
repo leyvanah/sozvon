@@ -132,6 +132,8 @@ func main() {
 			}
 			group.UDPMin = min
 			group.UDPMax = max
+			// Sozvon: the only ports the relay may send to here.
+			turnserver.MediaPortMin, turnserver.MediaPortMax = min, max
 		} else {
 			port, err := strconv.Atoi(udpRange)
 			if err != nil {
@@ -142,6 +144,8 @@ func main() {
 			if err != nil {
 				log.Fatalf("UDP: %v", err)
 			}
+			turnserver.MediaPortMin = uint16(port)
+			turnserver.MediaPortMax = uint16(port)
 		}
 	}
 
