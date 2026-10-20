@@ -20,6 +20,7 @@ if (!args.host) {
   console.error('usage: test-deploy.js --host HOST [--port N] [--user root]');
   console.error('       [--password PW | --key FILE] [--tls MODE] [--domain D]');
   console.error('       [--ip ADDR] [--mirror URL] [--version V] [--group G]');
+  console.error('       [--httpsPort N [--publicPort 443]]   (a home server whose 443 is taken)');
   process.exit(2);
 }
 
@@ -61,12 +62,18 @@ const d = new Deployer({
       adminUser: args.adminUser || 'operator',
       adminPassword: args.adminPassword,
       port: args.httpsPort,
+      publicPort: args.publicPort,
     });
     console.log('\n=== RESULT ===');
     console.log(JSON.stringify(result, null, 2));
     console.log(`\ntook ${Math.round((Date.now() - t0) / 1000)}s`);
   } catch (e) {
     console.error(`\nFAILED (${e.code || 'error'}): ${e.message}`);
+    if (e.reason) console.error(`reason: ${e.reason}`);
+    // What the app shows as a table after a port-forward failure.
+    if (e.forwards && e.forwards.length) {
+      console.error('--- forwards (from the state file) ---\n' + e.forwards.join('\n'));
+    }
     if (e.detail) console.error('--- detail ---\n' + e.detail);
     process.exitCode = 1;
   } finally {

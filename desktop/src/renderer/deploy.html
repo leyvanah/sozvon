@@ -128,6 +128,18 @@
     .kv span:last-child { font-family: var(--mono); text-align: right; word-break: break-all; }
     .row { display: flex; gap: 10px; }
     .row button { flex: 1; }
+    .box-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .box-text { margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+    .box-list { margin: 0 0 4px; padding-left: 18px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+    .box-list li { margin-bottom: 4px; }
+    label.check { display: flex; gap: 8px; align-items: flex-start; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); cursor: pointer; }
+    label.check input { margin: 2px 0 0; }
+    /* The router's port forwards: what the person copies into the router's
+       settings, one row per rule, so the numbers line up. */
+    table.fw { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    table.fw th { text-align: left; font-weight: 500; font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--divider); }
+    table.fw td { font-family: var(--mono); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--divider); }
+    table.fw tr:last-child td { border-bottom: none; }
     pre { background: var(--surface-2); border-radius: var(--radius); padding: 10px; font-size: 11px; color: var(--text-2); max-height: 160px; overflow: auto; white-space: pre-wrap; }
     [hidden] { display: none !important; }
   </style>
@@ -152,6 +164,42 @@
         <div>
           <label for="port">Порт SSH</label>
           <input id="port" type="number" value="22">
+        </div>
+      </div>
+
+      <!-- An address from the LAN: a home server behind a router.  Said
+           before the install rather than after it, because what it needs --
+           a public address on the router -- is not something the install can
+           fix, and the forwards are the person's own work on the router. -->
+      <div class="box warn" id="home-box" hidden>
+        <div class="box-title">Это домашний сервер</div>
+        <p class="box-text">
+          Адрес из локальной сети — значит, сервер стоит за роутером. Чтобы
+          к нему подключались снаружи, нужно два условия:
+        </p>
+        <ul class="box-list">
+          <li>
+            у роутера должен быть свой публичный IPv4-адрес («белый» IP).
+            Адрес из 100.64.0.0/10 или другой «серый» адрес от провайдера не
+            подойдёт: через него порты не пробросить;
+          </li>
+          <li>
+            на роутере нужно пробросить на этот сервер несколько портов.
+            Какие именно, приложение покажет после установки.
+          </li>
+        </ul>
+        <label class="check">
+          <input type="checkbox" id="port-taken">
+          <span>Порт 443 на этом сервере уже занят — например, другим веб-сервером</span>
+        </label>
+        <div id="port-taken-wrap" hidden>
+          <label for="local-port">Порт Sozvon на сервере</label>
+          <input id="local-port" type="number" value="8444" min="1" max="65535">
+          <div class="hint">
+            Роутер будет принимать подключения на свой порт 443 и передавать
+            их на этот. Адрес останется без номера порта, и сертификат
+            Let's Encrypt выдаётся как обычно.
+          </div>
         </div>
       </div>
 
@@ -256,6 +304,11 @@
         </div>
         <div class="fp" id="r-fp"></div>
       </div>
+      <div class="box warn" id="r-home" hidden>
+        <div class="box-title">Порты на роутере</div>
+        <p class="box-text" id="r-home-text"></p>
+        <table class="fw" id="r-fw"></table>
+      </div>
       <button id="d-open">Открыть комнату</button>
       <button id="d-copy" class="secondary">Скопировать данные</button>
     </div>
@@ -266,12 +319,22 @@
       <div class="box error">
         <div id="e-msg" style="font-size:14px;"></div>
       </div>
+      <div class="box warn" id="e-home" hidden>
+        <div class="box-title">Пробросьте на роутере эти порты</div>
+        <table class="fw" id="e-fw"></table>
+        <p class="hint">
+          Когда порты проброшены, запустите установку ещё раз: она доделает
+          начатое и покажет пароль оператора.
+        </p>
+      </div>
       <pre id="e-detail" hidden></pre>
+      <button id="e-rerun" hidden>Запустить ещё раз</button>
       <button id="e-retry">Назад к настройкам</button>
     </div>
 
   </div>
   <script src="install-errors.js"></script>
+  <script src="home-server.js"></script>
   <script src="deploy.js"></script>
 </body>
 </html>

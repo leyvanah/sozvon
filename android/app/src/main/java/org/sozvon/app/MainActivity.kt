@@ -368,7 +368,10 @@ class MainActivity : AppCompatActivity() {
      * so that screen asks for them again, every time.
      */
     private fun manageServer(server: ServerStore.Server, mode: String) {
-        val host = Uri.parse(server.url).host.orEmpty()
+        // A home server is reached over SSH at its LAN address: its public
+        // name leads to the router, which forwards the web ports, not SSH.
+        val host = server.deploy?.sshHost?.takeIf { it.isNotBlank() }
+            ?: Uri.parse(server.url).host.orEmpty()
         deployLauncher.launch(
             Intent(this, DeployActivity::class.java)
                 .putExtra(DeployActivity.EXTRA_MODE, mode)

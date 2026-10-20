@@ -119,6 +119,9 @@ class SshDeployer(
         val detail: String? = null,
         // why the installer stopped, as its state file names it (tasks#19)
         val reason: String? = null,
+        // behind a router: the ports it has to forward, as the state file
+        // lists them -- what a person needs after a port-forward failure
+        val forwards: List<String> = emptyList(),
     ) : Exception(message)
 
     /** How the caller answers the host-key question. */
@@ -474,6 +477,9 @@ class SshDeployer(
         // A host whose 443 is taken can still run Sozvon elsewhere; Let's
         // Encrypt cannot, and the installer refuses that combination itself.
         o.httpsPort?.let { args += listOf("--port", it.toString()) }
+        // Behind a router that forwards its 443 to that other port here,
+        // Let's Encrypt works after all: the port the internet sees counts.
+        o.publicPort?.let { args += listOf("--public-port", it.toString()) }
         return args.joinToString(" ") { shellQuote(it) }
     }
 
@@ -603,7 +609,8 @@ class SshDeployer(
                             state.optString("message").ifEmpty { "The install failed." }
                         },
                         "install", tail(),
-                        state.optString("code").ifEmpty { null })
+                        state.optString("code").ifEmpty { null },
+                        HomeServer.lines(state.optJSONArray("forwards")))
                 }
             }
 
@@ -622,6 +629,11 @@ class SshDeployer(
         val mirror: String? = null,
         /** HTTPS port; null means the installer's default, 443. */
         val httpsPort: Int? = null,
+        /**
+         * The HTTPS port the internet reaches the server at, when a router
+         * forwards it to a different [httpsPort]; null means the same one.
+         */
+        val publicPort: Int? = null,
         /**
          * Install the release carried in the APK instead of downloading one.
          * On by default: a server that cannot reach GitHub is the ordinary

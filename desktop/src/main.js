@@ -1413,6 +1413,10 @@ handleOurs('deploy:start', async (_e, opts) => {
       adminUser: opts.adminUser,
       version: opts.version,
       mirror: opts.mirror,
+      // A home server whose 443 is taken: listen on another port, and the
+      // router forwards its own 443 there.  (opts.port is the SSH port.)
+      port: opts.httpsPort,
+      publicPort: opts.publicPort,
     });
     // Remember the server so the launcher is ready to connect to it, but
     // never the SSH credentials: once the server is up, this app talks to it
@@ -1441,6 +1445,7 @@ handleOurs('deploy:start', async (_e, opts) => {
       reason: e.reason,
       message: e.message || String(e),
       detail: e.detail,
+      forwards: e.forwards || [],
     };
   } finally {
     d.disconnect();

@@ -631,6 +631,25 @@
       const openLabel = t(hub ? 'done.open' : 'done.open.room');
       const shareLink = m && m.state === 'ok' ? m.url : null;
 
+      // Behind a router the install is only half the job: the forwards stay
+      // the operator's to keep on the router, so they are on this screen,
+      // not only in the wizard's.  The address above is already the
+      // router's public one.
+      const fw = Flow.forwardsOf(r);
+      const forwards = fw && fw.rows.length ? [
+        h('p', { class: 'kicker gap' }, t('done.forwards')),
+        h('div', { class: 'card' },
+          h('p', { class: 'note' }, t('done.forwards.text', {
+            public: fw.publicIp || '—', lan: fw.lanIp || '—' })),
+          h('table', { class: 'forwards' },
+            h('tr', null, ['done.forwards.port', 'done.forwards.proto', 'done.forwards.to']
+              .map((k) => h('th', null, t(k)))),
+            fw.rows.map((f) => h('tr', null,
+              h('td', { class: 'mono' }, String(f.port)),
+              h('td', { class: 'mono' }, f.proto.toUpperCase()),
+              h('td', { class: 'mono' }, f.to))))),
+      ] : null;
+
       return {
         body: [kickerFor(), heading(t('done.title')), h('p', { class: 'lead' }, t('done.text')),
           h('div', { class: 'card' },
@@ -641,6 +660,7 @@
               : cred(t('done.password'), t('done.password.unchanged'))),
           h('p', { class: 'kicker gap' }, t('done.invite')),
           h('div', { class: 'card' }, invite),
+          forwards,
           r.tls_mode === 'self-signed' ? h('p', { class: 'note' }, t('done.selfsigned')) : null],
         actions: shareLink ? {
           primary: android

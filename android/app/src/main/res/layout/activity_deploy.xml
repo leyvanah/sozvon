@@ -44,6 +44,59 @@
                 android:hint="203.0.113.10"
                 android:inputType="textUri"/>
 
+            <!-- An address from the LAN: a home server behind a router.  Said
+                 before the install, because what it needs - a public address
+                 on the router - is not something the install can fix. -->
+            <LinearLayout
+                android:id="@+id/home_box"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_server_card"
+                android:orientation="vertical"
+                android:padding="14dp"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_title"
+                    android:textColor="@color/sozvon_warn"
+                    android:textSize="15sp"
+                    android:textStyle="bold"/>
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/home_text"
+                    android:textColor="@color/sozvon_text2"
+                    android:textSize="13sp"/>
+                <CheckBox
+                    android:id="@+id/port_taken"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:buttonTint="@color/sozvon_accent"
+                    android:text="@string/home_port_taken"
+                    android:textColor="@color/sozvon_text"
+                    android:textSize="14sp"/>
+                <LinearLayout
+                    android:id="@+id/local_port_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+                    <TextView style="@style/SozvonFieldLabel"
+                        android:text="@string/home_local_port_label"/>
+                    <EditText
+                        android:id="@+id/local_port"
+                        style="@style/SozvonField"
+                        android:inputType="number"
+                        android:text="8444"/>
+                    <TextView style="@style/SozvonHint"
+                        android:text="@string/home_local_port_hint"/>
+                </LinearLayout>
+            </LinearLayout>
+
             <TextView style="@style/SozvonFieldLabel"
                 android:text="@string/ssh_port_label"/>
             <EditText
@@ -413,6 +466,38 @@
                     android:textIsSelectable="true"/>
             </LinearLayout>
 
+            <!-- Behind a router: the forwards stay the operator's to keep. -->
+            <LinearLayout
+                android:id="@+id/result_home"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_server_card"
+                android:orientation="vertical"
+                android:padding="14dp"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_forwards_title"
+                    android:textColor="@color/sozvon_warn"
+                    android:textSize="15sp"
+                    android:textStyle="bold"/>
+                <TextView
+                    android:id="@+id/result_home_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="@color/sozvon_text2"
+                    android:textSize="13sp"/>
+                <TableLayout
+                    android:id="@+id/result_forwards"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:stretchColumns="2"/>
+            </LinearLayout>
+
             <Button
                 android:id="@+id/deploy_open"
                 android:layout_width="match_parent"
@@ -454,6 +539,34 @@
                 android:textColor="@color/sozvon_error"
                 android:textSize="15sp"/>
 
+            <!-- Stopped for want of the router's forwards: the one thing to
+                 act on, so it comes before the log. -->
+            <LinearLayout
+                android:id="@+id/error_home"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_server_card"
+                android:orientation="vertical"
+                android:padding="14dp"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_forwards_needed"
+                    android:textColor="@color/sozvon_warn"
+                    android:textSize="15sp"
+                    android:textStyle="bold"/>
+                <TableLayout
+                    android:id="@+id/error_forwards"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:stretchColumns="2"/>
+                <TextView style="@style/SozvonHint"
+                    android:text="@string/home_rerun_hint"/>
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/error_detail"
                 android:layout_width="match_parent"
@@ -463,6 +576,16 @@
                 android:textColor="@color/sozvon_text3"
                 android:textIsSelectable="true"
                 android:textSize="11sp"
+                android:visibility="gone"/>
+
+            <Button
+                android:id="@+id/deploy_rerun"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:backgroundTint="@color/sozvon_accent"
+                android:text="@string/home_rerun"
+                android:textColor="@color/sozvon_accent_contrast"
                 android:visibility="gone"/>
 
             <Button

@@ -62,6 +62,9 @@ class DeployError extends Error {
     // why the installer stopped, as its state file names it (tasks#19)
     this.reason = opts.reason;
     this.detail = opts.detail;
+    // Behind a router: the ports it has to forward, as the state file lists
+    // them -- what a person needs to see after a port-forward failure.
+    this.forwards = opts.forwards || [];
   }
 }
 
@@ -257,6 +260,9 @@ class Deployer {
     // can still run Sozvon elsewhere; Let's Encrypt cannot, and the installer
     // refuses that combination itself.
     if (o.port) args.push('--port', String(o.port));
+    // Behind a router that forwards its 443 to that other port here, Let's
+    // Encrypt works after all: it is the port the internet sees that counts.
+    if (o.publicPort) args.push('--public-port', String(o.publicPort));
     if (o.udpPort) args.push('--udp-port', String(o.udpPort));
     return args.map(shellQuote).join(' ');
   }
@@ -387,6 +393,7 @@ class Deployer {
           throw new DeployError(
             state.error || state.message || 'The install failed.',
             { code: 'install', reason: state.code || undefined,
+              forwards: Array.isArray(state.forwards) ? state.forwards : [],
               detail: await this.tail().catch(() => '') });
         }
       }

@@ -207,7 +207,7 @@ jobs:
           for f in src/main.js src/preload.js src/deploy/deployer.js \
                    src/tray.js src/knocks.js src/knock-preload.js \
                    src/renderer/launcher.js src/renderer/deploy.js \
-                   src/renderer/knock.js \
+                   src/renderer/knock.js src/renderer/home-server.js \
                    scripts/test-deploy.js scripts/sync-installer.js \
                    scripts/sync-onboarding.js; do
               node --check "$f"

@@ -38,6 +38,9 @@ APK_INSTALLED=no
 UDP_PORT=8443
 HTTPS_PORT=443
 PUBLIC_PORT=
+# the router's port forwards, one "443/tcp -> 192.168.0.60:8444" per line;
+# worked out in the firewall stage, and empty with no router in the way
+FORWARDS=
 DETACH=no
 UNINSTALL=no
 PURGE=no
@@ -237,6 +240,18 @@ json_escape() {
 	    -e 's/	/\\t/g' | tr -d '\r\n'
 }
 
+# The forwards as a JSON array of the same lines.
+forwards_json() {
+	_fj=$(printf '%s' "$FORWARDS" | while IFS= read -r f; do
+		printf '"%s",' "$(json_escape "$f")"
+	done)
+	printf '[%s]' "${_fj%,}"
+}
+
+# The forwards are in the state as well as in the result: a run that stops
+# for want of them (code port-forward) leaves no result, and a program driving
+# it has to show the person what to set up on the router before they run this
+# again -- from the state, not by picking through this script's English log.
 write_state() {
 	_status="$1"
 	_message="$2"
@@ -253,6 +268,7 @@ write_state() {
   "message": "$(json_escape "$_message")",
   "error": "$(json_escape "$_error")",
   "code": "$(json_escape "$_code")",
+  "forwards": $(forwards_json),
   "version": "$(json_escape "$VERSION")",
   "updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -1112,12 +1128,6 @@ else
 	HUB_JSON=false
 fi
 
-# The forwards as a JSON array of the same lines, empty when no router is in
-# the way.
-FORWARDS_JSON=$(printf '%s' "$FORWARDS" | while IFS= read -r f; do
-	printf '"%s",' "$(json_escape "$f")"
-done)
-FORWARDS_JSON="[${FORWARDS_JSON%,}]"
 if [ "$BEHIND_NAT" = yes ]; then BEHIND_NAT_JSON=true; else BEHIND_NAT_JSON=false; fi
 
 cat > "$STATE_DIR/result.json" <<EOF
@@ -1137,7 +1147,7 @@ cat > "$STATE_DIR/result.json" <<EOF
   "behind_nat": $BEHIND_NAT_JSON,
   "public_ip": "$(json_escape "$NAT_IP")",
   "lan_ip": "$(json_escape "$LAN_IP")",
-  "forwards": $FORWARDS_JSON
+  "forwards": $(forwards_json)
 }
 EOF
 chmod 600 "$STATE_DIR/result.json"
