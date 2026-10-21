@@ -63,6 +63,21 @@
         <p class="browser-unsupported-url" id="browser-unsupported-url"></p>
       </div>
     </div>
+    <!-- Sozvon: why the camera or microphone was refused and what to do about
+         it.  Filled by showMediaHelp() in galene.js from media-help.js; it
+         stays until closed or until the device opens. -->
+    <div id="media-help" class="media-help invisible" role="alert" hidden>
+      <div class="media-help-head">
+        <i id="media-help-icon" class="fas fa-microphone-slash" aria-hidden="true"></i>
+        <strong id="media-help-title"></strong>
+        <button id="media-help-close" class="media-help-close" type="button" title="Close" data-i18n-title="common.close">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </div>
+      <p id="media-help-reason"></p>
+      <ol id="media-help-steps"></ol>
+      <button id="media-help-retry" class="btn btn-blue" type="button" data-i18n="mediaHelp.retry">Try again</button>
+    </div>
     <!-- Sozvon: shown while an established connection dropped and we are retrying
          (gotClose/scheduleReconnect in galene.js).  Non-modal status banner. -->
     <div id="reconnect-banner" class="reconnect-banner invisible" role="status" aria-live="polite" hidden>
@@ -816,6 +831,7 @@
     <script src="/ice-recovery.js" defer></script>
     <script src="/bitrate-control.js" defer></script>
     <script src="/mic-recovery.js" defer></script>
+    <script src="/media-help.js" defer></script>
     <script src="/password-change.js" defer></script>
     <script src="/e2ee.js" defer></script>
     <script src="/settings.js" defer></script>
