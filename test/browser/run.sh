@@ -43,11 +43,14 @@ mkdir -p "$work/data" "$work/recordings"
 cp -R "$here/groups" "$work/groups"
 echo '{"writableGroups": true}' >"$work/data/config.json"
 export SOZVON_GROUPS="$work/groups"
+# The connection log is on, and the specs that read it are told where it is
+# (camera-check.spec.js).
+export SOZVON_SERVER_LOG="$work/server.log"
 # SOZVON_SERVER_ARGS: extra server flags, for the scenarios that need a stand
 # set up their own way (the TURN ones in udp-fallback.spec.js).  Split on
 # spaces on purpose.
 # shellcheck disable=SC2086
-"$bin" -insecure -dev -http "localhost:$port" \
+"$bin" -insecure -dev -log-connections -http "localhost:$port" \
     -static "$root/static/" -groups "$work/groups/" \
     -data "$work/data/" -recordings "$work/recordings/" \
     ${SOZVON_SERVER_ARGS:-} \

@@ -197,6 +197,65 @@ func TestQualityLine(t *testing.T) {
 			"minFps", 30.0), ""},
 		{"picture", "d1", m("width", "wide", "height", 480.0, "fps", 30.0,
 			"minFps", 30.0), ""},
+		// a phone whose picture gets all the way through the canvas
+		{"camera", "u1", m("after", 6.0, "os", "android", "app", nil,
+			"browser", "chrome", "touch", true, "canvas", "orientation",
+			"track", "live", "muted", false, "enabled", true,
+			"width", 640.0, "height", 480.0, "fps", 30.0, "delivered", nil,
+			"paused", false, "ready", 4.0,
+			"elementWidth", 640.0, "elementHeight", 480.0,
+			"play", "ok", "drawn", 178.0,
+			"source", 176.0, "encoded", 175.0, "sent", 912.0,
+			"limit", "none", "preview", 170.0),
+			who + " up=" + up + " camera after 6s: android/chrome touch; " +
+				"track live 640x480 30fps; " +
+				"canvas orientation, element playing ready 4 640x480, " +
+				"play ok, drawn 178; " +
+				"sender got 176 frames, encoded 175, sent 912 packets; " +
+				"preview 170 frames"},
+		// the 2026-10-21 case as this would have shown it, were the
+		// element refused: everything after the element is zero
+		{"camera", "u1", m("after", 6.0, "os", "ios", "browser", "safari",
+			"touch", true, "canvas", "orientation", "track", "live",
+			"muted", false, "enabled", true,
+			"paused", true, "ready", 0.0,
+			"elementWidth", 0.0, "elementHeight", 0.0,
+			"play", "NotAllowedError", "drawn", 0.0,
+			"source", 0.0, "encoded", 0.0, "sent", 0.0, "preview", 0.0),
+			who + " up=" + up + " camera after 6s: ios/safari touch; " +
+				"track live; " +
+				"canvas orientation, element paused ready 0 0x0, " +
+				"play NotAllowedError, drawn 0; " +
+				"sender got 0 frames, encoded 0, sent 0 packets; " +
+				"preview 0 frames"},
+		// a desktop app with no canvas; counters the browser does not
+		// report are left out, a muted camera and a limit are said
+		{"camera", "u1", m("after", 6.4, "os", "windows", "app", "desktop",
+			"browser", "chrome", "touch", false, "canvas", "none",
+			"track", "live", "muted", true, "enabled", false,
+			"width", 1280.0, "height", 720.0, "fps", nil, "delivered", 0.0,
+			"source", nil, "encoded", 0.0, "sent", 0.0, "limit", "cpu",
+			"preview", nil),
+			who + " up=" + up + " camera after 6s: windows/chrome app desktop; " +
+				"track live muted disabled 1280x720, delivered 0 frames; " +
+				"no canvas; encoded 0, sent 0 packets, limited by cpu"},
+		// malformed fields are left out, the rest of the line kept
+		{"camera", "u1", m("after", 6.0, "os", "mac", "browser", "safari",
+			"canvas", "filter", "track", "ended", "app", "<b>",
+			"muted", "yes", "width", -1.0, "height", 480.0,
+			"play", "<script>", "drawn", 1e12, "encoded", "many",
+			"sent", 10.0, "limit", "evil"),
+			who + " up=" + up + " camera after 6s: mac/safari; " +
+				"track ended; canvas filter; sent 10 packets"},
+		// what identifies the line is required
+		{"camera", "u1", m("after", 6.0, "os", "linux-6.1", "browser",
+			"chrome", "canvas", "none", "track", "live"), ""},
+		{"camera", "u1", m("after", 6.0, "os", "mac", "browser",
+			"Chrome/141.0.7390.54", "canvas", "none", "track", "live"), ""},
+		{"camera", "u1", m("os", "mac", "browser", "chrome",
+			"canvas", "none", "track", "live"), ""},
+		{"camera", "d1", m("after", 6.0, "os", "mac", "browser", "chrome",
+			"canvas", "none", "track", "live"), ""},
 		{"path", "u1", m("type", "evil"), ""},
 		{"transport", "", m("udp", false, "reason", "because"), ""},
 		{"transport", "", m("udp", true, "reason", "loss"), ""},

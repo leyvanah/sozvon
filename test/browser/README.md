@@ -62,6 +62,7 @@ test-results/*/trace.zip` replays the run frame by frame.
 | `videoless` | Camera off mid-call: the other side shows the avatar in the list colour and the name instead of the empty video; camera on: the picture replaces it. |
 | `tile-mic` | Muting marks the tile on the other side, unmuting clears it, rejoining without a microphone is marked from the start. |
 | `quality` | 20% extra packet loss is reported through a wrapped `getStats` in one client; everything after that runs for real. The tile shows the translated indicator, recovery hides it, no toasts at any point. |
+| `camera-check` | Six seconds after the camera is published the client reports how far its picture got (`camera-diag.js`): plain and through the orientation canvas every step counts past zero, a hidden element refused playback is reported as such, and the server writes the line (it reads the server log, which `run.sh` turns on with `-log-connections`). |
 | `bitrate` | Lag is added to the receiver's audio jitter-buffer delay through `getStats`: a new stream starts at the start cap, the lag lowers the sender's real `maxBitrate`, recovery raises it. `SOZVON_FULL_BITRATE=1` also waits for the cap to lift entirely (two minutes more). |
 
 `manual/` holds drivers for checks a person watches on a real device (a phone
