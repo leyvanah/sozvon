@@ -368,6 +368,17 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     renegotiation, E2EE untouched. If it cannot be reopened the call goes on
     with video alone and the microphone button shows "off". Screen sharing
     still ends with its track, which there means "stop sharing".
+  * **A refused camera or microphone says why and what to do**
+    (`static/media-help.js`). It used to be a four-second toast, "access was
+    denied". Now a card stays at the top, in the call and in the pre-join
+    device check, until it is closed or the device opens, with steps chosen
+    from the Permissions API state and the platform: a site blocked in the
+    browser settings, a prompt that was dismissed or never shown, or a site
+    that is allowed while the system refuses the browser. On Android the
+    second case names the cause nobody guesses: Chrome will not show a
+    permission prompt while another app draws over it (a chat bubble, a small
+    video window, a screen filter) and says only "This site can't ask for
+    permission". Allowing the site while the card is up retries on its own.
   * **State-reflecting mic/camera icons**: each colours by what is live right
     now — **blue + upright** when the device is on, **red + slashed** when off.
     The old neutral-grey in-between state is gone.

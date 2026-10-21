@@ -566,6 +566,8 @@ function isFirefox() {
  * @param{boolean} connected
  */
 function setConnected(connected) {
+    // the card retries into the session it was shown for
+    hideMediaHelp();
     let userbox = document.getElementById('profile');
     let connectionbox = document.getElementById('login-container');
     if(connected) {
@@ -3339,11 +3341,12 @@ async function addMicrophoneNow(c) {
         let s = await navigator.mediaDevices.getUserMedia({audio: audio});
         track = s.getAudioTracks()[0];
     } catch(e) {
-        displayMediaError(e);
+        displayMediaError(e, 'audio', () => addMicrophone(c));
         return;
     }
     if(!track)
         return;
+    mediaHelpResolved(true, false);
     if(!usable()) {
         // hung up, or the stream was replaced, while the microphone opened
         track.stop();
@@ -3389,13 +3392,15 @@ async function addMicrophoneNow(c) {
 }
 
 /**
- * The toast for a getUserMedia that failed.
+ * Tell the user about a getUserMedia that failed.
  *
  * @param {any} e
+ * @param {string} kind - what was asked for: 'audio' | 'video' | 'both'
+ * @param {function(): any} retry - asks for the same devices again
  */
-function displayMediaError(e) {
+function displayMediaError(e, kind, retry) {
     if(e && e.name === 'NotAllowedError')
-        displayError(Sozvon.i18n.t('toast.permissionDenied'));
+        showMediaHelp(kind, retry);
     else if(e && (e.name === 'NotFoundError' ||
                   e.name === 'OverconstrainedError' ||
                   e.name === 'DevicesNotFoundError'))
@@ -3405,6 +3410,154 @@ function displayMediaError(e) {
     else
         displayError(e);
 }
+
+/* The help card for a refused camera or microphone.  (Sozvon)
+
+   It replaced a four-second toast that said only "access was denied".  The
+   cause people cannot guess is on Android: Chrome will not show a permission
+   prompt while another app draws over it -- a chat bubble, a small video
+   window, a screen filter -- and offers only "This site can't ask for
+   permission"; cancelling that is a refusal.  The card stays until it is
+   closed or the device opens, and media-help.js picks its steps from the
+   platform and the permission state. */
+
+/** @type {string|null} */
+let mediaHelpKind = null;
+/** @type {(function(): any)|null} */
+let mediaHelpRetry = null;
+/** @type {PermissionStatus[]} */
+let mediaHelpWatched = [];
+// Bumped on every show and hide, so that a show still waiting for the
+// permission states does not reappear after the card was dismissed.
+let mediaHelpGen = 0;
+
+/**
+ * @param {string} name - 'camera' or 'microphone'
+ * @returns {Promise<PermissionStatus|null>} null where the browser will not say
+ */
+async function queryMediaPermission(name) {
+    try {
+        return await navigator.permissions.query(
+            /** @type {any} */ ({name: name}));
+    } catch(e) {
+        return null;
+    }
+}
+
+/**
+ * @param {{key: string, params?: Object<string,string>}} line
+ * @returns {string}
+ */
+function mediaHelpText(line) {
+    /** @type {Object<string,string>} */
+    let params = {};
+    for(let k in line.params || {})
+        params[k] = Sozvon.i18n.t(line.params[k]);
+    return Sozvon.i18n.t(line.key, params);
+}
+
+/**
+ * @param {string} kind - 'audio' | 'video' | 'both'
+ * @param {function(): any} retry - asks for the same devices again
+ */
+async function showMediaHelp(kind, retry) {
+    let gen = ++mediaHelpGen;
+    let names = kind === 'both' ? ['camera', 'microphone'] :
+        [kind === 'video' ? 'camera' : 'microphone'];
+    let statuses = await Promise.all(names.map(queryMediaPermission));
+    if(gen !== mediaHelpGen)
+        return;
+
+    let mh = /** @type {any} */ (window).SozvonMediaHelp;
+    let advice = mh.advice({
+        kind: kind,
+        state: mh.combineStates(statuses.map(s => s ? s.state : null)),
+        platform: mh.detectPlatform({
+            ua: navigator.userAgent,
+            bridge: !!hostApp(),
+            touchPoints: navigator.maxTouchPoints,
+        }),
+    });
+
+    unwatchMediaHelp();
+    mediaHelpKind = kind;
+    mediaHelpRetry = retry;
+    document.getElementById('media-help-icon').className =
+        'fas ' + (kind === 'video' ? 'fa-video-slash' : 'fa-microphone-slash');
+    document.getElementById('media-help-title').textContent =
+        Sozvon.i18n.t(advice.title);
+    document.getElementById('media-help-reason').textContent =
+        mediaHelpText(advice.reason);
+    let ol = document.getElementById('media-help-steps');
+    ol.textContent = '';
+    for(let step of advice.steps) {
+        let li = document.createElement('li');
+        li.textContent = mediaHelpText(step);
+        ol.appendChild(li);
+    }
+
+    // Allowing the site in its settings while the card is up is the fix
+    // most of the steps lead to; take it as the answer without making the
+    // user come back for the button.
+    for(let s of statuses) {
+        if(s) {
+            s.onchange = mediaHelpPermissionChanged;
+            mediaHelpWatched.push(s);
+        }
+    }
+    setVisibility('media-help', true);
+}
+
+function mediaHelpPermissionChanged() {
+    if(!mediaHelpWatched.every(s => s.state === 'granted'))
+        return;
+    let retry = mediaHelpRetry;
+    hideMediaHelp();
+    if(retry)
+        retry();
+}
+
+function unwatchMediaHelp() {
+    for(let s of mediaHelpWatched)
+        s.onchange = null;
+    mediaHelpWatched = [];
+}
+
+function hideMediaHelp() {
+    mediaHelpGen++;
+    unwatchMediaHelp();
+    mediaHelpKind = null;
+    mediaHelpRetry = null;
+    setVisibility('media-help', false);
+}
+
+/**
+ * A device has just opened: drop the card if it was about that device.
+ *
+ * @param {boolean} audio
+ * @param {boolean} video
+ */
+function mediaHelpResolved(audio, video) {
+    if(mediaHelpKind === null)
+        return;
+    if((mediaHelpKind === 'audio' && audio) ||
+       (mediaHelpKind === 'video' && video) ||
+       (mediaHelpKind === 'both' && audio && video))
+        hideMediaHelp();
+}
+
+document.getElementById('media-help-retry').onclick = function(e) {
+    e.preventDefault();
+    let retry = mediaHelpRetry;
+    hideMediaHelp();
+    if(retry)
+        retry();
+};
+
+document.getElementById('media-help-close').onclick = function(e) {
+    e.preventDefault();
+    hideMediaHelp();
+};
 
 /**
  * Whether local media may be published right now.
@@ -3511,10 +3664,12 @@ async function addLocalMediaNow(localId, force) {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         clearTimeout(hangTimer);
         hideBrowserUnsupported();
+        mediaHelpResolved(!!audio, !!video);
     } catch(e) {
         clearTimeout(hangTimer);
         hideBrowserUnsupported();
-        displayMediaError(e);
+        displayMediaError(e, audio && video ? 'both' : video ? 'video' : 'audio',
+                          () => addLocalMedia(localId, force));
         return;
     }
 
@@ -9460,7 +9615,10 @@ function makePrecheck(prefix) {
     function mediaErrorKey(err, kind) {
         let name = err && err.name;
         let mic = kind === 'audio';
-        if(name === 'NotAllowedError' || name === 'SecurityError')
+        // the help card says why and what to do; this line only names it
+        if(name === 'NotAllowedError')
+            return mic ? 'mediaHelp.title.audio' : 'mediaHelp.title.video';
+        if(name === 'SecurityError')
             return mic ? 'login.micDenied' : 'login.camDenied';
         if(name === 'NotFoundError' || name === 'DevicesNotFoundError')
             return mic ? 'login.micNotFound' : 'login.camNotFound';
@@ -9468,6 +9626,24 @@ function makePrecheck(prefix) {
            name === 'TrackStartError')
             return mic ? 'login.micUnavailable' : 'login.camUnavailable';
         return mic ? 'login.noMic' : 'login.noCamera';
+    }
+
+    /**
+     * Report a device that would not open.  A refusal also gets the help
+     * card, whose button presses the toggle again. (Sozvon)
+     *
+     * @param {any} err
+     * @param {string} kind - 'audio' or 'video'
+     */
+    function failed(err, kind) {
+        error(Sozvon.i18n.t(mediaErrorKey(err, kind)));
+        if(!err || err.name !== 'NotAllowedError')
+            return;
+        let toggle = kind === 'video' ? 'cam' : 'mic';
+        showMediaHelp(kind, () => {
+            if(!state[toggle] && !state[toggle + 'Opening'])
+                document.getElementById(elementId(toggle)).click();
+        });
     }
 
     /**
@@ -9572,6 +9748,7 @@ function makePrecheck(prefix) {
         let video = vid ? {deviceId: vid} : {};
         video.aspectRatio = {ideal: 4/3};
         let stream = await navigator.mediaDevices.getUserMedia({video: video});
+        mediaHelpResolved(false, true);
         if(gen !== state.gen) {
             stopStream(stream);
             return;
@@ -9610,6 +9787,7 @@ function makePrecheck(prefix) {
         let stream = await navigator.mediaDevices.getUserMedia(
             {audio: aid ? {deviceId: aid} : true},
         );
+        mediaHelpResolved(true, false);
         if(gen !== state.gen) {
             stopStream(stream);
             return;
@@ -9764,7 +9942,7 @@ function makePrecheck(prefix) {
             console.warn(err);
             if(gen === state.gen) {
                 state.cam = false;
-                error(Sozvon.i18n.t(mediaErrorKey(err, 'video')));
+                failed(err, 'video');
             }
         } finally {
             if(gen === state.gen)
@@ -9794,7 +9972,7 @@ function makePrecheck(prefix) {
             console.warn(err);
             if(gen === state.gen) {
                 state.mic = false;
-                error(Sozvon.i18n.t(mediaErrorKey(err, 'audio')));
+                failed(err, 'audio');
             }
         } finally {
             if(gen === state.gen)
@@ -9832,7 +10010,7 @@ function makePrecheck(prefix) {
         } catch(err) {
             console.warn(err);
             state.cam = false;
-            error(Sozvon.i18n.t(mediaErrorKey(err, 'video')));
+            failed(err, 'video');
             reflect();
         }
     };
@@ -9846,7 +10024,7 @@ function makePrecheck(prefix) {
         } catch(err) {
             console.warn(err);
             state.mic = false;
-            error(Sozvon.i18n.t(mediaErrorKey(err, 'audio')));
+            failed(err, 'audio');
             reflect();
         }
     };

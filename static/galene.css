@@ -3689,6 +3689,53 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     user-select: all;
 }
 
+/* Sozvon — the help card for a refused camera or microphone (showMediaHelp).
+   Non-modal, pinned to the top over the call and the login card alike, and
+   above the top bar and the side panels so a phone shows it whole.  Same
+   visibility trick as the overlays. */
+.media-help {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1060;
+    width: min(28rem, calc(100% - 2rem));
+    max-height: calc(100dvh - 1.5rem);
+    overflow-y: auto;
+    padding: 1rem 1.1rem 1.1rem;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    box-shadow: var(--shadow-3);
+    font-size: var(--fs-md);
+    line-height: 1.45;
+}
+.media-help:not(.invisible) { display: block; }
+.media-help-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.media-help-head > i { color: var(--warn); }
+.media-help-head strong { flex: 1; }
+.media-help-close {
+    border: 0;
+    background: none;
+    color: inherit;
+    padding: 0.25rem 0.4rem;
+    cursor: pointer;
+    opacity: 0.7;
+}
+.media-help-close:hover { opacity: 1; }
+.media-help p { margin: 0.5rem 0 0; }
+.media-help ol {
+    margin: 0.5rem 0 0;
+    padding-left: 1.3rem;
+}
+.media-help li + li { margin-top: 0.35rem; }
+.media-help .btn { margin-top: 0.8rem; }
+
 /* Sozvon — "reconnecting" banner: a non-modal status pill pinned to the top while
    a dropped connection is being re-established (see scheduleReconnect).  Same
    visibility trick as the overlays: the base rule has no `display`, so the
