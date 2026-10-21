@@ -2230,8 +2230,9 @@ function feedQuality(c, iceState, snap) {
  * so this is a handful of messages in a bad call and none in a good one.
  * (Sozvon)
  *
- * @param {string} kind - 'level', 'ask' (receiver asks for a cap) or
- *     'send' (sender applies one)
+ * @param {string} kind - 'level', 'ask' (receiver asks for a cap),
+ *     'send' (sender applies one), 'camera' (how far a published camera's
+ *     picture got, see checkCamera) and the others connlog.go knows
  * @param {string} id - the stream
  * @param {Object<string,any>} value
  */
@@ -3062,6 +3063,99 @@ async function setUpStream(c, stream) {
             c.close();
         }
     };
+
+    if(c.label === 'camera' && stream.getVideoTracks().length > 0)
+        scheduleCameraCheck(c);
+}
+
+/**
+ * A few seconds after a camera stream is published, tell the connection log
+ * how far its picture got: the camera track, the hidden element and canvas
+ * of a filter, the sender's input, the encoder, the wire, and the preview.
+ * See camera-diag.js.  (Sozvon)
+ *
+ * @param {Stream} c
+ */
+function scheduleCameraCheck(c) {
+    let D = /** @type {any} */ (window).SozvonCameraDiag;
+    if(!D)
+        return;
+    let published = Date.now();
+    setTimeout(() => {
+        checkCamera(c, published).catch(e => console.warn('checkCamera', e));
+    }, D.CHECK_AFTER);
+}
+
+/**
+ * @param {Stream} c
+ * @param {number} published - when the stream was set up, in ms
+ */
+async function checkCamera(c, published) {
+    let D = /** @type {any} */ (window).SozvonCameraDiag;
+    let mh = /** @type {any} */ (window).SozvonMediaHelp;
+    // still the camera we published: not closed, not replaced
+    let current = () =>
+        !!c.sc && !!c.pc && !!serverConnection &&
+        serverConnection.up[c.id] === c;
+    if(!D || !mh || !current())
+        return;
+
+    /** @type {any} */
+    let f = c.userdata.filter;
+    let input = f ? f.inputStream : c.stream;
+    /** @type {any} */
+    let track = input && input.getVideoTracks()[0];
+    if(!track)
+        return;
+
+    let stats = await c.pc.getStats();
+    if(!current())
+        return;
+
+    let media = /** @type {HTMLVideoElement} */
+        (document.getElementById('media-' + c.localId));
+    let preview = null;
+    if(media && media.getVideoPlaybackQuality)
+        preview = media.getVideoPlaybackQuality().totalVideoFrames;
+
+    let element = null;
+    if(f)
+        element = {
+            paused: f.video.paused,
+            readyState: f.video.readyState,
+            videoWidth: f.video.videoWidth,
+            videoHeight: f.video.videoHeight,
+            play: f.playState,
+            drawn: f.drawn,
+        };
+
+    let value = D.report({
+        platform: mh.detectPlatform({
+            ua: navigator.userAgent,
+            bridge: !!hostApp(),
+            touchPoints: navigator.maxTouchPoints,
+        }),
+        ua: navigator.userAgent,
+        touch: navigator.maxTouchPoints > 0,
+        canvas: !f ? 'none' :
+            f.definition === mobileOrientationFilter ? 'orientation' :
+            'filter',
+        track: {
+            readyState: track.readyState,
+            muted: track.muted,
+            enabled: track.enabled,
+            settings: track.getSettings ? track.getSettings() : {},
+            // MediaStreamTrack.stats, where the browser has it: frames the
+            // camera delivered to the page
+            delivered: track.stats ? track.stats.deliveredFrames : null,
+        },
+        element: element,
+        sender: D.senderStats(stats.values()),
+        preview: preview,
+        after: Date.now() - published,
+    });
+    console.info('camera check', value);
+    reportQuality('camera', c.id, value);
 }
 
 /**

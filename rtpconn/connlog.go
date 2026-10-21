@@ -221,6 +221,35 @@ var restartReasons = map[string]string{
 	"disconnected": "after staying disconnected",
 }
 
+// how far a published camera's picture got (static/camera-diag.js)
+var cameraOSes = map[string]bool{
+	"android": true, "ios": true, "windows": true, "mac": true,
+	"other": true,
+}
+
+var cameraApps = map[string]bool{"android": true, "desktop": true}
+
+var cameraBrowsers = map[string]bool{
+	"edge": true, "yandex": true, "samsung": true, "opera": true,
+	"firefox": true, "chrome": true, "safari": true, "webview": true,
+	"other": true,
+}
+
+var cameraCanvases = map[string]bool{
+	"none": true, "orientation": true, "filter": true,
+}
+
+var cameraTracks = map[string]bool{"live": true, "ended": true}
+
+var cameraPlays = map[string]bool{
+	"ok": true, "pending": true, "NotAllowedError": true,
+	"AbortError": true, "NotSupportedError": true, "error": true,
+}
+
+var cameraLimits = map[string]bool{
+	"none": true, "cpu": true, "bandwidth": true, "other": true,
+}
+
 var iceStates = map[string]bool{
 	"new": true, "checking": true, "connected": true, "completed": true,
 	"disconnected": true, "failed": true, "closed": true,
@@ -351,6 +380,106 @@ func askEvidence(v map[string]interface{}) string {
 		return ""
 	}
 	return ": " + strings.Join(parts, " ")
+}
+
+// cameraLine formats a camera report: each step from the camera to the
+// wire with its own count, so the first zero is where the picture stopped.
+// A count the browser does not report is left out, never shown as zero; so
+// is a field that is not well-formed, as for the evidence of a cap.
+func cameraLine(who, id string, v map[string]interface{}) string {
+	after, ok1 := number(v["after"], 3600)
+	system, ok2 := word(v["os"], cameraOSes)
+	browser, ok3 := word(v["browser"], cameraBrowsers)
+	canvas, ok4 := word(v["canvas"], cameraCanvases)
+	track, ok5 := word(v["track"], cameraTracks)
+	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
+		return ""
+	}
+	num := func(k string, max float64) (int64, bool) {
+		f, ok := number(v[k], max)
+		return int64(f), ok
+	}
+	flag := func(k string) (bool, bool) {
+		b, ok := v[k].(bool)
+		return b, ok
+	}
+
+	platform := system + "/" + browser
+	if app, ok := word(v["app"], cameraApps); ok {
+		platform += " app " + app
+	}
+	if touch, _ := flag("touch"); touch {
+		platform += " touch"
+	}
+
+	cam := "track " + track
+	if muted, _ := flag("muted"); muted {
+		cam += " muted"
+	}
+	if enabled, ok := flag("enabled"); ok && !enabled {
+		cam += " disabled"
+	}
+	w, okw := num("width", 100000)
+	h, okh := num("height", 100000)
+	if okw && okh {
+		cam += fmt.Sprintf(" %dx%d", w, h)
+	}
+	if fps, ok := num("fps", 1000); ok {
+		cam += fmt.Sprintf(" %dfps", fps)
+	}
+	if n, ok := num("delivered", 1e9); ok {
+		cam += fmt.Sprintf(", delivered %d frames", n)
+	}
+
+	el := "no canvas"
+	if canvas != "none" {
+		el = "canvas " + canvas
+		if paused, ok := flag("paused"); ok {
+			if paused {
+				el += ", element paused"
+			} else {
+				el += ", element playing"
+			}
+		}
+		if n, ok := num("ready", 4); ok {
+			el += fmt.Sprintf(" ready %d", n)
+		}
+		ew, okw := num("elementWidth", 100000)
+		eh, okh := num("elementHeight", 100000)
+		if okw && okh {
+			el += fmt.Sprintf(" %dx%d", ew, eh)
+		}
+		if play, ok := word(v["play"], cameraPlays); ok {
+			el += ", play " + play
+		}
+		if n, ok := num("drawn", 1e9); ok {
+			el += fmt.Sprintf(", drawn %d", n)
+		}
+	}
+
+	var sender []string
+	if n, ok := num("source", 1e9); ok {
+		sender = append(sender, fmt.Sprintf("sender got %d frames", n))
+	}
+	if n, ok := num("encoded", 1e9); ok {
+		sender = append(sender, fmt.Sprintf("encoded %d", n))
+	}
+	if n, ok := num("sent", 1e10); ok {
+		sender = append(sender, fmt.Sprintf("sent %d packets", n))
+	}
+	if limit, ok := word(v["limit"], cameraLimits); ok && limit != "none" {
+		sender = append(sender, "limited by "+limit)
+	}
+
+	parts := []string{platform, cam, el}
+	if len(sender) > 0 {
+		parts = append(parts, strings.Join(sender, ", "))
+	}
+	if n, ok := num("preview", 1e9); ok {
+		parts = append(parts, fmt.Sprintf("preview %d frames", n))
+	}
+	return fmt.Sprintf("%v up=%v camera after %ds: %v",
+		who, connTag(id), int64(after), strings.Join(parts, "; "))
 }
 
 // qualityLine turns a report into a log line, or "" if it is malformed.
@@ -502,6 +631,12 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		}
 		return fmt.Sprintf("%v %v=%v restarts ICE %v",
 			who, dir, connTag(id), why)
+	case "camera":
+		dir, ok := streamKind(c, id)
+		if !ok || dir != "up" {
+			return ""
+		}
+		return cameraLine(who, id, v)
 	case "everyone":
 		degraded, ok := v["degraded"].(bool)
 		if !ok {

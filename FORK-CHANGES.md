@@ -515,6 +515,24 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     the browser does not report is left out, never logged as zero, and the
     new figures come at the end of a request's line so that the earlier
     ones keep their places. Only reported; nothing is decided on them yet.
+    **A published camera says how far its picture got.** On 2026-10-21 a
+    guest turned her camera on nine times and not one video packet left her
+    browser, her own preview empty as well, while the same camera worked in
+    another service; the log could only say that nothing arrived. Six
+    seconds after a camera stream is published the client now reports each
+    step between the camera and the wire with its own count
+    (`static/camera-diag.js`): the camera track (live or ended, muted, size,
+    frames delivered where the browser counts them), and on touch devices
+    or with a filter the hidden element feeding the canvas (paused or
+    playing, what its `play()` came to -- a refusal was never caught before
+    -- and frames drawn), then the frames the sender took in, encoded and
+    sent as packets, and the frames the preview showed. The first zero is
+    where the picture stops:
+    `camera after 6s: ios/safari touch; track live; canvas orientation,
+    element paused ready 0 0x0, play NotAllowedError, drawn 0; sender got 0
+    frames, encoded 0, sent 0 packets; preview 0 frames`. The platform goes
+    out as a family of words (`android/chrome`, `ios/safari`, `app desktop`),
+    never the user agent; a count the browser does not report is left out.
 
 ### Localisation
 

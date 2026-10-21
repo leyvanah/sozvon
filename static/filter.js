@@ -66,6 +66,12 @@ function Filter(stream, definition) {
     this.captureStream = this.canvas.captureStream(0);
     /** @type {boolean} */
     this.busy = false;
+    // For the camera check (camera-diag.js): what the hidden element's
+    // play() came to, and how many frames reached the canvas. (Sozvon)
+    /** @type {string} */
+    this.playState = 'pending';
+    /** @type {number} */
+    this.drawn = 0;
 }
 
 Filter.prototype.start = async function() {
@@ -86,7 +92,18 @@ Filter.prototype.start = async function() {
     });
     this.video.srcObject = this.inputStream;
     this.video.muted = true;
-    this.video.play();
+    // A refused play() leaves the canvas without frames and says so nowhere
+    // else; keep its outcome for the camera check. (Sozvon)
+    let played = this.video.play();
+    if(played && played.then)
+        played.then(() => {
+            this.playState = 'ok';
+        }, e => {
+            this.playState = (e && e.name) || 'error';
+            console.warn('Filter: play() failed', e);
+        });
+    else
+        this.playState = 'ok';
     if(this.definition.init)
         await this.definition.init.call(this);
     this.timer = setInterval(() => this.draw(), 1000 / this.frameRate);
@@ -130,6 +147,8 @@ Filter.prototype.draw = async function() {
         } catch(e) {
             console.error(e);
         }
+        if(ok)
+            this.drawn++;
         if(ok && !this.fixedFramerate) {
             /** @ts-ignore */
             this.captureStream.getTracks()[0].requestFrame();
