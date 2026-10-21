@@ -117,7 +117,8 @@ test('a working camera reports every step, and the server logs it', async ({brow
     const line = await serverLine(mark);
     console.log('server:', line);
     expect(line).toMatch(/ up=[0-9a-f]{6} camera after \d+s: \w+\/chrome; track live \d+x\d+/);
-    expect(line).toMatch(/; no canvas; sender got [1-9]\d* frames, encoded [1-9]\d*, sent [1-9]\d* packets; preview [1-9]\d* frames$/);
+    // a new encoder often starts limited by bandwidth, which the line says
+    expect(line).toMatch(/; no canvas; sender got [1-9]\d* frames, encoded [1-9]\d*, sent [1-9]\d* packets(, limited by \w+)?; preview [1-9]\d* frames$/);
     expect(page.errors).toEqual([]);
 });
 
