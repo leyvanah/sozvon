@@ -159,6 +159,13 @@ test('a phone in the background is shown as away, and its canvas stops', async (
     // the last picture at thirty a second.
     await expect.poll(() => framesIn(bob, 'alice', 2000), {timeout: 10_000})
         .toBe(0);
+    // The paths are not judged while hidden: the phone takes the network
+    // away from a page in the background, and on the real phone that made
+    // the call give up UDP for six hours.
+    const watched = () => alice.evaluate(() =>
+        turnWatcher ? turnWatcher.streams.size : 0);
+    await alice.waitForTimeout(3000);
+    expect(await watched()).toBe(0);
 
     // back in front: the camera runs again
     await alice.evaluate(() => {
@@ -168,6 +175,8 @@ test('a phone in the background is shown as away, and its canvas stops', async (
     await expect.poll(() => awayShown(bob, 'alice'))
         .toEqual({tile: false, note: '', row: false});
     await expect.poll(() => framesIn(bob, 'alice', 1000)).toBeGreaterThan(5);
+    // and judged again once it is back
+    await expect.poll(watched).toBeGreaterThan(0);
 
     // a computer does not mark itself: its camera keeps running when hidden
     expect(await bob.evaluate(() => pausesWhenHidden())).toBe(false);

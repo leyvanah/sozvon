@@ -875,6 +875,18 @@ function watchTurnPath(c, report) {
     }
     if(udpGivenUp)
         return;
+    // A phone takes the network away from a page in the background, about
+    // a minute after it is hidden (away.js), and every path goes down with
+    // it.  That is the system's doing, not UDP's, yet on a real phone it
+    // made the call give up UDP, a decision kept for six hours; on the test
+    // stand the call then came back with no media at all.  Judge the paths
+    // again from scratch once the page is back. (Sozvon)
+    if(document.visibilityState === 'hidden' && pausesWhenHidden()) {
+        if(turnWatcher)
+            for(let id of [...turnWatcher.streams.keys()])
+                turnWatcher.forget(id);
+        return;
+    }
     if(!turnWatcher)
         turnWatcher = new F.Watcher();
     let q = c.userdata.quality;
