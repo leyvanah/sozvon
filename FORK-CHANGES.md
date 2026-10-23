@@ -544,9 +544,12 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     its camera running when hidden, so it never marks itself) sets
     `away` in its per-user data when the page is hidden, as the raised hand
     does; the others see "In another app -- camera and microphone paused"
-    over a dimmed picture, and a moon in the people list. A call the
+    over a dimmed picture, and a crossed-out camera in the people list. A call the
     background interrupted is rejoined on return with a message saying so
-    rather than a bare "reconnected".
+    rather than a bare "reconnected". While a phone's page is hidden its
+    paths are not judged by the UDP fallback either: the phone takes the
+    network away from a page in the background, and on the real phone that
+    made the call give up UDP for six hours.
     **The orientation canvas draws only new camera frames.** It used to be
     drawn on every tick, so a stopped camera went on sending its last
     picture at thirty frames a second -- a still face that looked live, with
