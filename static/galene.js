@@ -4866,7 +4866,7 @@ function setAwayNote(c) {
         note = document.createElement('div');
         note.className = 'peer-away-note';
         note.setAttribute('role', 'status');
-        note.appendChild(stateGlyph('fa-moon'));
+        note.appendChild(stateGlyph('fa-video-slash'));
         // tagged, so that a change of language rewrites them too
         for(let [tag, key] of [['strong', 'tile.away'],
                                ['span', 'tile.awayPaused']]) {
