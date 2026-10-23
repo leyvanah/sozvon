@@ -75,6 +75,26 @@
     <string name="deploy_patience">Обычно занимает 2–5 минут. Установка идёт на сервере сама по себе: если связь оборвётся, приложение переподключится и продолжит следить.</string>
     <string name="deploy_failed">Установка не удалась.</string>
     <string name="deploy_retry">Назад к настройкам</string>
+    <!-- Причина неудачной установки, по коду установщика (tasks#19).
+         Ключи совпадают с deploy/InstallErrors.kt; это проверяет тест. -->
+    <string name="install_error_not_root">У этой учётной записи нет прав root. Войдите на сервер как root или как пользователь, которому разрешён sudo без пароля.</string>
+    <string name="install_error_no_systemd">На сервере нет systemd. Sozvon ставится на Linux с systemd — например, Debian или Ubuntu.</string>
+    <string name="install_error_unsupported_os">На сервере не Linux. Sozvon ставится на Linux с systemd — например, Debian или Ubuntu.</string>
+    <string name="install_error_unsupported_arch">Процессор сервера не поддерживается: готовые сборки есть только для x86-64 и ARM64.</string>
+    <string name="install_error_packages">Не удалось установить нужные программы (curl, tar, openssl). Проверьте, что у сервера есть интернет и менеджер пакетов не занят другой установкой, и повторите.</string>
+    <string name="install_error_system_setup">Не удалось подготовить систему для Sozvon. Подробности — ниже.</string>
+    <string name="install_error_port_in_use">Нужный порт уже занят — скорее всего, на сервере работает веб-сервер. Остановите его или ставьте Sozvon на другой сервер. Какой порт — в строке ниже.</string>
+    <string name="install_error_version_unknown">Сервер не смог узнать, какая версия Sozvon последняя: у него нет связи с GitHub. Проверьте его доступ в интернет и повторите.</string>
+    <string name="install_error_download_failed">Сервер не смог скачать Sozvon. Проверьте его доступ в интернет и повторите.</string>
+    <string name="install_error_checksum_mismatch">Скачанный архив не совпал с контрольной суммой, поэтому установка остановлена. Повторите; если ошибка вернётся, сообщите нам.</string>
+    <string name="install_error_unpack_failed">Не удалось распаковать Sozvon на сервере. Проверьте, что на диске есть свободное место.</string>
+    <string name="install_error_public_ip_unknown">Не удалось узнать внешний IP-адрес сервера, а без него не получить ни адрес, ни сертификат. Укажите сервер по IP-адресу или выберите вариант со своим доменом.</string>
+    <string name="install_error_certificate_failed">Не удалось создать сертификат для сервера. Подробности — ниже.</string>
+    <string name="install_error_service_failed">Sozvon установлен, но его служба не запустилась. Подробности — в журнале ниже.</string>
+    <string name="install_error_rolled_back">Новая версия не запустилась, поэтому сервер возвращён к прежней — он работает как раньше.</string>
+    <string name="install_error_not_answering">Sozvon установлен, но не отвечает. Чаще всего это значит, что Let\'s Encrypt не выдал сертификат: проверьте, что порты 80 и 443 открыты снаружи, а свой домен указывает на этот сервер.</string>
+    <string name="install_error_internal">Установщик столкнулся с внутренней ошибкой. Пришлите нам текст ниже — он поможет разобраться.</string>
+    <string name="install_error_aborted">Установка неожиданно прервалась. Подробности — в журнале ниже; можно попробовать ещё раз.</string>
     <string name="deploy_done_title">Сервер готов</string>
     <string name="deploy_done_subtitle">Запишите пароль — он показывается только один раз.</string>
     <string name="result_address">Адрес</string>

@@ -77,6 +77,26 @@
     <string name="deploy_patience">Usually takes 2–5 minutes. The install runs on the server by itself: if the connection drops, the app reconnects and keeps watching.</string>
     <string name="deploy_failed">The install failed.</string>
     <string name="deploy_retry">Back to settings</string>
+    <!-- Why an install failed, by the installer's failure code (tasks#19).
+         Keys must match deploy/InstallErrors.kt; a test checks. -->
+    <string name="install_error_not_root">This account has no root rights. Sign in to the server as root, or as a user allowed to use sudo without a password.</string>
+    <string name="install_error_no_systemd">The server has no systemd. Sozvon installs on Linux with systemd, such as Debian or Ubuntu.</string>
+    <string name="install_error_unsupported_os">The server does not run Linux. Sozvon installs on Linux with systemd, such as Debian or Ubuntu.</string>
+    <string name="install_error_unsupported_arch">The server\'s processor is not supported: ready builds exist only for x86-64 and ARM64.</string>
+    <string name="install_error_packages">Could not install the programs it needs (curl, tar, openssl). Check that the server has internet access and its package manager is not busy with another install, then try again.</string>
+    <string name="install_error_system_setup">Could not prepare the system for Sozvon. Details are below.</string>
+    <string name="install_error_port_in_use">A port it needs is already taken, most likely by a web server. Stop it, or install Sozvon on another server. The line below says which port.</string>
+    <string name="install_error_version_unknown">The server could not find out the latest Sozvon version: it cannot reach GitHub. Check its internet access and try again.</string>
+    <string name="install_error_download_failed">The server could not download Sozvon. Check its internet access and try again.</string>
+    <string name="install_error_checksum_mismatch">The downloaded archive did not match its checksum, so the install stopped. Try again; if it happens again, let us know.</string>
+    <string name="install_error_unpack_failed">Could not unpack Sozvon on the server. Check that its disk has free space.</string>
+    <string name="install_error_public_ip_unknown">Could not find out the server\'s public IP address, and without it there is neither an address nor a certificate. Enter the server by its IP address, or choose the option with your own domain.</string>
+    <string name="install_error_certificate_failed">Could not create a certificate for the server. Details are below.</string>
+    <string name="install_error_service_failed">Sozvon is installed, but its service did not start. Details are in the log below.</string>
+    <string name="install_error_rolled_back">The new version did not start, so the server went back to the previous one. It works as before.</string>
+    <string name="install_error_not_answering">Sozvon is installed but does not answer. Most often Let\'s Encrypt did not issue a certificate: check that ports 80 and 443 are open from outside and that your domain points at this server.</string>
+    <string name="install_error_internal">The installer hit an internal error. Send us the text below; it will help us find out why.</string>
+    <string name="install_error_aborted">The install stopped unexpectedly. Details are in the log below; you can try again.</string>
     <string name="deploy_done_title">Your server is ready</string>
     <string name="deploy_done_subtitle">Write the password down — it is shown only once.</string>
     <string name="result_address">Address</string>
