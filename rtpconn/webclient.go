@@ -1730,7 +1730,12 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 	case "requestStream":
 		down := getDownConn(c, m.Id)
 		if down == nil {
-			return ErrUnknownId
+			// The stream may have been closed while this request
+			// was on its way, which is nothing to end the session
+			// over.  It did end it, a few hundred milliseconds
+			// into a rejoin, and the client had to rejoin again.
+			// (Sozvon)
+			return nil
 		}
 		requested, err := toStringArray(m.Request)
 		if err != nil {

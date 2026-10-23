@@ -382,3 +382,19 @@ func TestSetDataArrivesInOrder(t *testing.T) {
 		}
 	}
 }
+
+// A request for a stream that is gone is ignored: the server may close a
+// stream while the client's request for it is on its way, and that request
+// used to end the whole session.  (Sozvon)
+func TestRequestStreamForGoneStream(t *testing.T) {
+	setupPermissionsGroup(t, "request-gone")
+	boss := joinForTest(t, "request-gone", "boss-1", "boss", "bosspass")
+	err := handleClientMessage(boss, clientMessage{
+		Type:    "requestStream",
+		Id:      "gone",
+		Request: []interface{}{"audio", "video"},
+	})
+	if err != nil {
+		t.Errorf("requestStream for a stream that is gone: %v", err)
+	}
+}
