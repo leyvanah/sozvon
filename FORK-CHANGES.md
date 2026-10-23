@@ -533,6 +533,33 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     frames, encoded 0, sent 0 packets; preview 0 frames`. The platform goes
     out as a family of words (`android/chrome`, `ios/safari`, `app desktop`),
     never the user agent; a count the browser does not report is left out.
+  * **A phone that puts the call in the background says so**
+    (`static/away.js`). Measured on a real phone on 2026-10-23 (Android 16,
+    Chrome 155): within a second of the home button or the screen going
+    off, the system closes the camera and silences the microphone, though
+    the page's tracks still read "live"; a minute later the browser loses
+    the network, and two minutes after hiding the server ends the session.
+    Nobody else was told: they kept a still picture and silence. Now a
+    phone or tablet (touch points and a coarse pointer -- a computer keeps
+    its camera running when hidden, so it never marks itself) sets
+    `away` in its per-user data when the page is hidden, as the raised hand
+    does; the others see "In another app -- camera and microphone paused"
+    over a dimmed picture, and a moon in the people list. A call the
+    background interrupted is rejoined on return with a message saying so
+    rather than a bare "reconnected".
+    **The orientation canvas draws only new camera frames.** It used to be
+    drawn on every tick, so a stopped camera went on sending its last
+    picture at thirty frames a second -- a still face that looked live, with
+    the receiver's freeze counter at zero. It now draws when the element has
+    a frame it has not drawn (`getVideoPlaybackQuality()`, or
+    `requestVideoFrameCallback` where Firefox reports no count).
+    Two server fixes found on the way: **changes of a member's data reach
+    the room in the order they were made** (each `setdata` was pushed from a
+    goroutine of its own, so `{"muted": null}` then `{"away": true}` could
+    arrive reversed and leave the room with the older), and **a
+    `requestStream` for a stream that is gone no longer ends the session**
+    (a stream closed while the request was in flight killed a session a few
+    hundred milliseconds into a rejoin).
 
 ### Localisation
 
