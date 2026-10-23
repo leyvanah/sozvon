@@ -2447,8 +2447,16 @@ function feedBitrate(c, report) {
     if(!r.send || !c.source || !serverConnection ||
        !serverConnection.users[c.source])
         return;
-    serverConnection.userMessage(B.MESSAGE_KIND, c.source,
-                                 {stream: c.id, cap: r.cap}, true);
+    // The socket may have closed since this poll began; the request is
+    // repeated with the controller's next one, as in releaseBitrateCap().
+    // Uncaught, it surfaced as a page error whenever a poll met a dropped
+    // socket. (Sozvon)
+    try {
+        serverConnection.userMessage(B.MESSAGE_KIND, c.source,
+                                     {stream: c.id, cap: r.cap}, true);
+    } catch(e) {
+        console.warn('feedBitrate', e);
+    }
 }
 
 // How often the picture a down stream delivers goes to the connection log
