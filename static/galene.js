@@ -875,6 +875,18 @@ function watchTurnPath(c, report) {
     }
     if(udpGivenUp)
         return;
+    // A phone takes the network away from a page in the background, about
+    // a minute after it is hidden (away.js), and every path goes down with
+    // it.  That is the system's doing, not UDP's, yet on a real phone it
+    // made the call give up UDP, a decision kept for six hours; on the test
+    // stand the call then came back with no media at all.  Judge the paths
+    // again from scratch once the page is back. (Sozvon)
+    if(document.visibilityState === 'hidden' && pausesWhenHidden()) {
+        if(turnWatcher)
+            for(let id of [...turnWatcher.streams.keys()])
+                turnWatcher.forget(id);
+        return;
+    }
     if(!turnWatcher)
         turnWatcher = new F.Watcher();
     let q = c.userdata.quality;
@@ -1059,6 +1071,9 @@ function showReconnect(on) {
 function scheduleReconnect() {
     reconnecting = true;
     showReconnect(true);
+    let t = getAwayTracker();
+    if(t)
+        t.lost(Date.now());
     if(reconnectTimer)
         clearTimeout(reconnectTimer);
     let delay = Math.min(
@@ -1072,6 +1087,8 @@ function scheduleReconnect() {
 function stopReconnect() {
     reconnecting = false;
     reconnectAttempt = 0;
+    if(awayTracker)
+        awayTracker.back();
     if(reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -1129,7 +1146,18 @@ function reconnectSoon() {
 
 window.addEventListener('online', reconnectSoon);
 document.addEventListener('visibilitychange', function() {
-    if(document.visibilityState === 'visible')
+    let hidden = document.visibilityState === 'hidden';
+    // Sozvon: the last thing a phone lets a page do before it pauses the
+    // camera and microphone, so say it now (away.js).
+    let t = getAwayTracker();
+    if(t) {
+        if(hidden)
+            t.hidden(Date.now());
+        else
+            t.shown(Date.now());
+    }
+    publishAwayState(hidden);
+    if(!hidden)
         reconnectSoon();
 });
 
@@ -1708,6 +1736,76 @@ function publishMuteState(mute) {
         );
     } catch(e) {
         console.warn('Could not publish mute state', e);
+    }
+}
+
+/**
+ * Sozvon: away.js, or null before it has loaded.
+ *
+ * @returns {any}
+ */
+function awayApi() {
+    return /** @type {any} */ (window).SozvonAway || null;
+}
+
+/** @type {any} */
+let awayTracker = null;
+
+/**
+ * Sozvon: the tracker of when the page was in the background (away.js).
+ *
+ * @returns {any}
+ */
+function getAwayTracker() {
+    let A = awayApi();
+    if(!awayTracker && A)
+        awayTracker = new A.Tracker();
+    return awayTracker;
+}
+
+/**
+ * Sozvon: whether this device stops our camera and microphone when the page
+ * is hidden -- a phone or a tablet, not a computer (away.js).
+ *
+ * @returns {boolean}
+ */
+function pausesWhenHidden() {
+    let A = awayApi();
+    if(!A)
+        return false;
+    let coarse = false;
+    try {
+        coarse = window.matchMedia('(pointer: coarse)').matches;
+    } catch(e) {
+        // no matchMedia: no way to tell, so not a phone
+    }
+    return A.pausesWhenHidden({
+        touchPoints: navigator.maxTouchPoints || 0,
+        coarse: coarse,
+    });
+}
+
+/**
+ * Sozvon: tell the room whether this phone has put the call in the
+ * background, where the system pauses our camera and microphone.  Same
+ * per-user data as publishMuteState(); see away.js for what was measured.
+ *
+ * @param {boolean} away
+ */
+function publishAwayState(away) {
+    if(!serverConnection || !serverConnection.id)
+        return;
+    if(away && !pausesWhenHidden())
+        return;
+    let me = serverConnection.users[serverConnection.id];
+    if(me && !!me.data.away === !!away)
+        return;
+    try {
+        serverConnection.userAction(
+            'setdata', serverConnection.id, {'away': away ? true : null},
+        );
+    } catch(e) {
+        console.warn('Could not publish away state', e);
     }
 }
 
@@ -2349,8 +2447,16 @@ function feedBitrate(c, report) {
     if(!r.send || !c.source || !serverConnection ||
        !serverConnection.users[c.source])
         return;
-    serverConnection.userMessage(B.MESSAGE_KIND, c.source,
-                                 {stream: c.id, cap: r.cap}, true);
+    // The socket may have closed since this poll began; the request is
+    // repeated with the controller's next one, as in releaseBitrateCap().
+    // Uncaught, it surfaced as a page error whenever a poll met a dropped
+    // socket. (Sozvon)
+    try {
+        serverConnection.userMessage(B.MESSAGE_KIND, c.source,
+                                     {stream: c.id, cap: r.cap}, true);
+    } catch(e) {
+        console.warn('feedBitrate', e);
+    }
 }
 
 // How often the picture a down stream delivers goes to the connection log
@@ -4750,6 +4856,47 @@ function setLabel(c, fallback) {
         mic.appendChild(stateGlyph('fa-microphone-slash'));
         label.appendChild(mic);
     }
+
+    if(!c.up)
+        setAwayNote(c);
+}
+
+/**
+ * Sozvon: over the tile of somebody whose phone has put the call in the
+ * background, say so.  Their camera has stopped, so what the tile shows is
+ * the last picture before it did, and it looked like a person sitting still
+ * (away.js).
+ *
+ * @param {Stream} c
+ */
+function setAwayNote(c) {
+    let div = document.getElementById('peer-' + c.localId);
+    if(!div)
+        return;
+    let u = serverConnection && c.source && serverConnection.users[c.source];
+    let away = !!(u && u.data && u.data.away);
+    div.classList.toggle('peer-away', away);
+    let note = div.querySelector(':scope > .peer-away-note');
+    if(!away) {
+        if(note)
+            note.remove();
+        return;
+    }
+    if(!note) {
+        note = document.createElement('div');
+        note.className = 'peer-away-note';
+        note.setAttribute('role', 'status');
+        note.appendChild(stateGlyph('fa-video-slash'));
+        // tagged, so that a change of language rewrites them too
+        for(let [tag, key] of [['strong', 'tile.away'],
+                               ['span', 'tile.awayPaused']]) {
+            let e = document.createElement(tag);
+            e.setAttribute('data-i18n', key);
+            e.textContent = Sozvon.i18n.t(key);
+            note.appendChild(e);
+        }
+        div.appendChild(note);
+    }
 }
 
 /**
@@ -5779,6 +5926,17 @@ function setUserStatus(id, elt, userinfo) {
     // by publishMuteState() over the same per-user data as the raised hand.
     // (Sozvon)
     elt.classList.toggle('user-muted', !!userinfo.data.muted);
+    // And whether their phone has put the call in the background, which
+    // pauses their camera and microphone (publishAwayState()). (Sozvon)
+    let away = !!userinfo.data.away;
+    elt.classList.toggle('user-away', away);
+    if(away) {
+        elt.setAttribute('data-i18n-title', 'userlist.away');
+        elt.title = Sozvon.i18n.t('userlist.away');
+    } else if(elt.hasAttribute('data-i18n-title')) {
+        elt.removeAttribute('data-i18n-title');
+        elt.removeAttribute('title');
+    }
 
     let microphone=false, camera = false;
     for(let label in userinfo.streams) {
@@ -7071,8 +7229,15 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         reconnectLastJoin = serverConnection.lastJoin || reconnectLastJoin;
         reconnectName = hidePseudonym(serverConnection.username) || null;
         let wasReconnecting = reconnecting;
+        // A call that dropped because a phone put it in the background is
+        // rejoined the moment it comes back, so the person would only see a
+        // flash of "reconnecting"; say what happened (away.js). (Sozvon)
+        let tracker = getAwayTracker();
+        let fromAway = !!tracker && tracker.back();
         if(reconnecting)
-            displayMessage(Sozvon.i18n.t('toast.reconnected'));
+            displayMessage(Sozvon.i18n.t(fromAway ?
+                                         'toast.reconnectedAfterAway' :
+                                         'toast.reconnected'));
         stopReconnect();
         if(wasReconnecting && kind === 'join')
             restore = reconnectMedia;
@@ -7188,6 +7353,8 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
     // show as unmuted to everyone until the first time they touched the
     // button. (Sozvon)
     publishMuteState(!!getSettings().localMute);
+    // And whether we are in the background: a phone can rejoin while hidden.
+    publishAwayState(document.visibilityState === 'hidden');
 
     if(('mediaDevices' in navigator) &&
        ('getUserMedia' in navigator.mediaDevices) &&

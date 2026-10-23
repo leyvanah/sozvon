@@ -2011,6 +2011,11 @@ body.nav-hidden .nav-menu {
     flex: none;
 }
 #users .user-p:not(.knock-p)::after { float: none; flex: none; margin-left: 8px; }
+/* In the background on their phone (setUserStatus()): the camera crossed out
+   instead of the camera or microphone glyph, which would say they are on.
+   A glyph the subset already carries (contrib/subset-fontawesome.py). */
+#users .user-p.user-away:not(.knock-p)::after { content: "\f4e2"; }
+#users .user-p.user-away .up-name { opacity: 0.6; }
 .up-avatar {
     position: relative;
     flex: none;
@@ -4607,6 +4612,32 @@ body.drawer-open .sidenav {
    person with a media-player control that says nothing about who is there.
    visibility, not display: the tile takes its shape from this element. */
 .peer-nopicture video { visibility: hidden; }
+
+/* Somebody whose phone has put the call in the background (setAwayNote()):
+   their camera has stopped, so the picture is the last one before it did.
+   Dim it, so that it does not pass for a person sitting still, and say why
+   over it. */
+.peer-away video { filter: grayscale(1) brightness(0.45); }
+.peer-away-note {
+    position: absolute;
+    left: 50%;
+    top: 45%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    max-width: 90%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+    background: var(--on-video-scrim);
+    color: var(--on-video);
+    pointer-events: none;
+}
+.peer-away-note .fa-video-slash { font-size: 20px; }
+.peer-away-note span { font-size: 13px; opacity: 0.85; }
 
 /* The participant's avatar in the middle of a tile with no picture: the
    initial and the colour bucket of their row in the people list

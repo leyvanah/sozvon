@@ -72,6 +72,13 @@ function Filter(stream, definition) {
     this.playState = 'pending';
     /** @type {number} */
     this.drawn = 0;
+    // The camera frame last drawn, and the frames the element has presented
+    // when the browser counts them only through requestVideoFrameCallback.
+    // See newFrame(). (Sozvon)
+    /** @type {number} */
+    this.lastFrame = -1;
+    /** @type {number|null} */
+    this.callbackFrames = null;
 }
 
 Filter.prototype.start = async function() {
@@ -107,7 +114,52 @@ Filter.prototype.start = async function() {
     if(this.definition.init)
         await this.definition.init.call(this);
     this.timer = setInterval(() => this.draw(), 1000 / this.frameRate);
+    /** @type {any} */
+    let video = this.video;
+    if(video.requestVideoFrameCallback) {
+        let counted = () => {
+            this.callbackFrames = (this.callbackFrames || 0) + 1;
+            if(this.timer)
+                video.requestVideoFrameCallback(counted);
+        };
+        video.requestVideoFrameCallback(counted);
+    }
 }
+
+/**
+ * Whether the camera has given the element a frame that has not been drawn
+ * yet.  (Sozvon)
+ *
+ * The canvas used to be drawn on every tick whether or not there was
+ * anything new to draw, so when the camera stopped -- which is what a phone
+ * does the moment the call goes into the background -- the last picture
+ * went on being sent at thirty frames a second.  Everyone else saw a still
+ * face that looked live, and the receiver's freeze counter, which is how
+ * the call notices a stuck picture, stayed at zero.
+ *
+ * The count comes from getVideoPlaybackQuality() where the browser keeps it
+ * (Chromium, Safari); Firefox reports zero there for a camera, so it falls
+ * back to frames seen by requestVideoFrameCallback.  A browser that offers
+ * neither is drawn on every tick, as before.
+ *
+ * @returns {boolean}
+ */
+Filter.prototype.newFrame = function() {
+    let n = null;
+    if(this.video.getVideoPlaybackQuality) {
+        let t = this.video.getVideoPlaybackQuality().totalVideoFrames;
+        if(t > 0)
+            n = t;
+    }
+    if(n === null)
+        n = this.callbackFrames;
+    if(n === null)
+        return true;
+    if(n === this.lastFrame)
+        return false;
+    this.lastFrame = n;
+    return true;
+};
 
 Filter.prototype.draw = async function() {
     if(this.video.videoWidth === 0 && this.video.videoHeight === 0) {
@@ -136,6 +188,9 @@ Filter.prototype.draw = async function() {
         // drop frame
         return;
     }
+
+    if(!this.newFrame())
+        return;
 
     try {
         this.busy = true;
