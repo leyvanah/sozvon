@@ -324,3 +324,61 @@ func TestSetDataReplacesTheMap(t *testing.T) {
 		t.Errorf("the original map changed to %v", old)
 	}
 }
+
+// Two changes of a member's data, sent one after the other, reach everyone
+// else in that order, so the second is what they are left with.  Each was
+// pushed from a goroutine of its own, and those ran in any order: a client
+// that joined in the background said {"muted": null} and then
+// {"away": true}, and the room was left believing the first.  (Sozvon)
+func TestSetDataArrivesInOrder(t *testing.T) {
+	setupPermissionsGroup(t, "data-order")
+	boss := joinForTest(t, "data-order", "boss-1", "boss", "bosspass")
+	deputy := joinForTest(t, "data-order", "deputy-1", "deputy", "deputypass")
+	deputy.actions.Get()
+
+	for i := 0; i < 200; i++ {
+		for _, v := range []map[string]interface{}{
+			{"muted": nil}, {"away": true},
+		} {
+			err := handleClientMessage(boss, clientMessage{
+				Type:  "useraction",
+				Kind:  "setdata",
+				Dest:  boss.id,
+				Value: v,
+			})
+			if err != nil {
+				t.Fatalf("setdata: %v", err)
+			}
+		}
+		var changes []map[string]interface{}
+		for len(changes) < 2 {
+			<-deputy.actions.Ch
+			for _, a := range deputy.actions.Get() {
+				p, ok := a.(pushClientAction)
+				if ok && p.kind == "change" && p.id == boss.id {
+					changes = append(changes, p.data)
+				}
+			}
+		}
+		if changes[1]["away"] != true {
+			t.Fatalf("round %v: the room was left with %v", i, changes[1])
+		}
+		err := handleClientMessage(boss, clientMessage{
+			Type:  "useraction",
+			Kind:  "setdata",
+			Dest:  boss.id,
+			Value: map[string]interface{}{"away": nil},
+		})
+		if err != nil {
+			t.Fatalf("setdata: %v", err)
+		}
+		for n := 0; n < 1; {
+			<-deputy.actions.Ch
+			for _, a := range deputy.actions.Get() {
+				if p, ok := a.(pushClientAction); ok && p.kind == "change" {
+					n++
+				}
+			}
+		}
+	}
+}

@@ -2376,14 +2376,16 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 			user := c.Username()
 			perms := c.Permissions()
 			data = c.Data()
-			go func(clients []group.Client) {
-				for _, cc := range clients {
-					cc.PushClient(
-						g.Name(), "change",
-						id, user, perms, data,
-					)
-				}
-			}(g.GetClients(nil))
+			// In order, from this goroutine: a goroutine per change
+			// let two changes in a row arrive the wrong way round,
+			// leaving the room with the older one.  PushClient only
+			// queues, so it does not block.  (Sozvon)
+			for _, cc := range g.GetClients(nil) {
+				cc.PushClient(
+					g.Name(), "change",
+					id, user, perms, data,
+				)
+			}
 		default:
 			return group.UserError("unknown user action")
 		}
