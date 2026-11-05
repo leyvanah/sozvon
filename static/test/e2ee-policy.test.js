@@ -367,17 +367,46 @@ test('every handshake message says its version', async () => {
         assert.strictEqual(m.v, ctx.SozvonE2EECrypto.PROTOCOL_VERSION, m.t);
 });
 
-test('a handshake that does not finish in time fails', async () => {
+test('a handshake that does not finish in time says so', async () => {
     const ctx = loadController();
     const {e} = await waitingInitiator(ctx);
     assert.strictEqual(e.state, 'handshaking');
+    assert.strictEqual(e.detail, null);
     assert.ok(ctx.timers.length > 0, 'the handshake is not timed at all');
     ctx.fireTimers();
-    assert.strictEqual(
-        e.state, 'failed',
-        'a handshake nobody answers stays open for as long as anybody likes',
-    );
-    assert.strictEqual(e.detail, 'timeout');
+    assert.strictEqual(e.state, 'handshaking');
+    assert.strictEqual(e.detail, 'slow', 'a stuck handshake looks like any other');
+});
+
+// Signalling resume delivers what a stall held up, long after the timeout:
+// the handshake must still finish then, on both sides, as one session.
+test('a handshake held up past the timeout finishes once its messages arrive', async () => {
+    const ctx = loadController();
+    const queue = [];
+    const connection = id => ({
+        id: id,
+        userMessage: (kind, dest, payload) =>
+            queue.push({from: id, dest: dest, payload: payload}),
+    });
+    const a = new ctx.SozvonE2EE(connection('aaa'));
+    const b = new ctx.SozvonE2EE(connection('zzz'));
+    a.users.add('zzz');
+    b.users.add('aaa');
+    await a.startWith('zzz');
+    await b.startWith('aaa');
+    // nothing has got through yet when both run out of time
+    ctx.fireTimers();
+    assert.deepStrictEqual([a.state, a.detail, b.state, b.detail],
+                           ['handshaking', 'slow', 'handshaking', 'slow']);
+    const peers = {aaa: a, zzz: b};
+    for(let i = 0; queue.length && i < 100; i++) {
+        const m = queue.shift();
+        await peers[m.dest].onMessage(m.from, m.payload);
+    }
+    assert.strictEqual(a.state, 'established');
+    assert.strictEqual(b.state, 'established');
+    assert.strictEqual(a.detail, null);
+    assert.deepStrictEqual(a.sas, b.sas);
 });
 
 test('the timeout does not touch a handshake that finished', async () => {

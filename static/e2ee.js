@@ -34,10 +34,19 @@
 (function(global) {
     const C = global.SozvonE2EECrypto;
 
-    // How long a handshake may take before it is given up.  Two browsers on
-    // a working connection finish in well under a second; a handshake still
-    // open after this is either stuck or being held open by somebody who
-    // needs the time.
+    // How long a handshake may take before the user is told it is slow.  Two
+    // browsers on a working connection finish in well under a second.
+    //
+    // It is not given up, though.  Signalling resume holds a stalled
+    // participant in the call for up to two minutes and then delivers every
+    // message that was stuck, so a handshake still open after this is usually
+    // one whose answer is on its way.  Failing it left both sides in "failed"
+    // for good: each ignores the other's messages from then on, and only a
+    // rejoin starts a new handshake.  Nothing is gained by failing it either:
+    // the time a man in the middle could use was for choosing a key after
+    // seeing ours, and one commitment per handshake already rules that out,
+    // however long it stays open.  Until it finishes the worker drops every
+    // frame, as during any handshake. (Sozvon)
     const HANDSHAKE_TIMEOUT = 30000;
 
     /**
@@ -358,7 +367,7 @@
         this.handshakeTimer = global.setTimeout(() => {
             this.handshakeTimer = null;
             if(gen === this.generation && this.state === 'handshaking')
-                this.fail('timeout');
+                this.setState('handshaking', 'slow');
         }, HANDSHAKE_TIMEOUT);
 
         let kp = await C.generateKeyPair();

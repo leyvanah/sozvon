@@ -6790,13 +6790,24 @@ function updateE2EEUI() {
             icon.className = 'fas fa-unlock';
         // A handshake that ran out of time or met another version of the
         // page is not evidence of interception, and should not read as one.
-        ind.title = Sozvon.i18n.t({
-            'timeout': 'e2ee.failedTimeout',
-            'version': 'e2ee.failedVersion',
-        }[e2ee.detail] || 'e2ee.failed');
+        ind.title = Sozvon.i18n.t(e2ee.detail === 'version' ?
+                                  'e2ee.failedVersion' : 'e2ee.failed');
         setVisibility('e2ee-indicator', true);
         break;
-    default: // idle / handshaking: nothing to compare yet
+    case 'handshaking':
+        if(e2ee.detail === 'slow') {
+            // Still waiting for the other side, long enough to say so: until
+            // it answers, nothing gets through in either direction.
+            ind.classList.add('e2ee-bad');
+            if(icon)
+                icon.className = 'fas fa-unlock';
+            ind.title = Sozvon.i18n.t('e2ee.handshakeSlow');
+            setVisibility('e2ee-indicator', true);
+            break;
+        }
+        setVisibility('e2ee-indicator', false);
+        break;
+    default: // idle: nothing to compare yet
         setVisibility('e2ee-indicator', false);
         break;
     }
