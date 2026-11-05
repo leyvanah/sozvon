@@ -1322,6 +1322,10 @@ test('an encrypted call is remembered past the connection it was on', () => {
         e2eeWasEncrypted: false,
         updateE2EEUI: () => {},
         enforceE2EEMediaPolicy: () => {},
+        // read by the guest-name hand-off at the end of gotE2EEState
+        serverConnection: null,
+        nameSentTo: null,
+        sendOwnName: () => {},
     });
     vm.runInContext(liftFunction('galene.js', 'gotE2EEState'), ctx);
     ctx.gotE2EEState.call({state: 'handshaking'});
