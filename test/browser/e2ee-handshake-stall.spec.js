@@ -160,6 +160,20 @@ test('an encrypted call is set up again across a signalling stall', async ({brow
         expect(A.log.filter(l => /pageerror/.test(l))).toEqual([]);
         expect(B.log.filter(l => /pageerror/.test(l))).toEqual([]);
     } finally {
-        await p.close();
+        // Leave the room empty for the next test, which uses it too.  The
+        // pages go first, while the proxy still carries alice's close: torn
+        // down the other way round, her socket just dies, and the server
+        // keeps her session waiting for a resume that never comes.
+        p.thaw();
+        for (const c of browser.contexts())
+            await c.close();
+        const after = await browser.newContext({
+            baseURL: `http://localhost:${UPSTREAM}`});
+        try {
+            await emptyRoom(after.request);
+        } finally {
+            await after.close();
+            await p.close();
+        }
     }
 });
