@@ -34,6 +34,21 @@
 (function(global) {
     const C = global.SozvonE2EECrypto;
 
+    // How long a handshake may take before the user is told it is slow.  Two
+    // browsers on a working connection finish in well under a second.
+    //
+    // It is not given up, though.  Signalling resume holds a stalled
+    // participant in the call for up to two minutes and then delivers every
+    // message that was stuck, so a handshake still open after this is usually
+    // one whose answer is on its way.  Failing it left both sides in "failed"
+    // for good: each ignores the other's messages from then on, and only a
+    // rejoin starts a new handshake.  Nothing is gained by failing it either:
+    // the time a man in the middle could use was for choosing a key after
+    // seeing ours, and one commitment per handshake already rules that out,
+    // however long it stays open.  Until it finishes the worker drops every
+    // frame, as during any handshake. (Sozvon)
+    const HANDSHAKE_TIMEOUT = 30000;
+
     /**
      * @param {ServerConnection} sc
      * @constructor
@@ -55,11 +70,22 @@
         this.startingFor = null;
         this.keyPair = null;
         this.myPub = null;           // Uint8Array
+        this.myCommit = null;        // SHA-256 of myPub
         this.peerPub = null;
         this.peerCommit = null;      // initiator stores the responder's commitment
+        this.handshakeTimer = null;
         this.secret = null;
         this.peerSupports = null;    // null unknown | true | false (peer can encrypt)
-        this.chatKey = null;         // AES-GCM key for two-party chat
+        // Two-party chat: a key per direction, and a sequence number per
+        // direction that the messages are authenticated with.
+        this.chatSendKey = null;
+        this.chatRecvKey = null;
+        this.chatSendSeq = 0;        // the number our next message gets
+        this.chatRecvSeq = -1;       // the last number we accepted
+        // Chat is encrypted and decrypted one message at a time, in order:
+        // numbers taken out of order would read as a replay.
+        this.chatSendQueue = Promise.resolve();
+        this.chatRecvQueue = Promise.resolve();
 
         // Whether attaching an encryptor has ever failed.  `supported` is
         // what the browser claimed at startup; this is what happened when we
@@ -68,6 +94,16 @@
         // failing are still going out without an encryptor, and a later
         // handshake must not put the padlock back over them.
         this.transformFailed = false;
+
+        // Whether this room has had an end-to-end encrypted call, in this
+        // page or, as galene.js remembers it, on a connection before this one.
+        // What turns an encrypted call into a plaintext one -- a peer that
+        // says it cannot encrypt, a third participant -- arrives through the
+        // server, which can make up either.  So once the room has been
+        // encrypted, it does not go back to plaintext on the server's word:
+        // the call stops until the user agrees (clearAgreed).
+        this.wasEncrypted = false;
+        this.clearAgreed = false;
 
         // Session counter, bumped by resetPeer().  finalize() is a chain of
         // awaits and the peer can leave under any of them; the number a run
@@ -184,16 +220,57 @@
         this.startWith(peer);
     };
 
-    // Move to the unencrypted-but-allowed state, or refuse outright when the
-    // group requires encryption.  Never leaves secure media flowing in clear.
+    // Move to the unencrypted-but-allowed state, or refuse: outright when the
+    // group requires encryption, and until the user agrees when this room
+    // has had an encrypted call.  Never leaves secure media flowing in clear.
     E2EE.prototype.downgrade = function(reason) {
-        if(this.require) {
+        if(this.require || (this.wasEncrypted && !this.clearAgreed)) {
             this.setWorkerMode(false);
             this.setState('blocked', reason);
         } else {
             this.setWorkerMode(true);
             this.setState('unencrypted', reason);
         }
+    };
+
+    /**
+     * Whether the call is refused only until the user agrees to go on
+     * without encryption, as opposed to refused by the group.
+     * @returns {boolean}
+     */
+    E2EE.prototype.awaitsClearConsent = function() {
+        return this.state === 'blocked' && !this.require &&
+            this.wasEncrypted && !this.clearAgreed;
+    };
+
+    /**
+     * Whether local media may stay published while the call is refused.
+     *
+     * Only while it waits for the user's consent, and only while this browser
+     * can encrypt: the worker is then not in cleartext mode, so every frame
+     * goes through an encryptor that either has no key and drops it, or seals
+     * it for the session that was established.  Nothing leaves in clear, and
+     * the camera does not have to be closed -- which matters when the reason
+     * goes away by itself, as a reconnecting participant's old session does
+     * once the server notices it is dead.  Where this browser cannot encrypt,
+     * a track has no encryptor at all and must be closed.
+     * @returns {boolean}
+     */
+    E2EE.prototype.mayPublishWhileAsking = function() {
+        return this.awaitsClearConsent() && this.canEncrypt();
+    };
+
+    /**
+     * The user has agreed to go on without end-to-end encryption.  Holds until
+     * the call is encrypted again: every reason to refuse after that is a new
+     * question.
+     */
+    E2EE.prototype.continueInClear = function() {
+        if(!this.awaitsClearConsent())
+            return;
+        this.clearAgreed = true;
+        this.setWorkerMode(true);
+        this.setState('unencrypted', this.detail);
     };
 
     // Tell the worker to forward frames unchanged (cleartext) or to
@@ -217,17 +294,55 @@
         this.startingFor = null;
         this.keyPair = null;
         this.myPub = null;
+        this.myCommit = null;
         this.peerPub = null;
         this.peerCommit = null;
         this.secret = null;
         this.sas = null;
         this.peerSupports = null;
-        this.chatKey = null;
+        this.dropChatKeys();
+        this.stopHandshakeTimer();
         if(this.worker) {
             this.worker.postMessage({type: 'clear'});
             // Safe default: drop unkeyed frames rather than leak cleartext.
             this.worker.postMessage({type: 'mode', cleartext: false});
         }
+    };
+
+    E2EE.prototype.dropChatKeys = function() {
+        this.chatSendKey = null;
+        this.chatRecvKey = null;
+        this.chatSendSeq = 0;
+        this.chatRecvSeq = -1;
+    };
+
+    E2EE.prototype.stopHandshakeTimer = function() {
+        if(this.handshakeTimer !== null) {
+            global.clearTimeout(this.handshakeTimer);
+            this.handshakeTimer = null;
+        }
+    };
+
+    /**
+     * Give up on this session: the handshake did not check out.  Anything a
+     * completion still in flight would write back belongs to a session that
+     * has failed, so it is stopped the way resetPeer() stops it, and the
+     * worker is left dropping frames.  The peer and our own key stay, so
+     * that further messages from the same peer do not start a new handshake
+     * behind the failure.
+     * @param {string} detail
+     */
+    E2EE.prototype.fail = function(detail) {
+        this.generation++;
+        this.stopHandshakeTimer();
+        this.secret = null;
+        this.sas = null;
+        this.dropChatKeys();
+        if(this.worker) {
+            this.worker.postMessage({type: 'clear'});
+            this.worker.postMessage({type: 'mode', cleartext: false});
+        }
+        this.setState('failed', detail);
     };
 
     // ---- handshake ----------------------------------------------------------
@@ -248,22 +363,36 @@
         this.ensureWorker();
         // Drop unkeyed frames during the handshake; never forward cleartext.
         this.setWorkerMode(false);
+        let gen = this.generation;
+        this.handshakeTimer = global.setTimeout(() => {
+            this.handshakeTimer = null;
+            if(gen === this.generation && this.state === 'handshaking')
+                this.setState('handshaking', 'slow');
+        }, HANDSHAKE_TIMEOUT);
 
         let kp = await C.generateKeyPair();
-        if(this.peer !== peer)
+        let myPub = await C.exportPublic(kp.publicKey);
+        let myCommit = await C.commit(myPub);
+        if(this.peer !== peer || gen !== this.generation)
             return; // peer changed while generating
         this.keyPair = kp;
-        this.myPub = await C.exportPublic(kp.publicKey);
+        this.myPub = myPub;
+        this.myCommit = myCommit;
         this.startingFor = null;
 
         this.send({t: 'hello'});
         if(this.role === 'responder')
-            this.send({t: 'commit', commit: C.b64(await C.commit(this.myPub))});
+            this.send({t: 'commit', commit: C.b64(this.myCommit)});
     };
 
     E2EE.prototype.send = function(payload) {
-        if(this.peer)
+        if(this.peer) {
+            // Every message but 'nocrypto', which a peer on any version has
+            // to understand, says which version of the handshake it is for.
+            if(payload.t !== 'nocrypto')
+                payload = Object.assign({v: C.PROTOCOL_VERSION}, payload);
             this.sc.userMessage('e2ee', this.peer, payload, true);
+        }
     };
 
     /**
@@ -297,22 +426,47 @@
         // restart arrives as a leave+join (new user id) via del/addUser.
         if(this.state === 'established' || this.state === 'failed')
             return;
-        if(!this.myPub)
+        if(!this.myCommit)
             return;
+        if(payload.v !== C.PROTOCOL_VERSION) {
+            // The peer derives its keys another way: going on would show two
+            // different sets of emoji, which is what an interception looks
+            // like.  Say what it is instead.
+            this.fail('version');
+            return;
+        }
 
         switch(payload.t) {
         case 'hello':
             if(this.role === 'responder')
-                this.send({t: 'commit', commit: C.b64(await C.commit(this.myPub))});
+                this.send({t: 'commit', commit: C.b64(this.myCommit)});
             break;
         case 'commit':
             if(this.role === 'initiator') {
-                this.peerCommit = C.unb64(payload.commit);
+                let commit = C.unb64(payload.commit);
+                // One commitment per handshake.  The commitment is what stops
+                // the responder's key from being chosen after ours is known;
+                // a second one, arriving after our key went out, would let
+                // whoever sent it pick a key to suit the emoji.  An honest
+                // responder repeats the same one for every hello, so an exact
+                // repeat is harmless and needs no answer.
+                if(this.peerCommit) {
+                    if(!C.bytesEqual(commit, this.peerCommit))
+                        this.fail('commitment');
+                    return;
+                }
+                this.peerCommit = commit;
                 this.send({t: 'dh', pub: C.b64(this.myPub)});
             }
             break;
         case 'dh': {
             let pub = C.unb64(payload.pub);
+            // One key from the peer per handshake, for the same reason.
+            if(this.peerPub) {
+                if(!C.bytesEqual(pub, this.peerPub))
+                    this.fail('commitment');
+                return;
+            }
             if(this.role === 'responder') {
                 this.peerPub = pub;
                 this.send({t: 'dh', pub: C.b64(this.myPub)});
@@ -323,9 +477,11 @@
                 let h = await C.commit(pub);
                 if(!C.bytesEqual(h, this.peerCommit)) {
                     // Commitment broken: the responder's key was substituted.
-                    this.setState('failed', 'commitment');
+                    this.fail('commitment');
                     return;
                 }
+                if(this.peerPub || this.state !== 'handshaking')
+                    return; // another key got in while we were hashing
                 this.peerPub = pub;
                 await this.finalize();
             }
@@ -344,7 +500,9 @@
         let gen = this.generation;
         let keyPair = this.keyPair, myPub = this.myPub;
         let peerPub = this.peerPub, peer = this.peer, role = this.role;
-        if(!keyPair || !myPub || !peerPub || !peer) {
+        let initiator = role === 'initiator';
+        let commit = initiator ? this.peerCommit : this.myCommit;
+        if(!keyPair || !myPub || !peerPub || !peer || !commit) {
             // Nothing to finish: the session was reset before this ran.  Say
             // so, or a controller stuck in 'handshaking' has nothing to
             // explain it.
@@ -358,8 +516,15 @@
         if(gen !== this.generation)
             return;
         this.secret = secret;
-        let iPub = role === 'initiator' ? myPub : peerPub;
-        let rPub = role === 'initiator' ? peerPub : myPub;
+        let salt = await C.transcript({
+            initiatorId: initiator ? this.sc.id : peer,
+            responderId: initiator ? peer : this.sc.id,
+            commit: commit,
+            initiatorPub: initiator ? myPub : peerPub,
+            responderPub: initiator ? peerPub : myPub,
+        });
+        if(gen !== this.generation)
+            return;
 
         // One key per (sender, media kind); each gets its own IV space.
         let owners = [this.sc.id, peer];
@@ -367,7 +532,7 @@
         for(let owner of owners) {
             for(let kind of kinds) {
                 let streamId = owner + '|' + kind;
-                let key = await C.deriveMediaKey(secret, iPub, rPub, streamId);
+                let key = await C.deriveMediaKey(secret, salt, streamId);
                 if(gen !== this.generation)
                     return;
                 this.ensureWorker().postMessage(
@@ -376,21 +541,29 @@
             }
         }
 
-        // Key for two-party text chat, bound to the same transcript.
-        let chatKey = await C.deriveChatKey(secret, iPub, rPub);
+        // Keys for two-party text chat, bound to the same transcript: ours
+        // to send with, the peer's to receive with.
+        let chatSendKey = await C.deriveChatKey(secret, salt, this.sc.id);
+        let chatRecvKey = await C.deriveChatKey(secret, salt, peer);
         if(gen !== this.generation)
             return;
-        this.chatKey = chatKey;
+        this.chatSendKey = chatSendKey;
+        this.chatRecvKey = chatRecvKey;
+        this.chatSendSeq = 0;
+        this.chatRecvSeq = -1;
 
         // Switch the worker to encrypt/decrypt (it may have been forwarding
         // cleartext while this call was momentarily a >2-party or downgraded).
         this.setWorkerMode(false);
 
-        let sas = await C.deriveSAS(secret, iPub, rPub);
+        let sas = await C.deriveSAS(secret, salt);
         if(gen !== this.generation)
             return;
         this.sas = sas;
         this.peerSupports = true;
+        this.stopHandshakeTimer();
+        this.wasEncrypted = true;
+        this.clearAgreed = false;
         this.setState('established');
         if(this.onsas)
             this.onsas.call(this, this.sas);
@@ -452,36 +625,96 @@
 
     /** Whether outgoing chat can be end-to-end encrypted right now. */
     E2EE.prototype.canChat = function() {
-        return this.state === 'established' && !!this.chatKey && !!this.peer;
+        return this.state === 'established' && !!this.chatSendKey && !!this.peer;
     };
 
     /**
      * Encrypt and send a chat message to the single peer over the (un-stored)
      * user-message channel.  Returns true if it was sent encrypted, false if
-     * the caller should fall back to a normal cleartext chat message.
+     * the caller should fall back to a normal cleartext chat message, null if
+     * the encrypted call it was written in ended before it went out (then it
+     * must not go out at all).
      * @param {string} kind - '' or 'me'
      * @param {string} text
-     * @returns {Promise<boolean>}
+     * @returns {Promise<boolean|null>}
      */
-    E2EE.prototype.sendChat = async function(kind, text) {
+    E2EE.prototype.sendChat = function(kind, text) {
         if(!this.canChat())
-            return false;
-        let enc = await C.encryptChat(this.chatKey, text);
-        this.sc.userMessage('e2eechat', this.peer,
-                            {kind: kind || '', iv: enc.iv, ct: enc.ct}, true);
+            return Promise.resolve(false);
+        // The session the user wrote this in.  If it is over by the time the
+        // message would go out, the answer is null, not false: false invites
+        // the caller to send it as ordinary chat, which would put words
+        // written for an encrypted call on the server.
+        let gen = this.generation;
+        let run = this.chatSendQueue.then(
+            () => this.sendChatNow(kind, text, gen),
+        );
+        this.chatSendQueue = run.catch(() => {});
+        return run;
+    };
+
+    E2EE.prototype.sendChatNow = async function(kind, text, gen) {
+        if(gen !== this.generation || !this.canChat())
+            return null; // the call stopped being encrypted before its turn
+        let peer = this.peer, key = this.chatSendKey;
+        kind = kind || '';
+        let seq = this.chatSendSeq;
+        let enc = await C.encryptChat(
+            key, text, C.chatAAD(this.sc.id, peer, seq, kind),
+        );
+        if(gen !== this.generation || !this.canChat())
+            return null; // ... or while it was being sealed
+        this.chatSendSeq = seq + 1;
+        this.sc.userMessage('e2eechat', peer,
+                            {kind: kind, seq: seq, iv: enc.iv, ct: enc.ct},
+                            true);
         return true;
     };
 
     /**
      * Decrypt a received 'e2eechat' user message.
+     *
+     * Only a message from the peer of the current session opens, only once,
+     * and only in the order it was sent: each carries the sender's sequence
+     * number, authenticated together with who sent it to whom.  A message the
+     * server sends back to its author, replays or reorders is dropped.
+     * Messages it withholds show up as a gap, which is reported as `missed`.
+     *
+     * @param {string} from - the sender's id, as the server gives it
      * @param {any} payload
-     * @returns {Promise<{kind: string, text: string}|null>}
+     * @returns {Promise<{kind: string, text: string, missed: number}|null>}
      */
-    E2EE.prototype.decryptChat = async function(payload) {
-        if(!this.chatKey || !payload || !payload.iv || !payload.ct)
+    E2EE.prototype.decryptChat = function(from, payload) {
+        let run = this.chatRecvQueue.then(
+            () => this.decryptChatNow(from, payload),
+        );
+        this.chatRecvQueue = run.catch(() => {});
+        return run;
+    };
+
+    E2EE.prototype.decryptChatNow = async function(from, payload) {
+        if(this.state !== 'established' || !this.chatRecvKey ||
+           from !== this.peer || !payload ||
+           typeof payload.iv !== 'string' || typeof payload.ct !== 'string')
             return null;
-        let text = await C.decryptChat(this.chatKey, payload.iv, payload.ct);
-        return {kind: payload.kind || '', text: text};
+        let seq = payload.seq;
+        if(!Number.isSafeInteger(seq) || seq <= this.chatRecvSeq ||
+           seq >= 2 ** 48)
+            return null;
+        let kind = typeof payload.kind === 'string' ? payload.kind : '';
+        let gen = this.generation;
+        let text = await C.decryptChat(
+            this.chatRecvKey, payload.iv, payload.ct,
+            C.chatAAD(from, this.sc.id, seq, kind),
+        );
+        if(gen !== this.generation)
+            return null;
+        // Moved on only once the message has opened: a number on something
+        // that does not open says nothing, and must not shut out the real
+        // messages after it.
+        let missed = seq - this.chatRecvSeq - 1;
+        this.chatRecvSeq = seq;
+        return {kind: kind, text: text, missed: missed};
     };
 
     global.SozvonE2EE = E2EE;

@@ -40,18 +40,23 @@
          its messages when the connection is slow.  Styled in common.css
          because the CSP forbids inline <style>. -->
     <div id="app-loading"><div class="app-spinner"></div></div>
-    <!-- Shown when the group requires end-to-end encryption but this call
-         cannot be encrypted.  One reason line is shown under it, the one
-         matching the state's own detail; the rest stay hidden.  Toggled by
-         enforceE2EEMediaPolicy() in galene.js. -->
+    <!-- Shown when this call cannot be encrypted and may not go on in clear:
+         either the group requires end-to-end encryption, or the room has had
+         an encrypted call and the user has not agreed to go on without it
+         (then with a button to agree).  One reason line is shown under it,
+         the one matching the state's own detail; the rest stay hidden.
+         Toggled by enforceE2EEMediaPolicy() in galene.js. -->
     <div id="e2ee-block-overlay" class="e2ee-block-overlay invisible" role="alert" hidden>
       <div class="e2ee-block-card">
         <i class="fas fa-unlock" aria-hidden="true"></i>
-        <p data-i18n="e2ee.blockedOverlay">Unencrypted connections are blocked in this room, and this call cannot be end-to-end encrypted, so nothing is being sent.</p>
+        <p id="e2ee-block-consent" class="invisible" data-i18n="e2ee.consentOverlay">This call was end-to-end encrypted and can now only go on without encryption. Nothing goes out unencrypted until you decide.</p>
+        <p id="e2ee-block-required" data-i18n="e2ee.blockedOverlay">Unencrypted connections are blocked in this room, and this call cannot be end-to-end encrypted, so nothing is being sent.</p>
         <p id="e2ee-why-multipeer" class="e2ee-block-why invisible" data-i18n="e2ee.blockedWhy.multipeer">There are more than two people here, and this encryption covers exactly two.</p>
         <p id="e2ee-why-unsupported" class="e2ee-block-why invisible" data-i18n="e2ee.blockedWhy.unsupported">This browser cannot encrypt a call. Update it, or open the link in a current Chrome, Edge, Firefox or Safari.</p>
         <p id="e2ee-why-peer-unsupported" class="e2ee-block-why invisible" data-i18n="e2ee.blockedWhy.peerUnsupported">The other person's browser cannot encrypt a call. Ask them to update it, or to open the link in a current Chrome, Edge, Firefox or Safari.</p>
         <p id="e2ee-why-transform" class="e2ee-block-why invisible" data-i18n="e2ee.blockedWhy.transform">The encryption could not be started in this browser.</p>
+        <p id="e2ee-block-consent-hint" class="e2ee-block-why invisible" data-i18n="e2ee.consentHint">If you did not expect this, leave the call: somebody may be trying to listen in.</p>
+        <button type="button" id="e2ee-continue-clear" class="btn btn-default e2ee-block-button invisible" data-i18n="e2ee.continueInClear">Continue without encryption</button>
       </div>
     </div>
     <!-- Shown when the browser cannot do video calls (missing/broken WebRTC,

@@ -3654,6 +3654,9 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     margin: 0.4rem 0 0;
     line-height: 1.45;
 }
+.e2ee-block-button {
+    margin-top: 1rem;
+}
 
 /* Full-screen notice when the browser cannot do video calls (missing/broken
    WebRTC, e.g. Xiaomi Mi Browser).  Same visibility trick as the E2EE overlay. */

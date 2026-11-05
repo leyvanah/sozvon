@@ -788,6 +788,27 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     derived from the same ECDH transcript (`deriveChatKey` in
     `static/e2ee-crypto.js`), so the SFU never sees the text nor keeps it in
     history. Larger or unencrypted calls keep normal cleartext chat.
+  * **The handshake holds against the server it is meant to keep out**
+    (advisory `GHSA-xvjf-3x6j-9p8h`, fixed in 0.4.2).
+    - One commitment and one key per handshake: a repeat is ignored, a
+      different one fails it (`failed/commitment`), so the responder's key can
+      no longer be swapped after the initiator's is known. The SAS and every
+      key are derived from a hash of the whole handshake (both ids, the
+      commitment, both keys) under a protocol version; a page of another
+      version says so (`failed/version`) instead of showing other emoji.
+    - A handshake open for 30 s is marked slow, not failed: signalling resume
+      delivers a stalled peer's answer up to two minutes late, and failing it
+      left both sides in `failed` until somebody rejoined.
+    - A room that has had an encrypted call does not go on in clear without
+      the user: a `nocrypto` from the peer or a third participant now blocks
+      the call with a *“Continue without encryption”* button (no button with
+      `require-e2ee`), and a join whose status turns `e2ee` off is reported,
+      not obeyed. While the call only waits for that consent, media stays
+      published: the worker drops whatever it has no key for.
+    - Chat has a key per direction and a sequence number, with sender,
+      recipient, number and kind authenticated: a message the server sends
+      back to its author, replays or reorders does not open, and a gap is
+      reported.
   * A `cleartextMode` toggle in the media worker forwards frames unchanged for
     the allowed-but-unencrypted fallback, while the handshake window still drops
     unkeyed frames so secure media is never emitted in clear.

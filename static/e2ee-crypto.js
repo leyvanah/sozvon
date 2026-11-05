@@ -158,12 +158,40 @@
         return new Uint8Array(bits);
     }
 
-    // The SAS / media keys are bound to the exact pair of public keys that were
-    // exchanged (in initiator-then-responder order).  A man-in-the-middle that
-    // substitutes its own keys therefore yields a different transcript, hence a
-    // different SAS and incompatible media keys on the two legs.
-    function transcriptSalt(initiatorPub, responderPub) {
-        return concat(te.encode('sozvon-e2ee-v1'), initiatorPub, responderPub);
+    // Version of the handshake and of everything derived from it.  Peers on
+    // different versions derive different keys, so the handshake carries it
+    // and a peer on another one is refused rather than shown other emoji.
+    const PROTOCOL_VERSION = 2;
+
+    function lengthPrefixed(u8) {
+        return concat(new Uint8Array([u8.length >>> 8, u8.length & 0xff]), u8);
+    }
+
+    /**
+     * Hash of the whole handshake, the salt everything is derived under.
+     *
+     * The SAS, media and chat keys are bound to the exact public keys that
+     * were exchanged, in their roles, so a man-in-the-middle that substitutes
+     * its own keys gets a different SAS and incompatible keys on each leg.
+     * They are bound as well to the responder's commitment and to the two
+     * participant ids the roles were decided by, as ZRTP binds its SAS to the
+     * hash of the whole exchange (RFC 6189, 4.5.2): whatever either side took
+     * from the handshake is in what it shows the user.
+     *
+     * @param {{initiatorId: string, responderId: string,
+     *          commit: Uint8Array,
+     *          initiatorPub: Uint8Array, responderPub: Uint8Array}} t
+     * @returns {Promise<Uint8Array>}
+     */
+    async function transcript(t) {
+        return await sha256(concat(
+            te.encode('sozvon-e2ee-v' + PROTOCOL_VERSION),
+            lengthPrefixed(te.encode(t.initiatorId)),
+            lengthPrefixed(te.encode(t.responderId)),
+            lengthPrefixed(t.commit),
+            lengthPrefixed(t.initiatorPub),
+            lengthPrefixed(t.responderPub),
+        ));
     }
 
     // ---- Short Authentication String (emoji) --------------------------------
@@ -192,13 +220,12 @@
 
     /**
      * Derive the emoji SAS that both peers display for out-of-band comparison.
+     * @param {Uint8Array} secret
+     * @param {Uint8Array} salt - transcript() of this handshake
      * @returns {Promise<string[]>}
      */
-    async function deriveSAS(secret, initiatorPub, responderPub) {
-        let bytes = await hkdf(
-            secret, transcriptSalt(initiatorPub, responderPub),
-            'sas', SAS_LENGTH,
-        );
+    async function deriveSAS(secret, salt) {
+        let bytes = await hkdf(secret, salt, 'sas', SAS_LENGTH);
         let out = [];
         for(let i = 0; i < SAS_LENGTH; i++)
             // 256 is a multiple of 64, so (byte & 63) is unbiased.
@@ -212,13 +239,13 @@
      * Derive the AES-256-GCM key a given sender uses.  Each sender gets a
      * distinct key (info bound to its id) so that a plain monotonic frame
      * counter never reuses an (key, IV) pair across senders.
+     * @param {Uint8Array} secret
+     * @param {Uint8Array} salt - transcript() of this handshake
+     * @param {string} senderId
      * @returns {Promise<CryptoKey>}
      */
-    async function deriveMediaKey(secret, initiatorPub, responderPub, senderId) {
-        let raw = await hkdf(
-            secret, transcriptSalt(initiatorPub, responderPub),
-            'media|' + senderId, 32,
-        );
+    async function deriveMediaKey(secret, salt, senderId) {
+        let raw = await hkdf(secret, salt, 'media|' + senderId, 32);
         return await subtle.importKey(
             'raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'],
         );
@@ -227,45 +254,74 @@
     // ---- chat encryption ----------------------------------------------------
 
     /**
-     * Derive the AES-256-GCM key used to encrypt text chat in a two-party
-     * end-to-end encrypted call.  Bound to the same transcript as the media
-     * keys and the SAS, so it inherits their man-in-the-middle protection.
+     * Derive the AES-256-GCM key one sender encrypts text chat with in a
+     * two-party end-to-end encrypted call.  Bound to the same transcript as
+     * the media keys and the SAS, so it inherits their man-in-the-middle
+     * protection.  Each direction has a key of its own, so a message sent back
+     * to its author does not open as one from the other side.
+     * @param {Uint8Array} secret
+     * @param {Uint8Array} salt - transcript() of this handshake
+     * @param {string} senderId
      * @returns {Promise<CryptoKey>}
      */
-    async function deriveChatKey(secret, initiatorPub, responderPub) {
-        let raw = await hkdf(
-            secret, transcriptSalt(initiatorPub, responderPub), 'chat', 32,
-        );
+    async function deriveChatKey(secret, salt, senderId) {
+        let raw = await hkdf(secret, salt, 'chat|' + senderId, 32);
         return await subtle.importKey(
             'raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'],
         );
     }
 
     /**
-     * Encrypt a chat message.  Chat has no monotonic counter, so we use a
-     * fresh random 96-bit IV per message (safe for AES-GCM at chat volumes).
+     * What a chat message is authenticated together with: who sent it to
+     * whom, its place in the sender's sequence and its kind.  A message
+     * replayed, reordered or passed off as another kind then fails to open.
+     * @param {string} senderId
+     * @param {string} recipientId
+     * @param {number} seq - 0, 1, 2... per sender
+     * @param {string} kind
+     * @returns {Uint8Array}
+     */
+    function chatAAD(senderId, recipientId, seq, kind) {
+        let n = new Uint8Array(6);
+        writeUint48(n, 0, seq);
+        return concat(
+            te.encode('sozvon-chat-v' + PROTOCOL_VERSION),
+            lengthPrefixed(te.encode(senderId)),
+            lengthPrefixed(te.encode(recipientId)),
+            n,
+            lengthPrefixed(te.encode(kind)),
+        );
+    }
+
+    /**
+     * Encrypt a chat message.  A fresh random 96-bit IV per message is safe
+     * for AES-GCM at chat volumes.
      * @param {CryptoKey} key
      * @param {string} text
+     * @param {Uint8Array} aad - chatAAD() of this message
      * @returns {Promise<{iv: string, ct: string}>} base64 IV and ciphertext
      */
-    async function encryptChat(key, text) {
+    async function encryptChat(key, text, aad) {
         let iv = global.crypto.getRandomValues(new Uint8Array(12));
         let ct = new Uint8Array(await subtle.encrypt(
-            {name: 'AES-GCM', iv: iv}, key, te.encode(text),
+            {name: 'AES-GCM', iv: iv, additionalData: aad}, key, te.encode(text),
         ));
         return {iv: b64(iv), ct: b64(ct)};
     }
 
     /**
-     * Decrypt a chat message produced by encryptChat.  Throws on tampering.
+     * Decrypt a chat message produced by encryptChat.  Throws on tampering,
+     * and on associated data other than it was sealed with.
      * @param {CryptoKey} key
      * @param {string} ivB64
      * @param {string} ctB64
+     * @param {Uint8Array} aad - chatAAD() the message is expected to carry
      * @returns {Promise<string>}
      */
-    async function decryptChat(key, ivB64, ctB64) {
+    async function decryptChat(key, ivB64, ctB64, aad) {
         let pt = await subtle.decrypt(
-            {name: 'AES-GCM', iv: unb64(ivB64)}, key, unb64(ctB64),
+            {name: 'AES-GCM', iv: unb64(ivB64), additionalData: aad},
+            key, unb64(ctB64),
         );
         return td.decode(pt);
     }
@@ -371,12 +427,13 @@
         concat, bytesEqual, b64, unb64,
         // key agreement
         generateKeyPair, exportPublic, importPublic, agree, sha256, commit, hkdf,
+        transcript, PROTOCOL_VERSION,
         // authentication
         deriveSAS, EMOJI, SAS_LENGTH,
         // media keys + frames
         deriveMediaKey, encryptFrame, decryptFrame,
         // chat
-        deriveChatKey, encryptChat, decryptChat,
+        deriveChatKey, chatAAD, encryptChat, decryptChat,
         clearPrefixLength, OVERHEAD, TAG_BYTES, TRAILER_BYTES, SALT_BYTES,
     };
 
