@@ -257,6 +257,7 @@
             'toast.noDevice': 'No camera or microphone was found.',
             'toast.micEnded': 'The microphone stopped — access was revoked or the device was disconnected. Turn it on again to reconnect.',
             'toast.micReconnecting': 'The microphone dropped out — reconnecting it…',
+            'toast.deviceFallback': 'The chosen camera or microphone is not available, so the default one is used.',
             'toast.micBack': 'The microphone is back.',
             'toast.enableHint': 'Use the camera or microphone buttons to start.',
             // Refused camera or microphone (media-help.js)
@@ -547,6 +548,7 @@
             'toast.noDevice': 'Камера или микрофон не найдены.',
             'toast.micEnded': 'Микрофон отключился — доступ отозван или устройство отсоединено. Включите его снова, чтобы восстановить звук.',
             'toast.micReconnecting': 'Микрофон отключился — подключаем снова…',
+            'toast.deviceFallback': 'Выбранная камера или микрофон недоступны, включены те, что по умолчанию.',
             'toast.micBack': 'Микрофон снова работает.',
             'toast.enableHint': 'Включите камеру или микрофон кнопками на панели.',
             // Refused camera or microphone (media-help.js)

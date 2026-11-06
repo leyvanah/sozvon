@@ -388,6 +388,14 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     came back white and stayed white. Now the running camera track is carried
     over to the new stream and only the microphone is opened; a microphone
     that cannot be added in place falls back to this instead of failing.
+  * **The microphone you pick is the one that opens.** A device id passed to
+    `getUserMedia` as a plain value is only a preference, and Chrome opens
+    the default microphone over it; the picker then went back to the
+    default, so choosing another microphone did nothing (a guest on
+    2026-11-06 tried several times). Chosen cameras and microphones are now
+    asked for exactly (`getChosenMedia`), in the call and in the device
+    check; one that is no longer there gives the default device and a
+    message saying so.
   * **State-reflecting mic/camera icons**: each colours by what is live right
     now — **blue + upright** when the device is on, **red + slashed** when off.
     The old neutral-grey in-between state is gone.

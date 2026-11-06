@@ -2786,6 +2786,58 @@ function selectOptionDefault(select) {
 }
 
 /**
+ * Open the camera and microphone the user chose, and those exactly.
+ *
+ * A device id given as a plain value is only a preference, and Chrome does
+ * not honour it for microphones: asked for the second microphone, it opens
+ * the default one, and syncDeviceSelect then puts the picker back on it -- a
+ * choice that silently does not take.  Seen on a call on 2026-11-06 and
+ * confirmed on a laptop's own microphone.  So every device id in the
+ * constraints is asked for exactly.  If a chosen device is no longer there,
+ * the default one is opened instead, and the user is told. (Sozvon)
+ *
+ * @param {MediaStreamConstraints} constraints - device ids as plain strings
+ * @returns {Promise<MediaStream>}
+ */
+async function getChosenMedia(constraints) {
+    let chosen = false;
+    /**
+     * @param {boolean|MediaTrackConstraints} c
+     * @param {boolean} exact - true: ask for the device exactly; false: drop it
+     */
+    let device = (c, exact) => {
+        if(!c || typeof c !== 'object' || typeof c.deviceId !== 'string')
+            return c;
+        let copy = Object.assign({}, c);
+        if(exact) {
+            copy.deviceId = {exact: c.deviceId};
+            chosen = true;
+        } else {
+            delete copy.deviceId;
+        }
+        return copy;
+    };
+    let md = navigator.mediaDevices;
+    try {
+        return await md.getUserMedia({
+            audio: device(constraints.audio, true),
+            video: device(constraints.video, true),
+        });
+    } catch(e) {
+        // Missing, not refused or busy: those are errors the caller reports.
+        if(!chosen || !e ||
+           (e.name !== 'OverconstrainedError' && e.name !== 'NotFoundError'))
+            throw e;
+    }
+    let stream = await md.getUserMedia({
+        audio: device(constraints.audio, false),
+        video: device(constraints.video, false),
+    });
+    displayWarning(Sozvon.i18n.t('toast.deviceFallback'));
+    return stream;
+}
+
+/**
  * Point a settings device picker at the device a live track is actually
  * capturing from, and persist that choice.  The mic/camera can be turned on
  * with the system default (via the toolbar buttons, which force media without
@@ -3345,15 +3397,14 @@ async function recoverMicrophone(c, lost) {
     /** @type {MediaTrackConstraints} */
     let audio = {};
     if(settings.audio)
-        // a preference, not a requirement: if the chosen device is gone for
-        // good, the default one will do
+        // the chosen device, or the default one if it is gone for good
         audio.deviceId = settings.audio;
     if(!settings.preprocessing)
         audio.noiseSuppression = false;
 
     let track = await /** @type {any} */ (window).SozvonMicRecovery.reopen({
         open: async () => {
-            let s = await navigator.mediaDevices.getUserMedia({audio: audio});
+            let s = await getChosenMedia({audio: audio});
             s.getVideoTracks().forEach(v => v.stop());
             return s.getAudioTracks()[0];
         },
@@ -3556,7 +3607,7 @@ async function addMicrophoneNow(c) {
     /** @type {MediaStreamTrack} */
     let track;
     try {
-        let s = await navigator.mediaDevices.getUserMedia({audio: audio});
+        let s = await getChosenMedia({audio: audio});
         track = s.getAudioTracks()[0];
     } catch(e) {
         displayMediaError(e, 'audio', () => addMicrophone(c));
@@ -3910,7 +3961,7 @@ async function addLocalMediaNow(localId, force) {
     let hangTimer = setTimeout(showBrowserUnsupported, 12000);
     try {
         if(constraints.audio || constraints.video)
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            stream = await getChosenMedia(constraints);
         else
             stream = new MediaStream();
         clearTimeout(hangTimer);
@@ -10171,7 +10222,7 @@ function makePrecheck(prefix) {
         /** @type {MediaTrackConstraints} */
         let video = vid ? {deviceId: vid} : {};
         video.aspectRatio = {ideal: 4/3};
-        let stream = await navigator.mediaDevices.getUserMedia({video: video});
+        let stream = await getChosenMedia({video: video});
         mediaHelpResolved(false, true);
         if(gen !== state.gen) {
             stopStream(stream);
@@ -10208,7 +10259,7 @@ function makePrecheck(prefix) {
     async function startMic(gen = state.gen) {
         stopMic();
         let aid = select('audio').value;
-        let stream = await navigator.mediaDevices.getUserMedia(
+        let stream = await getChosenMedia(
             {audio: aid ? {deviceId: aid} : true},
         );
         mediaHelpResolved(true, false);
