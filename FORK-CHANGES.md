@@ -368,6 +368,17 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     renegotiation, E2EE untouched. If it cannot be reopened the call goes on
     with video alone and the microphone button shows "off". Screen sharing
     still ends with its track, which there means "stop sharing".
+  * **A refused camera or microphone says why and what to do**
+    (`static/media-help.js`). It used to be a four-second toast, "access was
+    denied". Now a card stays at the top, in the call and in the pre-join
+    device check, until it is closed or the device opens, with steps chosen
+    from the Permissions API state and the platform: a site blocked in the
+    browser settings, a prompt that was dismissed or never shown, or a site
+    that is allowed while the system refuses the browser. On Android the
+    second case names the cause nobody guesses: Chrome will not show a
+    permission prompt while another app draws over it (a chat bubble, a small
+    video window, a screen filter) and says only "This site can't ask for
+    permission". Allowing the site while the card is up retries on its own.
   * **A change to the sound never reopens the camera.** Upstream publishes
     the camera stream anew for any change of media, closing the camera and
     opening it again; turning the microphone on mid-call is added to the
@@ -494,6 +505,73 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     minutes the receiver also logs the picture each stream delivered
     (`receives 640x480 at 30 fps (worst 24), 2412 kbit/s, cap 2500 kbit/s`),
     so a call can be checked afterwards for what a cap did to it.
+    **Each delay is logged with what it is made of.** On 2026-10-14 a call
+    held its audio about 300 ms behind on a clean network (15–30 ms of
+    arrival jitter, no loss), and cutting the video to the floor did not
+    shorten it, so the delay was not the sender's -- but nothing in the log
+    said whose it was. Requests and the two-minute picture reports now carry
+    the jitter buffers' target and minimum delay next to each delay
+    (`audio delay 300ms … audio target 290ms audio minimum 40ms`). The
+    minimum is the target with constraints from outside the buffer taken
+    away -- mainly audio/video synchronisation, also a playout hint -- so it
+    shows what the arrival jitter alone would need; delay minus target is a
+    backlog not yet played out. Target minus minimum is the outside share
+    only roughly: the buffer's own ceiling holds the target down and not the
+    minimum, so on a very uneven path the minimum can exceed the target.
+    Requests also log the video decoding time alone (`decode 2ms`): the
+    `processing` figure runs from a frame's first packet, so it includes the
+    jitter buffer and cannot show a receiver too busy to decode. A figure
+    the browser does not report is left out, never logged as zero, and the
+    new figures come at the end of a request's line so that the earlier
+    ones keep their places. Only reported; nothing is decided on them yet.
+    **A published camera says how far its picture got.** On 2026-10-21 a
+    guest turned her camera on nine times and not one video packet left her
+    browser, her own preview empty as well, while the same camera worked in
+    another service; the log could only say that nothing arrived. Six
+    seconds after a camera stream is published the client now reports each
+    step between the camera and the wire with its own count
+    (`static/camera-diag.js`): the camera track (live or ended, muted, size,
+    frames delivered where the browser counts them), and on touch devices
+    or with a filter the hidden element feeding the canvas (paused or
+    playing, what its `play()` came to -- a refusal was never caught before
+    -- and frames drawn), then the frames the sender took in, encoded and
+    sent as packets, and the frames the preview showed. The first zero is
+    where the picture stops:
+    `camera after 6s: ios/safari touch; track live; canvas orientation,
+    element paused ready 0 0x0, play NotAllowedError, drawn 0; sender got 0
+    frames, encoded 0, sent 0 packets; preview 0 frames`. The platform goes
+    out as a family of words (`android/chrome`, `ios/safari`, `app desktop`),
+    never the user agent; a count the browser does not report is left out.
+  * **A phone that puts the call in the background says so**
+    (`static/away.js`). Measured on a real phone on 2026-10-23 (Android 16,
+    Chrome 155): within a second of the home button or the screen going
+    off, the system closes the camera and silences the microphone, though
+    the page's tracks still read "live"; a minute later the browser loses
+    the network, and two minutes after hiding the server ends the session.
+    Nobody else was told: they kept a still picture and silence. Now a
+    phone or tablet (touch points and a coarse pointer -- a computer keeps
+    its camera running when hidden, so it never marks itself) sets
+    `away` in its per-user data when the page is hidden, as the raised hand
+    does; the others see "In another app -- camera and microphone paused"
+    over a dimmed picture, and a crossed-out camera in the people list. A call the
+    background interrupted is rejoined on return with a message saying so
+    rather than a bare "reconnected". While a phone's page is hidden its
+    paths are not judged by the UDP fallback either: the phone takes the
+    network away from a page in the background, and on the real phone that
+    made the call give up UDP for six hours.
+    **The orientation canvas draws only new camera frames.** It used to be
+    drawn on every tick, so a stopped camera went on sending its last
+    picture at thirty frames a second -- a still face that looked live, with
+    the receiver's freeze counter at zero. It now draws when the element has
+    a frame it has not drawn (`getVideoPlaybackQuality()`, or
+    `requestVideoFrameCallback` where Firefox reports no count).
+    Two server fixes found on the way: **changes of a member's data reach
+    the room in the order they were made** (each `setdata` was pushed from a
+    goroutine of its own, so `{"muted": null}` then `{"away": true}` could
+    arrive reversed and leave the room with the older), and **a
+    `requestStream` for a stream that is gone no longer ends the session**
+    (a stream closed while the request was in flight killed a session a few
+    hundred milliseconds into a rejoin).
 
 ### Localisation
 
@@ -719,6 +797,27 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     derived from the same ECDH transcript (`deriveChatKey` in
     `static/e2ee-crypto.js`), so the SFU never sees the text nor keeps it in
     history. Larger or unencrypted calls keep normal cleartext chat.
+  * **The handshake holds against the server it is meant to keep out**
+    (advisory `GHSA-xvjf-3x6j-9p8h`, fixed in 0.4.2).
+    - One commitment and one key per handshake: a repeat is ignored, a
+      different one fails it (`failed/commitment`), so the responder's key can
+      no longer be swapped after the initiator's is known. The SAS and every
+      key are derived from a hash of the whole handshake (both ids, the
+      commitment, both keys) under a protocol version; a page of another
+      version says so (`failed/version`) instead of showing other emoji.
+    - A handshake open for 30 s is marked slow, not failed: signalling resume
+      delivers a stalled peer's answer up to two minutes late, and failing it
+      left both sides in `failed` until somebody rejoined.
+    - A room that has had an encrypted call does not go on in clear without
+      the user: a `nocrypto` from the peer or a third participant now blocks
+      the call with a *“Continue without encryption”* button (no button with
+      `require-e2ee`), and a join whose status turns `e2ee` off is reported,
+      not obeyed. While the call only waits for that consent, media stays
+      published: the worker drops whatever it has no key for.
+    - Chat has a key per direction and a sequence number, with sender,
+      recipient, number and kind authenticated: a message the server sends
+      back to its author, replays or reorders does not open, and a gap is
+      reported.
   * A `cleartextMode` toggle in the media worker forwards frames unchanged for
     the allowed-but-unencrypted fallback, while the handshake window still drops
     unkeyed frames so secure media is never emitted in clear.

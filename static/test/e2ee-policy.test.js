@@ -47,9 +47,17 @@ class FakeWorker {
  * @returns {any} the context, carrying SozvonE2EECrypto and SozvonE2EE
  */
 function loadController() {
+    const timers = [];
     const ctx = vm.createContext({
         crypto: webcrypto, TextEncoder, TextDecoder, Uint8Array,
         btoa, atob, console: quiet,
+        // Timers the test fires by hand: a handshake timeout has nothing to
+        // wait for here, and a real one would hold the test run open.
+        setTimeout: (fn) => timers.push({fn: fn, live: true}),
+        clearTimeout: (id) => {
+            if(timers[id - 1])
+                timers[id - 1].live = false;
+        },
         Worker: FakeWorker,
         RTCRtpScriptTransform: class {
             constructor(worker, options) {
@@ -58,6 +66,15 @@ function loadController() {
         },
     });
     ctx.self = ctx;
+    ctx.timers = timers;
+    ctx.fireTimers = () => {
+        for(const t of timers.slice()) {
+            if(t.live) {
+                t.live = false;
+                t.fn();
+            }
+        }
+    };
     for(const file of ['e2ee-crypto.js', 'e2ee.js'])
         vm.runInContext(
             fs.readFileSync(path.join(staticDir, file), 'utf8'), ctx,
@@ -82,6 +99,7 @@ async function readyToFinalize(ctx) {
     e.keyPair = await C.generateKeyPair();
     e.myPub = await C.exportPublic(e.keyPair.publicKey);
     e.peerPub = await C.exportPublic((await C.generateKeyPair()).publicKey);
+    e.peerCommit = await C.commit(e.peerPub);
     return e;
 }
 
@@ -132,7 +150,8 @@ test('a completion that outlives its session writes nothing back', async () => {
     );
     assert.strictEqual(e.peer, null);
     assert.strictEqual(e.sas, null, 'an authentication string outlived its session');
-    assert.strictEqual(e.chatKey, null, 'a chat key outlived its session');
+    assert.strictEqual(e.chatSendKey, null, 'a chat key outlived its session');
+    assert.strictEqual(e.chatRecvKey, null, 'a chat key outlived its session');
 });
 
 // The same run, stopped earlier: the media keys must not reach the worker
@@ -165,7 +184,7 @@ test('a completion that is still current establishes the session', async () => {
     await e.finalize();
     assert.strictEqual(e.state, 'established');
     assert.ok(e.sas && e.sas.length > 0);
-    assert.ok(e.chatKey);
+    assert.ok(e.chatSendKey && e.chatRecvKey);
     assert.strictEqual(
         e.worker.messages.filter(m => m.type === 'key').length, 4,
         'one key per (sender, media kind)',
@@ -190,7 +209,7 @@ async function handshake(ctx, tamper) {
             if(tamper && id === 'zzz' && payload.t === 'dh') {
                 const pub = C.unb64(payload.pub);
                 pub[1] ^= 1;
-                payload = {t: 'dh', pub: C.b64(pub)};
+                payload = Object.assign({}, payload, {pub: C.b64(pub)});
             }
             queue.push({from: id, dest: dest, payload: payload});
         },
@@ -230,6 +249,180 @@ test('a substituted public key is still refused', async () => {
     const {a} = await handshake(ctx, true);
     assert.strictEqual(a.state, 'failed');
     assert.strictEqual(a.sas, null);
+});
+
+// ---- a handshake the server rewrites ---------------------------------------
+//
+// The server relays every handshake message and can write any of them itself.
+// What it must not be able to do is choose a key after it has seen the other
+// side's: that is what lets it search for a pair of keys that shows the same
+// emoji on both legs of a man-in-the-middle, and the emoji are the only thing
+// that would give it away.
+
+/** A key pair the server makes up, as it would to stand in the middle. */
+async function forgedKey(C) {
+    const pub = await C.exportPublic((await C.generateKeyPair()).publicKey);
+    return {pub: pub, commit: C.b64(await C.commit(pub))};
+}
+
+/**
+ * An initiator ('aaa' < 'zzz') that has sent its hello and is waiting for the
+ * responder's commitment.
+ */
+async function waitingInitiator(ctx) {
+    const sent = [];
+    const e = new ctx.SozvonE2EE({
+        id: 'aaa', userMessage: (kind, dest, payload) => sent.push(payload),
+    });
+    e.users.add('zzz');
+    await e.startWith('zzz');
+    return {e: e, sent: sent};
+}
+
+test('a second commitment with another key fails the handshake', async () => {
+    const ctx = loadController();
+    const C = ctx.SozvonE2EECrypto;
+    const {e, sent} = await waitingInitiator(ctx);
+    const throwaway = await forgedKey(C);
+    const chosen = await forgedKey(C);
+
+    // A commitment to a key the server does not mean to use: our key goes
+    // out in answer, and the server now has all it needs to search.
+    await e.onMessage('zzz', {v: 2, t: 'commit', commit: throwaway.commit});
+    assert.ok(sent.some(m => m.t === 'dh'), 'our key did not go out');
+    // Then the commitment to the key the search came up with, and that key.
+    await e.onMessage('zzz', {v: 2, t: 'commit', commit: chosen.commit});
+    await e.onMessage('zzz', {v: 2, t: 'dh', pub: C.b64(chosen.pub)});
+
+    assert.strictEqual(
+        e.state, 'failed',
+        'a key chosen after ours was known was accepted, so the emoji could ' +
+        'have been made to match',
+    );
+    assert.strictEqual(e.detail, 'commitment');
+    assert.strictEqual(e.sas, null);
+    assert.strictEqual(
+        e.worker.messages.filter(m => m.type === 'key').length, 0,
+        'the worker was given keys for a session that failed',
+    );
+});
+
+// An honest responder answers every hello with its commitment, so the same
+// one arriving twice is ordinary and must not break the call.
+test('the same commitment twice is not a failure', async () => {
+    const ctx = loadController();
+    const C = ctx.SozvonE2EECrypto;
+    const {e} = await waitingInitiator(ctx);
+    const responder = await forgedKey(C);
+
+    await e.onMessage('zzz', {v: 2, t: 'commit', commit: responder.commit});
+    await e.onMessage('zzz', {v: 2, t: 'commit', commit: responder.commit});
+    await e.onMessage('zzz', {v: 2, t: 'dh', pub: C.b64(responder.pub)});
+    assert.strictEqual(e.state, 'established');
+});
+
+// The responder has no commitment to check, but it too takes one key per
+// handshake: two different ones is somebody writing into the exchange.
+test('a responder given two different keys fails the handshake', async () => {
+    const ctx = loadController();
+    const C = ctx.SozvonE2EECrypto;
+    const e = new ctx.SozvonE2EE({id: 'zzz', userMessage() {}});
+    e.users.add('aaa');
+    await e.startWith('aaa');
+    const one = await forgedKey(C);
+    const two = await forgedKey(C);
+
+    await Promise.all([
+        e.onMessage('aaa', {v: 2, t: 'dh', pub: C.b64(one.pub)}),
+        e.onMessage('aaa', {v: 2, t: 'dh', pub: C.b64(two.pub)}),
+    ]);
+    assert.strictEqual(e.state, 'failed');
+    assert.strictEqual(e.sas, null);
+});
+
+// A page loaded before a deploy derives its keys the old way.  Going on with
+// it would put different emoji in front of the two people, which is exactly
+// what an interception looks like; the handshake stops and says why instead.
+test('a peer on another version of the handshake is refused, and why', async () => {
+    const ctx = loadController();
+    const C = ctx.SozvonE2EECrypto;
+    const {e} = await waitingInitiator(ctx);
+    const responder = await forgedKey(C);
+
+    await e.onMessage('zzz', {t: 'commit', commit: responder.commit});
+    assert.strictEqual(e.state, 'failed');
+    assert.strictEqual(e.detail, 'version');
+});
+
+test('every handshake message says its version', async () => {
+    const ctx = loadController();
+    const sent = [];
+    const e = new ctx.SozvonE2EE({
+        id: 'zzz', userMessage: (kind, dest, payload) => sent.push(payload),
+    });
+    e.users.add('aaa');
+    await e.startWith('aaa');
+    assert.deepStrictEqual(sent.map(m => m.t), ['hello', 'commit']);
+    for(const m of sent)
+        assert.strictEqual(m.v, ctx.SozvonE2EECrypto.PROTOCOL_VERSION, m.t);
+});
+
+test('a handshake that does not finish in time says so', async () => {
+    const ctx = loadController();
+    const {e} = await waitingInitiator(ctx);
+    assert.strictEqual(e.state, 'handshaking');
+    assert.strictEqual(e.detail, null);
+    assert.ok(ctx.timers.length > 0, 'the handshake is not timed at all');
+    ctx.fireTimers();
+    assert.strictEqual(e.state, 'handshaking');
+    assert.strictEqual(e.detail, 'slow', 'a stuck handshake looks like any other');
+});
+
+// Signalling resume delivers what a stall held up, long after the timeout:
+// the handshake must still finish then, on both sides, as one session.
+test('a handshake held up past the timeout finishes once its messages arrive', async () => {
+    const ctx = loadController();
+    const queue = [];
+    const connection = id => ({
+        id: id,
+        userMessage: (kind, dest, payload) =>
+            queue.push({from: id, dest: dest, payload: payload}),
+    });
+    const a = new ctx.SozvonE2EE(connection('aaa'));
+    const b = new ctx.SozvonE2EE(connection('zzz'));
+    a.users.add('zzz');
+    b.users.add('aaa');
+    await a.startWith('zzz');
+    await b.startWith('aaa');
+    // nothing has got through yet when both run out of time
+    ctx.fireTimers();
+    assert.deepStrictEqual([a.state, a.detail, b.state, b.detail],
+                           ['handshaking', 'slow', 'handshaking', 'slow']);
+    const peers = {aaa: a, zzz: b};
+    for(let i = 0; queue.length && i < 100; i++) {
+        const m = queue.shift();
+        await peers[m.dest].onMessage(m.from, m.payload);
+    }
+    assert.strictEqual(a.state, 'established');
+    assert.strictEqual(b.state, 'established');
+    assert.strictEqual(a.detail, null);
+    assert.deepStrictEqual(a.sas, b.sas);
+});
+
+test('the timeout does not touch a handshake that finished', async () => {
+    const ctx = loadController();
+    const {a, b} = await handshake(ctx);
+    ctx.fireTimers();
+    assert.strictEqual(a.state, 'established');
+    assert.strictEqual(b.state, 'established');
+});
+
+test('the timeout does not touch a peer who has left', async () => {
+    const ctx = loadController();
+    const {e} = await waitingInitiator(ctx);
+    e.delUser('zzz');
+    ctx.fireTimers();
+    assert.strictEqual(e.state, 'idle');
 });
 
 /** A sender whose transform cannot be set, as an unsupporting browser has. */
@@ -397,6 +590,98 @@ test('a group that does not require encryption is not blocked by this', () => {
     assert.strictEqual(e.state, 'idle');
 });
 
+// ---- an encrypted call the server tries to turn into a plaintext one -------
+//
+// What turns a call to plaintext -- a peer saying it cannot encrypt, a third
+// participant -- reaches the client through the server, and the server can
+// make up either.  Once a room has had an encrypted call it therefore stops
+// until the user agrees to go on in clear, rather than going on in clear on
+// the server's word with only the padlock to show for it.
+
+/** The mode the controller last put the worker in: true for cleartext. */
+function lastMode(e) {
+    const modes = e.worker.messages.filter(m => m.type === 'mode');
+    return modes[modes.length - 1].cleartext;
+}
+
+test('a peer said to be unable to encrypt does not turn an encrypted call to plaintext', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    assert.strictEqual(a.state, 'established');
+
+    // The message a peer that cannot encrypt sends; nothing proves it came
+    // from the peer rather than from the server.
+    await a.onMessage('zzz', {t: 'nocrypto'});
+    assert.strictEqual(
+        a.state, 'blocked',
+        'an encrypted call went on in clear because the server said so',
+    );
+    assert.strictEqual(lastMode(a), false, 'the worker was told to pass media in clear');
+    assert.ok(a.awaitsClearConsent(), 'the user was not asked');
+});
+
+test('a third participant stops an encrypted call until the user agrees', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+
+    a.addUser('phantom');
+    assert.strictEqual(a.state, 'blocked');
+    assert.strictEqual(a.detail, 'multipeer');
+    assert.strictEqual(lastMode(a), false);
+
+    a.continueInClear();
+    assert.strictEqual(a.state, 'unencrypted');
+    assert.strictEqual(a.detail, 'multipeer');
+    assert.strictEqual(lastMode(a), true);
+    assert.ok(!a.awaitsClearConsent());
+});
+
+// Agreeing covers the call that was lost, not every later one.
+test('agreeing to go on in clear lasts until the call is encrypted again', async () => {
+    const ctx = loadController();
+    const e = await readyToFinalize(ctx);
+    e.wasEncrypted = true;
+    e.clearAgreed = true;
+    await e.finalize();
+    assert.strictEqual(e.state, 'established');
+    assert.strictEqual(e.clearAgreed, false);
+
+    e.addUser('phantom');
+    assert.strictEqual(e.state, 'blocked', 'an earlier yes answered a new question');
+});
+
+// Where the group requires encryption there is nothing to agree to.
+test('a group that requires encryption offers no way on in clear', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    a.setRequire(true);
+    await a.onMessage('zzz', {t: 'nocrypto'});
+    assert.strictEqual(a.state, 'blocked');
+    assert.ok(!a.awaitsClearConsent());
+    a.continueInClear();
+    assert.strictEqual(a.state, 'blocked');
+});
+
+// A room that has never had an encrypted call is not changed by this: a peer
+// that cannot encrypt makes an unencrypted call, as before.
+test('a room that was never encrypted goes on unencrypted as before', async () => {
+    const ctx = loadController();
+    const {e} = await waitingInitiator(ctx);
+    await e.onMessage('zzz', {t: 'nocrypto'});
+    assert.strictEqual(e.state, 'unencrypted');
+});
+
+// galene.js carries the fact that a room was encrypted over to the controller
+// of the next connection, so a reconnect does not reset it.
+test('a room remembered as encrypted is protected from the first message', async () => {
+    const ctx = loadController();
+    const {e} = await waitingInitiator(ctx);
+    e.wasEncrypted = true;
+    await e.onMessage('zzz', {t: 'nocrypto'});
+    assert.strictEqual(e.state, 'blocked');
+    assert.ok(e.awaitsClearConsent());
+});
+
 // ---- the media policy in galene.js ----------------------------------------
 
 /**
@@ -445,9 +730,15 @@ function liftFunctionOr(ctx, file, name, before) {
 }
 
 /** @param {string|null} state - the controller state, or null for no connection */
-function mayPublish(state) {
+/**
+ * @param {string|null} state
+ * @param {boolean} [whileAsking] - what mayPublishWhileAsking() answers
+ */
+function mayPublish(state, whileAsking) {
     const ctx = vm.createContext({
-        serverConnection: state === null ? null : {e2ee: {state: state}},
+        serverConnection: state === null ? null : {e2ee: {
+            state: state, mayPublishWhileAsking: () => !!whileAsking,
+        }},
     });
     vm.runInContext(liftFunction('galene.js', 'mayPublishLocalMedia'), ctx);
     return ctx.mayPublishLocalMedia();
@@ -468,16 +759,28 @@ test('local media is not published while the controller refuses', () => {
     assert.strictEqual(mayPublish(null), true);
 });
 
-/** @param {string} state @param {string} [detail] */
-function runMediaPolicy(state, detail) {
+/**
+ * @param {string} state
+ * @param {string} [detail]
+ * @param {boolean} [consent] - refused only until the user agrees
+ */
+function runMediaPolicy(state, detail, consent, whileAsking) {
     const closed = [];
     const visibility = {};
     const ctx = vm.createContext({
-        serverConnection: {e2ee: {state: state, detail: detail || null}},
+        serverConnection: {e2ee: {
+            state: state, detail: detail || null,
+            awaitsClearConsent: () => !!consent,
+            mayPublishWhileAsking: () => !!whileAsking,
+        }},
         setVisibility: (id, visible) => visibility[id] = visible,
         closeUpMedia: label => closed.push(label),
         setButtonsVisibility: () => {},
     });
+    // The policy asks mayPublishLocalMedia() whether to close the camera;
+    // before it did, it closed on every refusal.
+    liftFunctionOr(ctx, 'galene.js', 'mayPublishLocalMedia',
+                   'function mayPublishLocalMedia() { return false; }');
     vm.runInContext(liftFunction('galene.js', 'enforceE2EEMediaPolicy'), ctx);
     ctx.enforceE2EEMediaPolicy();
     return {closed: closed, visibility: visibility};
@@ -775,9 +1078,10 @@ test('closing a stream that never had a tile is not an error', () => {
  * not a copy of it, so it goes stale the moment the source does.
  *
  * @param {object} o
- * @param {'unusable'|'refuses'|'fails'|'sends'} o.mode - how the encrypted
+ * @param {'unusable'|'refuses'|'fails'|'lost'|'sends'} o.mode - how the encrypted
  *     path ends: the channel is not usable at all, sendChat() reports it did
- *     not send, sendChat() rejects, or it goes out encrypted
+ *     not send, sendChat() rejects, the call it was written in ended before
+ *     it went out, or it goes out encrypted
  * @param {boolean} o.require - the group's "require encryption" option
  * @param {string} o.text - what the user typed
  * @returns {Promise<{sent: any[][], errors: any[], input: {value: string}}>}
@@ -812,10 +1116,13 @@ async function runHandleInput(o) {
             chat: (...args) => sent.push(args),
             e2ee: {
                 require: o.require,
+                awaitsClearConsent: () => !!o.consent,
                 canChat: () => o.mode !== 'unusable',
                 sendChat: async () => {
                     if(o.mode === 'fails')
                         throw new Error('injected encryption failure');
+                    if(o.mode === 'lost')
+                        return null;
                     return o.mode === 'sends';
                 },
             },
@@ -945,4 +1252,363 @@ test('chat falls back to an ordinary message where encryption is not required', 
         assert.strictEqual(r.sent[0][2], 'text for the other person');
         assert.strictEqual(r.input.value, '', `${mode}: the box was not cleared`);
     }
+});
+
+test('a call waiting for the user to agree offers the way on, and says why', () => {
+    const r = runMediaPolicy('blocked', 'multipeer', true, true);
+    assert.strictEqual(r.visibility['e2ee-block-overlay'], true);
+    assert.strictEqual(r.visibility['e2ee-block-consent'], true);
+    assert.strictEqual(r.visibility['e2ee-continue-clear'], true);
+    assert.strictEqual(
+        r.visibility['e2ee-block-required'], false,
+        'the notice blamed a room setting that is not on',
+    );
+    assert.strictEqual(r.visibility['e2ee-why-multipeer'], true);
+
+    const required = runMediaPolicy('blocked', 'multipeer', false);
+    assert.strictEqual(required.visibility['e2ee-block-required'], true);
+    assert.strictEqual(required.visibility['e2ee-block-consent'], false);
+    assert.strictEqual(
+        required.visibility['e2ee-continue-clear'], false,
+        'a group that requires encryption offered a way round it',
+    );
+});
+
+test('chat is not sent in clear while the user has not agreed to it', async () => {
+    const r = await runHandleInput({
+        mode: 'unusable', require: false, consent: true,
+        text: 'text for the other person',
+    });
+    assert.deepStrictEqual(r.sent, [], 'the message went to the server in clear');
+    assert.deepStrictEqual(r.errors, ['e2ee.clearNotAgreed']);
+    assert.strictEqual(r.input.value, 'text for the other person');
+});
+
+// ---- a reconnect the server answers with encryption switched off ----------
+
+/**
+ * Merge a join's status over the one before, as gotJoined() does, and hand
+ * back what keepE2EEStatus() made of it.
+ *
+ * @param {object} before - groupStatus before the join
+ * @param {object} status - the join's status
+ */
+function joinWithStatus(before, status) {
+    const ctx = vm.createContext({groupStatus: Object.assign({}, before)});
+    // Before these existed a join's status was merged in and obeyed.
+    liftFunctionOr(ctx, 'galene.js', 'e2eeStatus',
+                   'function e2eeStatus() { return {}; }');
+    liftFunctionOr(ctx, 'galene.js', 'keepE2EEStatus',
+                   'function keepE2EEStatus() { return false; }');
+    const snapshot = ctx.e2eeStatus(ctx.groupStatus);
+    for(const key in status)
+        ctx.groupStatus[key] = status[key];
+    const dropped = ctx.keepE2EEStatus(snapshot);
+    return {dropped: dropped, status: ctx.groupStatus};
+}
+
+test('a reconnect answered with encryption switched off keeps it on, and says so', () => {
+    const encrypted = {name: 'room', e2ee: true, requireE2ee: true};
+    for(const status of [
+        {e2ee: false},
+        {requireE2ee: false},
+        {e2ee: false, requireE2ee: false},
+        // e2eeActive() also turns off in an operator hub
+        {operatorRoom: true},
+    ]) {
+        const r = joinWithStatus(encrypted, status);
+        assert.strictEqual(r.dropped, true, JSON.stringify(status));
+        assert.strictEqual(r.status.e2ee, true, JSON.stringify(status));
+        assert.strictEqual(r.status.requireE2ee, true, JSON.stringify(status));
+        assert.strictEqual(r.status.operatorRoom, false, JSON.stringify(status));
+    }
+});
+
+// A server that means no harm leaves the fields out when they are false, so
+// an ordinary reconnect must not set anything off.
+test('an ordinary reconnect is not taken for one', () => {
+    const r = joinWithStatus(
+        {name: 'room', e2ee: true}, {name: 'room', displayName: 'Room'},
+    );
+    assert.strictEqual(r.dropped, false);
+    assert.strictEqual(r.status.e2ee, true);
+    assert.ok(!r.status.requireE2ee, 'a requirement was made up');
+});
+
+test('a room that never encrypted is left as the server says', () => {
+    const r = joinWithStatus({name: 'room'}, {e2ee: false});
+    assert.strictEqual(r.dropped, false);
+    assert.strictEqual(r.status.e2ee, false);
+
+    const hub = joinWithStatus({name: 'hub', e2ee: true, operatorRoom: true},
+                               {e2ee: true, operatorRoom: true});
+    assert.strictEqual(hub.dropped, false);
+    assert.strictEqual(hub.status.operatorRoom, true);
+});
+
+test('an encrypted call is remembered past the connection it was on', () => {
+    const ctx = vm.createContext({
+        e2eeWasEncrypted: false,
+        updateE2EEUI: () => {},
+        enforceE2EEMediaPolicy: () => {},
+        // read by the guest-name hand-off at the end of gotE2EEState
+        serverConnection: null,
+        nameSentTo: null,
+        sendOwnName: () => {},
+    });
+    vm.runInContext(liftFunction('galene.js', 'gotE2EEState'), ctx);
+    ctx.gotE2EEState.call({state: 'handshaking'});
+    assert.strictEqual(ctx.e2eeWasEncrypted, false);
+    ctx.gotE2EEState.call({state: 'established'});
+    assert.strictEqual(ctx.e2eeWasEncrypted, true);
+    ctx.gotE2EEState.call({state: 'blocked'});
+    assert.strictEqual(ctx.e2eeWasEncrypted, true, 'forgotten on the next change');
+});
+
+// ---- encrypted chat the server relays ---------------------------------------
+//
+// The server cannot read encrypted chat, but it decides what reaches whom and
+// under whose id.  A message must open only as what it was: from the peer, to
+// us, once, in its place.
+
+/**
+ * Two controllers in an established call, with the encrypted chat each one
+ * sends caught on its way to the server.
+ */
+async function chatting(ctx) {
+    const {a, b} = await handshake(ctx);
+    const outbox = {aaa: [], zzz: []};
+    for(const [e, id] of [[a, 'aaa'], [b, 'zzz']])
+        e.sc.userMessage = (kind, dest, payload) => {
+            if(kind === 'e2eechat')
+                outbox[id].push(payload);
+        };
+    return {a: a, b: b, outbox: outbox};
+}
+
+test('encrypted chat reaches the other side', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    assert.strictEqual(await a.sendChat('', 'hello'), true);
+    const got = await b.decryptChat('aaa', outbox.aaa[0]);
+    assert.strictEqual(got.text, 'hello');
+    assert.strictEqual(got.kind, '');
+    assert.strictEqual(got.missed, 0);
+});
+
+test("your own message sent back to you does not open as the other person's", async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'something I said');
+    // The server hands it back to its author under the peer's id.
+    const got = await a.decryptChat('zzz', outbox.aaa[0]).catch(() => null);
+    assert.strictEqual(got, null, 'your own words were shown as theirs');
+    // The same message does open where it was sent: the refusal above is
+    // about who it came back to, not a message that opens nowhere.
+    assert.strictEqual(
+        (await b.decryptChat('aaa', outbox.aaa[0])).text, 'something I said',
+    );
+});
+
+test('a message comes only from the peer', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'hello');
+    assert.strictEqual(
+        await b.decryptChat('somebody-else', outbox.aaa[0]), null,
+        'a message was attributed to whoever the server said sent it',
+    );
+    assert.strictEqual((await b.decryptChat('aaa', outbox.aaa[0])).text, 'hello');
+});
+
+test('a message is shown once, and in its place', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'one');
+    await a.sendChat('', 'two');
+    const [one, two] = outbox.aaa;
+
+    assert.strictEqual((await b.decryptChat('aaa', two)).text, 'two');
+    assert.strictEqual(
+        await b.decryptChat('aaa', one), null,
+        'an older message was shown after a newer one',
+    );
+    assert.strictEqual(
+        await b.decryptChat('aaa', two), null, 'a message was replayed',
+    );
+});
+
+// Changing the number does not help: it is sealed into the message.
+test('a message given another number does not open', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'hello');
+    const moved = Object.assign({}, outbox.aaa[0], {seq: 5});
+    await assert.rejects(b.decryptChat('aaa', moved));
+    // and a message that did not open does not move the count on
+    assert.strictEqual((await b.decryptChat('aaa', outbox.aaa[0])).text, 'hello');
+});
+
+test('a message held back shows up as a gap', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await a.sendChat('', 'one');
+    await a.sendChat('', 'two');
+    await a.sendChat('', 'three');
+    assert.strictEqual((await b.decryptChat('aaa', outbox.aaa[0])).missed, 0);
+    const got = await b.decryptChat('aaa', outbox.aaa[2]);
+    assert.strictEqual(got.text, 'three');
+    assert.strictEqual(got.missed, 1);
+});
+
+// Two messages sent at once must still go out in their order, or the other
+// side would take the second for a replay of the first.
+test('messages sent at once keep their order', async () => {
+    const ctx = loadController();
+    const {a, b, outbox} = await chatting(ctx);
+    await Promise.all([
+        a.sendChat('', 'one'), a.sendChat('me', 'two'), a.sendChat('', 'three'),
+    ]);
+    assert.deepStrictEqual(outbox.aaa.map(m => m.seq), [0, 1, 2]);
+    const texts = await Promise.all(
+        outbox.aaa.map(m => b.decryptChat('aaa', m)),
+    );
+    assert.deepStrictEqual(texts.map(t => t.text), ['one', 'two', 'three']);
+    assert.strictEqual(texts[1].kind, 'me');
+});
+
+// ---- a message written in an encrypted call that ends under it ------------
+//
+// The user typed into an encrypted call.  If the call ends while the message
+// is being sealed -- the peer leaves, or it stops being encrypted -- the
+// message must not go out as ordinary chat instead: that puts it on the
+// server, in the room's history, which is what the user was writing to avoid.
+
+test('a message sealed for a call that has ended is not reported as merely unsent', async () => {
+    const ctx = loadController();
+    const {a, outbox} = await chatting(ctx);
+    const paused = pauseIn(ctx.SozvonE2EECrypto, 'encryptChat');
+    const pending = a.sendChat('', 'written in the encrypted call');
+    await paused.reached;
+    a.delUser('zzz');
+    paused.release();
+    assert.strictEqual(
+        await pending, null,
+        'the caller was told to send it some other way',
+    );
+    assert.deepStrictEqual(outbox.aaa, []);
+});
+
+// The same when the message was queued behind another one and the call
+// stopped being encrypted before its turn came.
+test('a queued message whose call stopped being encrypted is not reported as merely unsent', async () => {
+    const ctx = loadController();
+    const {a} = await chatting(ctx);
+    const paused = pauseIn(ctx.SozvonE2EECrypto, 'encryptChat');
+    const first = a.sendChat('', 'one');
+    const second = a.sendChat('', 'two');
+    await paused.reached;
+    await a.onMessage('zzz', {t: 'nocrypto'});
+    paused.release();
+    assert.strictEqual(await first, null);
+    assert.strictEqual(await second, null);
+});
+
+test('a message whose encrypted call ended is not sent in clear', async () => {
+    const r = await runHandleInput({
+        mode: 'lost', require: false, text: 'text for the other person',
+    });
+    assert.deepStrictEqual(
+        r.sent, [],
+        'a message written in an encrypted call went to the server in clear',
+    );
+    assert.deepStrictEqual(r.errors, ['e2ee.chatLost']);
+    assert.strictEqual(r.input.value, 'text for the other person');
+});
+
+// ---- a refusal that may go away by itself -----------------------------------
+//
+// A participant who reconnects gets a new id while the server keeps the old,
+// dead session for up to 45 seconds: for that long the room holds three, and
+// an encrypted call is refused until the user agrees.  Closing the camera then
+// would leave both people with their cameras off once the old session is gone
+// and the call is encrypted again.  While this browser can encrypt, nothing
+// leaves in clear anyway: the worker drops what it has no key for.
+
+test('a refusal that only waits for consent keeps the camera', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    a.addUser('old-session-of-zzz');
+    assert.ok(a.awaitsClearConsent());
+    assert.strictEqual(a.mayPublishWhileAsking(), true);
+    assert.strictEqual(lastMode(a), false, 'the worker would pass media in clear');
+
+    const r = runMediaPolicy('blocked', 'multipeer', true, true);
+    assert.deepStrictEqual(
+        r.closed, [],
+        'the camera was closed for a refusal that may go away by itself',
+    );
+    assert.strictEqual(r.visibility['e2ee-block-consent'], true);
+    assert.strictEqual(mayPublish('blocked', true), true,
+                       'the camera could not come back after a reconnect');
+});
+
+// ... and comes back by itself once the old session is gone.
+test('the encrypted call resumes once the extra session is gone', async () => {
+    const ctx = loadController();
+    const {a, b} = await handshake(ctx);
+    a.addUser('old-session-of-zzz');
+    assert.strictEqual(a.state, 'blocked');
+    a.delUser('old-session-of-zzz');
+    assert.strictEqual(a.state, 'handshaking');
+    // relay the new handshake: b answers a's hello
+    const relay = [];
+    a.sc.userMessage = (k, d, p) => relay.push({to: b, from: 'aaa', p: p});
+    b.sc.userMessage = (k, d, p) => relay.push({to: a, from: 'zzz', p: p});
+    // b too saw the extra session come and go
+    b.addUser('old-session-of-zzz');
+    b.delUser('old-session-of-zzz');
+    // delUser() started both handshakes, and their keys are generated off
+    // the main thread: wait for the messages until a deadline, rather than
+    // for a number of event-loop turns a loaded machine can spin through
+    // before the first key is ready.
+    const deadline = Date.now() + 10000;
+    while((a.state !== 'established' || b.state !== 'established') &&
+          Date.now() < deadline) {
+        if(relay.length) {
+            const m = relay.shift();
+            await m.to.onMessage(m.from, m.p);
+        } else {
+            await new Promise(resolve => setTimeout(resolve, 5));
+        }
+    }
+    assert.strictEqual(a.state, 'established');
+    assert.strictEqual(b.state, 'established');
+});
+
+// Where this browser cannot encrypt, a track has no encryptor at all: the
+// camera must still be closed, consent or not.
+test('a browser whose encryptor failed still closes the camera while asking', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    assert.strictEqual(a.attachSender(refusingSender(), 'video'), false);
+    assert.strictEqual(a.state, 'blocked');
+    assert.ok(a.awaitsClearConsent());
+    assert.strictEqual(a.mayPublishWhileAsking(), false);
+
+    const r = runMediaPolicy('blocked', 'transform', true, false);
+    assert.deepStrictEqual(r.closed, ['camera', 'screenshare']);
+    assert.strictEqual(mayPublish('blocked', false), false);
+});
+
+test('a group that requires encryption still closes the camera', async () => {
+    const ctx = loadController();
+    const {a} = await handshake(ctx);
+    a.setRequire(true);
+    a.addUser('third');
+    assert.strictEqual(a.mayPublishWhileAsking(), false);
+    assert.deepStrictEqual(
+        runMediaPolicy('blocked', 'multipeer', false, false).closed,
+        ['camera', 'screenshare'],
+    );
 });

@@ -1730,7 +1730,12 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 	case "requestStream":
 		down := getDownConn(c, m.Id)
 		if down == nil {
-			return ErrUnknownId
+			// The stream may have been closed while this request
+			// was on its way, which is nothing to end the session
+			// over.  It did end it, a few hundred milliseconds
+			// into a rejoin, and the client had to rejoin again.
+			// (Sozvon)
+			return nil
 		}
 		requested, err := toStringArray(m.Request)
 		if err != nil {
@@ -2376,14 +2381,16 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 			user := c.Username()
 			perms := c.Permissions()
 			data = c.Data()
-			go func(clients []group.Client) {
-				for _, cc := range clients {
-					cc.PushClient(
-						g.Name(), "change",
-						id, user, perms, data,
-					)
-				}
-			}(g.GetClients(nil))
+			// In order, from this goroutine: a goroutine per change
+			// let two changes in a row arrive the wrong way round,
+			// leaving the room with the older one.  PushClient only
+			// queues, so it does not block.  (Sozvon)
+			for _, cc := range g.GetClients(nil) {
+				cc.PushClient(
+					g.Name(), "change",
+					id, user, perms, data,
+				)
+			}
 		default:
 			return group.UserError("unknown user action")
 		}

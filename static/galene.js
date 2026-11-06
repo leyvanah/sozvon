@@ -85,6 +85,15 @@ const RECONNECT_MAX_DELAY = 30000;
 let groupStatus = {};
 
 /**
+ * Whether this page has had an end-to-end encrypted call in this group.
+ * Outlives the connection, and with it the E2EE controller, so that a
+ * reconnect does not forget it.  (Sozvon)
+ *
+ * @type {boolean}
+ */
+let e2eeWasEncrypted = false;
+
+/**
  * Whether "remember me" was ticked at join time; checked on a successful join
  * to decide whether to mint a remember-token (operators only).
  * @type {{group: string, username: string, remember: boolean}|null}
@@ -566,6 +575,8 @@ function isFirefox() {
  * @param{boolean} connected
  */
 function setConnected(connected) {
+    // the card retries into the session it was shown for
+    hideMediaHelp();
     let userbox = document.getElementById('profile');
     let connectionbox = document.getElementById('login-container');
     if(connected) {
@@ -873,6 +884,18 @@ function watchTurnPath(c, report) {
     }
     if(udpGivenUp)
         return;
+    // A phone takes the network away from a page in the background, about
+    // a minute after it is hidden (away.js), and every path goes down with
+    // it.  That is the system's doing, not UDP's, yet on a real phone it
+    // made the call give up UDP, a decision kept for six hours; on the test
+    // stand the call then came back with no media at all.  Judge the paths
+    // again from scratch once the page is back. (Sozvon)
+    if(document.visibilityState === 'hidden' && pausesWhenHidden()) {
+        if(turnWatcher)
+            for(let id of [...turnWatcher.streams.keys()])
+                turnWatcher.forget(id);
+        return;
+    }
     if(!turnWatcher)
         turnWatcher = new F.Watcher();
     let q = c.userdata.quality;
@@ -1057,6 +1080,9 @@ function showReconnect(on) {
 function scheduleReconnect() {
     reconnecting = true;
     showReconnect(true);
+    let t = getAwayTracker();
+    if(t)
+        t.lost(Date.now());
     if(reconnectTimer)
         clearTimeout(reconnectTimer);
     let delay = Math.min(
@@ -1070,6 +1096,8 @@ function scheduleReconnect() {
 function stopReconnect() {
     reconnecting = false;
     reconnectAttempt = 0;
+    if(awayTracker)
+        awayTracker.back();
     if(reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -1127,7 +1155,18 @@ function reconnectSoon() {
 
 window.addEventListener('online', reconnectSoon);
 document.addEventListener('visibilitychange', function() {
-    if(document.visibilityState === 'visible')
+    let hidden = document.visibilityState === 'hidden';
+    // Sozvon: the last thing a phone lets a page do before it pauses the
+    // camera and microphone, so say it now (away.js).
+    let t = getAwayTracker();
+    if(t) {
+        if(hidden)
+            t.hidden(Date.now());
+        else
+            t.shown(Date.now());
+    }
+    publishAwayState(hidden);
+    if(!hidden)
         reconnectSoon();
 });
 
@@ -1710,6 +1749,76 @@ function publishMuteState(mute) {
 }
 
 /**
+ * Sozvon: away.js, or null before it has loaded.
+ *
+ * @returns {any}
+ */
+function awayApi() {
+    return /** @type {any} */ (window).SozvonAway || null;
+}
+
+/** @type {any} */
+let awayTracker = null;
+
+/**
+ * Sozvon: the tracker of when the page was in the background (away.js).
+ *
+ * @returns {any}
+ */
+function getAwayTracker() {
+    let A = awayApi();
+    if(!awayTracker && A)
+        awayTracker = new A.Tracker();
+    return awayTracker;
+}
+
+/**
+ * Sozvon: whether this device stops our camera and microphone when the page
+ * is hidden -- a phone or a tablet, not a computer (away.js).
+ *
+ * @returns {boolean}
+ */
+function pausesWhenHidden() {
+    let A = awayApi();
+    if(!A)
+        return false;
+    let coarse = false;
+    try {
+        coarse = window.matchMedia('(pointer: coarse)').matches;
+    } catch(e) {
+        // no matchMedia: no way to tell, so not a phone
+    }
+    return A.pausesWhenHidden({
+        touchPoints: navigator.maxTouchPoints || 0,
+        coarse: coarse,
+    });
+}
+
+/**
+ * Sozvon: tell the room whether this phone has put the call in the
+ * background, where the system pauses our camera and microphone.  Same
+ * per-user data as publishMuteState(); see away.js for what was measured.
+ *
+ * @param {boolean} away
+ */
+function publishAwayState(away) {
+    if(!serverConnection || !serverConnection.id)
+        return;
+    if(away && !pausesWhenHidden())
+        return;
+    let me = serverConnection.users[serverConnection.id];
+    if(me && !!me.data.away === !!away)
+        return;
+    try {
+        serverConnection.userAction(
+            'setdata', serverConnection.id, {'away': away ? true : null},
+        );
+    } catch(e) {
+        console.warn('Could not publish away state', e);
+    }
+}
+
+/**
  * Update only the microphone button's icon/state, without touching any
  * tracks or stored settings.  Used both by setLocalMute and by
  * setButtonsVisibility (to keep the icon honest when the audio track
@@ -2230,8 +2339,9 @@ function feedQuality(c, iceState, snap) {
  * so this is a handful of messages in a bad call and none in a good one.
  * (Sozvon)
  *
- * @param {string} kind - 'level', 'ask' (receiver asks for a cap) or
- *     'send' (sender applies one)
+ * @param {string} kind - 'level', 'ask' (receiver asks for a cap),
+ *     'send' (sender applies one), 'camera' (how far a published camera's
+ *     picture got, see checkCamera) and the others connlog.go knows
  * @param {string} id - the stream
  * @param {Object<string,any>} value
  */
@@ -2335,65 +2445,34 @@ function feedBitrate(c, report) {
     if(!c.userdata.bitrate)
         c.userdata.bitrate = new B.Controller(B.START_CAP, c.label);
     let r = c.userdata.bitrate.update(B.snapshot(report.values(), Date.now()));
-    notePicture(c, r.sample, r.cap);
+    if(!c.userdata.picture)
+        c.userdata.picture = new B.Picture(pictureInterval);
+    let picture = c.userdata.picture.add(r.sample, r.cap, Date.now());
+    if(picture)
+        reportQuality('picture', c.id, picture);
     if(r.changed) {
         console.info('bitrate: asking', c.username || c.source,
                      'to cap', c.id, 'at', r.cap, r.sample);
-        // what the decision rested on, for the connection log: whether a
-        // cap follows network trouble or a receiver too busy to keep up is
-        // not settled yet (tasks#32), and this is the evidence
-        let s = r.sample;
-        reportQuality('ask', c.id, {
-            cap: r.cap, audioDelay: s.audioDelay, videoDelay: s.videoDelay,
-            jitter: s.jitter, processing: s.processing, freeze: s.freeze,
-            concealed: s.concealed,
-            // the delay judged to be the path's own, if any (tasks#62)
-            pathAudio: s.path ? s.path.audioDelay : null,
-            pathVideo: s.path ? s.path.videoDelay : null,
-        });
+        reportQuality('ask', c.id, B.askReport(r.cap, r.sample));
     }
     if(!r.send || !c.source || !serverConnection ||
        !serverConnection.users[c.source])
         return;
-    serverConnection.userMessage(B.MESSAGE_KIND, c.source,
-                                 {stream: c.id, cap: r.cap}, true);
+    // The socket may have closed since this poll began; the request is
+    // repeated with the controller's next one, as in releaseBitrateCap().
+    // Uncaught, it surfaced as a page error whenever a poll met a dropped
+    // socket. (Sozvon)
+    try {
+        serverConnection.userMessage(B.MESSAGE_KIND, c.source,
+                                     {stream: c.id, cap: r.cap}, true);
+    } catch(e) {
+        console.warn('feedBitrate', e);
+    }
 }
 
-// How often the picture a down stream delivers goes to the connection log.
+// How often the picture a down stream delivers goes to the connection log
+// (bitrate-control.js, Picture).
 const pictureInterval = 120000;
-
-/**
- * Receiver side: keep track of the picture a stream delivers, and every
- * pictureInterval report it to the connection log -- size, frame rate
- * (average and worst interval) and rate -- so that a call can be checked
- * afterwards for what a cap did to the picture (tasks#65).
- *
- * @param {Stream} c
- * @param {any} sample - what bitrate-control.js made of the last interval
- * @param {number|null} cap
- */
-function notePicture(c, sample, cap) {
-    if(!sample || sample.state === 'unknown' || !(sample.fps > 0))
-        return;
-    let now = Date.now();
-    let p = c.userdata.picture;
-    if(!p)
-        p = c.userdata.picture = {since: now, n: 0, fps: 0, minFps: Infinity,
-                                  bps: 0, width: 0, height: 0};
-    p.n++;
-    p.fps += sample.fps;
-    p.minFps = Math.min(p.minFps, sample.fps);
-    p.bps += sample.videoBps;
-    p.width = sample.width;
-    p.height = sample.height;
-    if(now - p.since < pictureInterval)
-        return;
-    reportQuality('picture', c.id, {
-        width: p.width, height: p.height,
-        fps: p.fps / p.n, minFps: p.minFps, rate: p.bps / p.n, cap: cap,
-    });
-    delete c.userdata.picture;
-}
 
 /**
  * Receiver side: we no longer receive a down stream, so lift whatever cap
@@ -3101,6 +3180,99 @@ async function setUpStream(c, stream) {
             c.close();
         }
     };
+
+    if(c.label === 'camera' && stream.getVideoTracks().length > 0)
+        scheduleCameraCheck(c);
+}
+
+/**
+ * A few seconds after a camera stream is published, tell the connection log
+ * how far its picture got: the camera track, the hidden element and canvas
+ * of a filter, the sender's input, the encoder, the wire, and the preview.
+ * See camera-diag.js.  (Sozvon)
+ *
+ * @param {Stream} c
+ */
+function scheduleCameraCheck(c) {
+    let D = /** @type {any} */ (window).SozvonCameraDiag;
+    if(!D)
+        return;
+    let published = Date.now();
+    setTimeout(() => {
+        checkCamera(c, published).catch(e => console.warn('checkCamera', e));
+    }, D.CHECK_AFTER);
+}
+
+/**
+ * @param {Stream} c
+ * @param {number} published - when the stream was set up, in ms
+ */
+async function checkCamera(c, published) {
+    let D = /** @type {any} */ (window).SozvonCameraDiag;
+    let mh = /** @type {any} */ (window).SozvonMediaHelp;
+    // still the camera we published: not closed, not replaced
+    let current = () =>
+        !!c.sc && !!c.pc && !!serverConnection &&
+        serverConnection.up[c.id] === c;
+    if(!D || !mh || !current())
+        return;
+
+    /** @type {any} */
+    let f = c.userdata.filter;
+    let input = f ? f.inputStream : c.stream;
+    /** @type {any} */
+    let track = input && input.getVideoTracks()[0];
+    if(!track)
+        return;
+
+    let stats = await c.pc.getStats();
+    if(!current())
+        return;
+
+    let media = /** @type {HTMLVideoElement} */
+        (document.getElementById('media-' + c.localId));
+    let preview = null;
+    if(media && media.getVideoPlaybackQuality)
+        preview = media.getVideoPlaybackQuality().totalVideoFrames;
+
+    let element = null;
+    if(f)
+        element = {
+            paused: f.video.paused,
+            readyState: f.video.readyState,
+            videoWidth: f.video.videoWidth,
+            videoHeight: f.video.videoHeight,
+            play: f.playState,
+            drawn: f.drawn,
+        };
+
+    let value = D.report({
+        platform: mh.detectPlatform({
+            ua: navigator.userAgent,
+            bridge: !!hostApp(),
+            touchPoints: navigator.maxTouchPoints,
+        }),
+        ua: navigator.userAgent,
+        touch: navigator.maxTouchPoints > 0,
+        canvas: !f ? 'none' :
+            f.definition === mobileOrientationFilter ? 'orientation' :
+            'filter',
+        track: {
+            readyState: track.readyState,
+            muted: track.muted,
+            enabled: track.enabled,
+            settings: track.getSettings ? track.getSettings() : {},
+            // MediaStreamTrack.stats, where the browser has it: frames the
+            // camera delivered to the page
+            delivered: track.stats ? track.stats.deliveredFrames : null,
+        },
+        element: element,
+        sender: D.senderStats(stats.values()),
+        preview: preview,
+        after: Date.now() - published,
+    });
+    console.info('camera check', value);
+    reportQuality('camera', c.id, value);
 }
 
 /**
@@ -3387,11 +3559,12 @@ async function addMicrophoneNow(c) {
         let s = await navigator.mediaDevices.getUserMedia({audio: audio});
         track = s.getAudioTracks()[0];
     } catch(e) {
-        displayMediaError(e);
+        displayMediaError(e, 'audio', () => addMicrophone(c));
         return;
     }
     if(!track)
         return;
+    mediaHelpResolved(true, false);
     if(!usable()) {
         // hung up, or the stream was replaced, while the microphone opened
         track.stop();
@@ -3439,13 +3612,15 @@ async function addMicrophoneNow(c) {
 }
 
 /**
- * The toast for a getUserMedia that failed.
+ * Tell the user about a getUserMedia that failed.
  *
  * @param {any} e
+ * @param {string} kind - what was asked for: 'audio' | 'video' | 'both'
+ * @param {function(): any} retry - asks for the same devices again
  */
-function displayMediaError(e) {
+function displayMediaError(e, kind, retry) {
     if(e && e.name === 'NotAllowedError')
-        displayError(Sozvon.i18n.t('toast.permissionDenied'));
+        showMediaHelp(kind, retry);
     else if(e && (e.name === 'NotFoundError' ||
                   e.name === 'OverconstrainedError' ||
                   e.name === 'DevicesNotFoundError'))
@@ -3455,6 +3630,154 @@ function displayMediaError(e) {
     else
         displayError(e);
 }
+
+/* The help card for a refused camera or microphone.  (Sozvon)
+
+   It replaced a four-second toast that said only "access was denied".  The
+   cause people cannot guess is on Android: Chrome will not show a permission
+   prompt while another app draws over it -- a chat bubble, a small video
+   window, a screen filter -- and offers only "This site can't ask for
+   permission"; cancelling that is a refusal.  The card stays until it is
+   closed or the device opens, and media-help.js picks its steps from the
+   platform and the permission state. */
+
+/** @type {string|null} */
+let mediaHelpKind = null;
+/** @type {(function(): any)|null} */
+let mediaHelpRetry = null;
+/** @type {PermissionStatus[]} */
+let mediaHelpWatched = [];
+// Bumped on every show and hide, so that a show still waiting for the
+// permission states does not reappear after the card was dismissed.
+let mediaHelpGen = 0;
+
+/**
+ * @param {string} name - 'camera' or 'microphone'
+ * @returns {Promise<PermissionStatus|null>} null where the browser will not say
+ */
+async function queryMediaPermission(name) {
+    try {
+        return await navigator.permissions.query(
+            /** @type {any} */ ({name: name}));
+    } catch(e) {
+        return null;
+    }
+}
+
+/**
+ * @param {{key: string, params?: Object<string,string>}} line
+ * @returns {string}
+ */
+function mediaHelpText(line) {
+    /** @type {Object<string,string>} */
+    let params = {};
+    for(let k in line.params || {})
+        params[k] = Sozvon.i18n.t(line.params[k]);
+    return Sozvon.i18n.t(line.key, params);
+}
+
+/**
+ * @param {string} kind - 'audio' | 'video' | 'both'
+ * @param {function(): any} retry - asks for the same devices again
+ */
+async function showMediaHelp(kind, retry) {
+    let gen = ++mediaHelpGen;
+    let names = kind === 'both' ? ['camera', 'microphone'] :
+        [kind === 'video' ? 'camera' : 'microphone'];
+    let statuses = await Promise.all(names.map(queryMediaPermission));
+    if(gen !== mediaHelpGen)
+        return;
+
+    let mh = /** @type {any} */ (window).SozvonMediaHelp;
+    let advice = mh.advice({
+        kind: kind,
+        state: mh.combineStates(statuses.map(s => s ? s.state : null)),
+        platform: mh.detectPlatform({
+            ua: navigator.userAgent,
+            bridge: !!hostApp(),
+            touchPoints: navigator.maxTouchPoints,
+        }),
+    });
+
+    unwatchMediaHelp();
+    mediaHelpKind = kind;
+    mediaHelpRetry = retry;
+    document.getElementById('media-help-icon').className =
+        'fas ' + (kind === 'video' ? 'fa-video-slash' : 'fa-microphone-slash');
+    document.getElementById('media-help-title').textContent =
+        Sozvon.i18n.t(advice.title);
+    document.getElementById('media-help-reason').textContent =
+        mediaHelpText(advice.reason);
+    let ol = document.getElementById('media-help-steps');
+    ol.textContent = '';
+    for(let step of advice.steps) {
+        let li = document.createElement('li');
+        li.textContent = mediaHelpText(step);
+        ol.appendChild(li);
+    }
+
+    // Allowing the site in its settings while the card is up is the fix
+    // most of the steps lead to; take it as the answer without making the
+    // user come back for the button.
+    for(let s of statuses) {
+        if(s) {
+            s.onchange = mediaHelpPermissionChanged;
+            mediaHelpWatched.push(s);
+        }
+    }
+    setVisibility('media-help', true);
+}
+
+function mediaHelpPermissionChanged() {
+    if(!mediaHelpWatched.every(s => s.state === 'granted'))
+        return;
+    let retry = mediaHelpRetry;
+    hideMediaHelp();
+    if(retry)
+        retry();
+}
+
+function unwatchMediaHelp() {
+    for(let s of mediaHelpWatched)
+        s.onchange = null;
+    mediaHelpWatched = [];
+}
+
+function hideMediaHelp() {
+    mediaHelpGen++;
+    unwatchMediaHelp();
+    mediaHelpKind = null;
+    mediaHelpRetry = null;
+    setVisibility('media-help', false);
+}
+
+/**
+ * A device has just opened: drop the card if it was about that device.
+ *
+ * @param {boolean} audio
+ * @param {boolean} video
+ */
+function mediaHelpResolved(audio, video) {
+    if(mediaHelpKind === null)
+        return;
+    if((mediaHelpKind === 'audio' && audio) ||
+       (mediaHelpKind === 'video' && video) ||
+       (mediaHelpKind === 'both' && audio && video))
+        hideMediaHelp();
+}
+
+document.getElementById('media-help-retry').onclick = function(e) {
+    e.preventDefault();
+    let retry = mediaHelpRetry;
+    hideMediaHelp();
+    if(retry)
+        retry();
+};
+
+document.getElementById('media-help-close').onclick = function(e) {
+    e.preventDefault();
+    hideMediaHelp();
+};
 
 /**
  * Whether local media may be published right now.
@@ -3469,7 +3792,11 @@ function displayMediaError(e) {
  */
 function mayPublishLocalMedia() {
     let e2ee = serverConnection && serverConnection.e2ee;
-    return !(e2ee && e2ee.state === 'blocked');
+    if(!(e2ee && e2ee.state === 'blocked'))
+        return true;
+    // Refused only until the user agrees, in a browser whose frames still go
+    // through the encryptor: nothing leaves in clear, so the camera may stay.
+    return !!(e2ee.mayPublishWhileAsking && e2ee.mayPublishWhileAsking());
 }
 
 /**
@@ -3588,11 +3915,16 @@ async function addLocalMediaNow(localId, force) {
             stream = new MediaStream();
         clearTimeout(hangTimer);
         hideBrowserUnsupported();
+        mediaHelpResolved(!!audio, !!video);
     } catch(e) {
         clearTimeout(hangTimer);
         hideBrowserUnsupported();
-        // with the camera kept, the old stream still shows the picture
-        displayMediaError(e);
+        // With the camera kept, only the microphone was being opened, and
+        // the old stream still shows the picture: say which device failed.
+        displayMediaError(e,
+                          constraints.audio && constraints.video ? 'both' :
+                          constraints.video ? 'video' : 'audio',
+                          () => addLocalMedia(localId, force));
         return;
     }
     if(keep) {
@@ -4587,6 +4919,47 @@ function setLabel(c, fallback) {
         mic.setAttribute('aria-label', text);
         mic.appendChild(stateGlyph('fa-microphone-slash'));
         label.appendChild(mic);
+    }
+
+    if(!c.up)
+        setAwayNote(c);
+}
+
+/**
+ * Sozvon: over the tile of somebody whose phone has put the call in the
+ * background, say so.  Their camera has stopped, so what the tile shows is
+ * the last picture before it did, and it looked like a person sitting still
+ * (away.js).
+ *
+ * @param {Stream} c
+ */
+function setAwayNote(c) {
+    let div = document.getElementById('peer-' + c.localId);
+    if(!div)
+        return;
+    let u = serverConnection && c.source && serverConnection.users[c.source];
+    let away = !!(u && u.data && u.data.away);
+    div.classList.toggle('peer-away', away);
+    let note = div.querySelector(':scope > .peer-away-note');
+    if(!away) {
+        if(note)
+            note.remove();
+        return;
+    }
+    if(!note) {
+        note = document.createElement('div');
+        note.className = 'peer-away-note';
+        note.setAttribute('role', 'status');
+        note.appendChild(stateGlyph('fa-video-slash'));
+        // tagged, so that a change of language rewrites them too
+        for(let [tag, key] of [['strong', 'tile.away'],
+                               ['span', 'tile.awayPaused']]) {
+            let e = document.createElement(tag);
+            e.setAttribute('data-i18n', key);
+            e.textContent = Sozvon.i18n.t(key);
+            note.appendChild(e);
+        }
+        div.appendChild(note);
     }
 }
 
@@ -5617,6 +5990,17 @@ function setUserStatus(id, elt, userinfo) {
     // by publishMuteState() over the same per-user data as the raised hand.
     // (Sozvon)
     elt.classList.toggle('user-muted', !!userinfo.data.muted);
+    // And whether their phone has put the call in the background, which
+    // pauses their camera and microphone (publishAwayState()). (Sozvon)
+    let away = !!userinfo.data.away;
+    elt.classList.toggle('user-away', away);
+    if(away) {
+        elt.setAttribute('data-i18n-title', 'userlist.away');
+        elt.title = Sozvon.i18n.t('userlist.away');
+    } else if(elt.hasAttribute('data-i18n-title')) {
+        elt.removeAttribute('data-i18n-title');
+        elt.removeAttribute('title');
+    }
 
     let microphone=false, camera = false;
     for(let label in userinfo.streams) {
@@ -6065,6 +6449,50 @@ function e2eeActive() {
 }
 
 /**
+ * The part of a group's status that decides whether its calls are end-to-end
+ * encrypted. (Sozvon)
+ *
+ * @param {Object<string,any>} status
+ * @returns {{e2ee: boolean, requireE2ee: boolean, operatorRoom: boolean}}
+ */
+function e2eeStatus(status) {
+    return {
+        e2ee: !!status.e2ee,
+        requireE2ee: !!status.requireE2ee,
+        operatorRoom: !!status.operatorRoom,
+    };
+}
+
+/**
+ * Keep a join from switching end-to-end encryption off in this page.
+ *
+ * Whether the group encrypts is the server's answer to every join, and the
+ * server is the party the encryption keeps out.  Dropping the connection and
+ * answering the reconnect with "e2ee": false would otherwise take a call to
+ * plaintext with only the padlock to show for it, and the camera would be
+ * republished on its own.  A server that means no harm never says so: the
+ * fields are left out when false, and a join's status is merged over the one
+ * before.  So once this page has seen the group encrypt, it goes on doing so,
+ * and a status that says otherwise is reported rather than obeyed. (Sozvon)
+ *
+ * @param {{e2ee: boolean, requireE2ee: boolean, operatorRoom: boolean}} before
+ *     e2eeStatus() of groupStatus before the join's status was merged in
+ * @returns {boolean} whether the join's status tried to switch it off
+ */
+function keepE2EEStatus(before) {
+    if(!before.e2ee || before.operatorRoom)
+        return false;
+    let now = e2eeStatus(groupStatus);
+    let dropped = !now.e2ee || now.operatorRoom ||
+        (before.requireE2ee && !now.requireE2ee);
+    groupStatus.e2ee = true;
+    groupStatus.operatorRoom = false;
+    if(before.requireE2ee)
+        groupStatus.requireE2ee = true;
+    return dropped;
+}
+
+/**
  * Whether an ordinary chat message may be sent at all.
  *
  * An ordinary chat message goes through the server in clear and stays in the
@@ -6077,7 +6505,12 @@ function e2eeActive() {
  */
 function mayChatInClear() {
     let e2ee = serverConnection && serverConnection.e2ee;
-    return !(e2eeActive() && e2ee && e2ee.require);
+    if(!(e2eeActive() && e2ee))
+        return true;
+    // A call that stopped being encrypted and waits for the user to agree to
+    // go on in clear holds its chat back as well as its media.
+    return !e2ee.require &&
+        !(e2ee.awaitsClearConsent && e2ee.awaitsClearConsent());
 }
 
 /**
@@ -6286,6 +6719,10 @@ function gotE2EESas(sas) {
  * @this {SozvonE2EE}
  */
 function gotE2EEState() {
+    // Carried over to the controller of the next connection: a room that has
+    // had an encrypted call does not go on in clear without the user.
+    if(this.state === 'established')
+        e2eeWasEncrypted = true;
     updateE2EEUI();
     enforceE2EEMediaPolicy();
     // a new encrypted session, or none: send our name again when it is up
@@ -6307,6 +6744,14 @@ function enforceE2EEMediaPolicy() {
     let e2ee = serverConnection && serverConnection.e2ee;
     let blocked = !!(e2ee && e2ee.state === 'blocked');
     setVisibility('e2ee-block-overlay', blocked);
+    // Refused by the group, or only until the user agrees to go on in clear:
+    // the second says so and offers the way on.
+    let consent = blocked && !!e2ee.awaitsClearConsent &&
+        e2ee.awaitsClearConsent();
+    setVisibility('e2ee-block-required', blocked && !consent);
+    setVisibility('e2ee-block-consent', consent);
+    setVisibility('e2ee-block-consent-hint', consent);
+    setVisibility('e2ee-continue-clear', consent);
     // Which reason to show under the notice.  The notice itself cannot name
     // one without guessing, and the guess was wrong for the state where
     // nobody else is in the room yet and it is this browser that cannot
@@ -6321,7 +6766,7 @@ function enforceE2EEMediaPolicy() {
     for(let reason in reasons)
         setVisibility(reasons[reason],
                       blocked && !!e2ee && e2ee.detail === reason);
-    if(blocked) {
+    if(blocked && !mayPublishLocalMedia()) {
         // Never publish in clear when encryption is required.
         closeUpMedia('camera');
         closeUpMedia('screenshare');
@@ -6394,10 +6839,26 @@ function updateE2EEUI() {
         ind.classList.add('e2ee-bad');
         if(icon)
             icon.className = 'fas fa-unlock';
-        ind.title = Sozvon.i18n.t('e2ee.failed');
+        // A handshake that ran out of time or met another version of the
+        // page is not evidence of interception, and should not read as one.
+        ind.title = Sozvon.i18n.t(e2ee.detail === 'version' ?
+                                  'e2ee.failedVersion' : 'e2ee.failed');
         setVisibility('e2ee-indicator', true);
         break;
-    default: // idle / handshaking: nothing to compare yet
+    case 'handshaking':
+        if(e2ee.detail === 'slow') {
+            // Still waiting for the other side, long enough to say so: until
+            // it answers, nothing gets through in either direction.
+            ind.classList.add('e2ee-bad');
+            if(icon)
+                icon.className = 'fas fa-unlock';
+            ind.title = Sozvon.i18n.t('e2ee.handshakeSlow');
+            setVisibility('e2ee-indicator', true);
+            break;
+        }
+        setVisibility('e2ee-indicator', false);
+        break;
+    default: // idle: nothing to compare yet
         setVisibility('e2ee-indicator', false);
         break;
     }
@@ -6896,8 +7357,12 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
             token = null;
         }
         // don't discard endPoint and friends
+        let e2eeBefore = e2eeStatus(groupStatus);
         for(let key in status)
             groupStatus[key] = status[key];
+        let e2eeDropped = keepE2EEStatus(e2eeBefore);
+        if(e2eeDropped)
+            displayError(Sozvon.i18n.t('e2ee.statusDropped'));
         if(serverConnection.e2ee)
             serverConnection.e2ee.setRequire(groupStatus.requireE2ee);
         usingRememberToken = false;
@@ -6909,10 +7374,19 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
         reconnectLastJoin = serverConnection.lastJoin || reconnectLastJoin;
         reconnectName = hidePseudonym(serverConnection.username) || null;
         let wasReconnecting = reconnecting;
+        // A call that dropped because a phone put it in the background is
+        // rejoined the moment it comes back, so the person would only see a
+        // flash of "reconnecting"; say what happened (away.js). (Sozvon)
+        let tracker = getAwayTracker();
+        let fromAway = !!tracker && tracker.back();
         if(reconnecting)
-            displayMessage(Sozvon.i18n.t('toast.reconnected'));
+            displayMessage(Sozvon.i18n.t(fromAway ?
+                                         'toast.reconnectedAfterAway' :
+                                         'toast.reconnected'));
         stopReconnect();
-        if(wasReconnecting && kind === 'join')
+        // Not after a status that tried to switch encryption off: whatever
+        // else it may have got wrong, the camera stays with the user.
+        if(wasReconnecting && kind === 'join' && !e2eeDropped)
             restore = reconnectMedia;
         reconnectMedia = null;
         if(pendingRemember) {
@@ -7026,6 +7500,8 @@ async function gotJoined(kind, group, perms, status, data, error, message) {
     // show as unmuted to everyone until the first time they touched the
     // button. (Sozvon)
     publishMuteState(!!getSettings().localMute);
+    // And whether we are in the background: a phone can rejoin while hidden.
+    publishAwayState(document.visibilityState === 'hidden');
 
     if(('mediaDevices' in navigator) &&
        ('getUserMedia' in navigator.mediaDevices) &&
@@ -7258,9 +7734,13 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
         return;
     case 'e2eechat':
         if(e2eeActive() && serverConnection.e2ee) {
-            serverConnection.e2ee.decryptChat(message).then(function(res) {
+            serverConnection.e2ee.decryptChat(id, message).then(function(res) {
                 if(!res)
                     return;
+                // The server relays the encrypted chat and can hold some of
+                // it back; the sequence numbers show that it did.
+                if(res.missed > 0)
+                    displayWarning(Sozvon.i18n.t('e2ee.chatMissed'));
                 let G = guestNameApi();
                 if(G) {
                     let m = G.classify(res.kind, res.text);
@@ -8989,7 +9469,9 @@ commands.msg = {
         // carries no such thing -- it has exactly one other end -- so where
         // encryption is required there is nothing to fall back to. (Sozvon)
         if(!mayChatInClear())
-            throw new Error(Sozvon.i18n.t('e2ee.privateBlocked'));
+            throw new Error(Sozvon.i18n.t(serverConnection.e2ee.require ?
+                                          'e2ee.privateBlocked' :
+                                          'e2ee.clearNotAgreed'));
         serverConnection.chat('', id, p[1]);
         // You are the sender, so you go in the peerId slot: an empty one is
         // read as "this did not come from a person" and drawn as a system
@@ -9348,7 +9830,9 @@ function handleInput() {
      */
     function sendCleartext() {
         if(!mayChatInClear()) {
-            displayError(Sozvon.i18n.t('e2ee.chatBlocked'));
+            displayError(Sozvon.i18n.t(serverConnection.e2ee.require ?
+                                       'e2ee.chatBlocked' :
+                                       'e2ee.clearNotAgreed'));
             // The box was emptied when this message was taken from it; hand
             // the text back unless the user has started typing something else.
             if(input.value === '')
@@ -9365,12 +9849,20 @@ function handleInput() {
             // user-message channel and echo it locally, so the server never
             // sees the cleartext nor keeps it in chat history.
             e2ee.sendChat(kind, message).then(function(sent) {
-                if(sent)
+                if(sent) {
                     addToChatbox(null, serverConnection.id, '',
                                  serverConnection.username, new Date(),
                                  false, false, kind, message);
-                else
+                } else if(sent === null) {
+                    // Written in an encrypted call that ended before it
+                    // went out: not sent at all, rather than sent to the
+                    // server in its place.
+                    displayError(Sozvon.i18n.t('e2ee.chatLost'));
+                    if(input.value === '')
+                        input.value = data;
+                } else {
                     sendCleartext();
+                }
             }).catch(function(err) {
                 console.error(err);
                 sendCleartext();
@@ -9547,7 +10039,10 @@ function makePrecheck(prefix) {
     function mediaErrorKey(err, kind) {
         let name = err && err.name;
         let mic = kind === 'audio';
-        if(name === 'NotAllowedError' || name === 'SecurityError')
+        // the help card says why and what to do; this line only names it
+        if(name === 'NotAllowedError')
+            return mic ? 'mediaHelp.title.audio' : 'mediaHelp.title.video';
+        if(name === 'SecurityError')
             return mic ? 'login.micDenied' : 'login.camDenied';
         if(name === 'NotFoundError' || name === 'DevicesNotFoundError')
             return mic ? 'login.micNotFound' : 'login.camNotFound';
@@ -9555,6 +10050,24 @@ function makePrecheck(prefix) {
            name === 'TrackStartError')
             return mic ? 'login.micUnavailable' : 'login.camUnavailable';
         return mic ? 'login.noMic' : 'login.noCamera';
+    }
+
+    /**
+     * Report a device that would not open.  A refusal also gets the help
+     * card, whose button presses the toggle again. (Sozvon)
+     *
+     * @param {any} err
+     * @param {string} kind - 'audio' or 'video'
+     */
+    function failed(err, kind) {
+        error(Sozvon.i18n.t(mediaErrorKey(err, kind)));
+        if(!err || err.name !== 'NotAllowedError')
+            return;
+        let toggle = kind === 'video' ? 'cam' : 'mic';
+        showMediaHelp(kind, () => {
+            if(!state[toggle] && !state[toggle + 'Opening'])
+                document.getElementById(elementId(toggle)).click();
+        });
     }
 
     /**
@@ -9659,6 +10172,7 @@ function makePrecheck(prefix) {
         let video = vid ? {deviceId: vid} : {};
         video.aspectRatio = {ideal: 4/3};
         let stream = await navigator.mediaDevices.getUserMedia({video: video});
+        mediaHelpResolved(false, true);
         if(gen !== state.gen) {
             stopStream(stream);
             return;
@@ -9697,6 +10211,7 @@ function makePrecheck(prefix) {
         let stream = await navigator.mediaDevices.getUserMedia(
             {audio: aid ? {deviceId: aid} : true},
         );
+        mediaHelpResolved(true, false);
         if(gen !== state.gen) {
             stopStream(stream);
             return;
@@ -9851,7 +10366,7 @@ function makePrecheck(prefix) {
             console.warn(err);
             if(gen === state.gen) {
                 state.cam = false;
-                error(Sozvon.i18n.t(mediaErrorKey(err, 'video')));
+                failed(err, 'video');
             }
         } finally {
             if(gen === state.gen)
@@ -9881,7 +10396,7 @@ function makePrecheck(prefix) {
             console.warn(err);
             if(gen === state.gen) {
                 state.mic = false;
-                error(Sozvon.i18n.t(mediaErrorKey(err, 'audio')));
+                failed(err, 'audio');
             }
         } finally {
             if(gen === state.gen)
@@ -9919,7 +10434,7 @@ function makePrecheck(prefix) {
         } catch(err) {
             console.warn(err);
             state.cam = false;
-            error(Sozvon.i18n.t(mediaErrorKey(err, 'video')));
+            failed(err, 'video');
             reflect();
         }
     };
@@ -9933,7 +10448,7 @@ function makePrecheck(prefix) {
         } catch(err) {
             console.warn(err);
             state.mic = false;
-            error(Sozvon.i18n.t(mediaErrorKey(err, 'audio')));
+            failed(err, 'audio');
             reflect();
         }
     };
@@ -10117,6 +10632,16 @@ document.getElementById('rejoinbutton').onclick = function(e) {
     // optimistic setConnected(true) a normal join would give us. (Sozvon)
     setConnected(true);
     serverConnect();
+};
+
+// Sozvon: the user agrees to go on without end-to-end encryption in a call
+// that has lost it.  Media is left as it is: whatever is still published goes
+// on, now in clear, and what the refusal closed is the user's to turn on.
+document.getElementById('e2ee-continue-clear').onclick = function(e) {
+    e.preventDefault();
+    let e2ee = serverConnection && serverConnection.e2ee;
+    if(e2ee)
+        e2ee.continueInClear();
 };
 
 // Sozvon: bypass the quick rejoin to log in as someone else. reconnectLastJoin
@@ -10731,6 +11256,7 @@ async function serverConnect() {
     serverConnection.onfiletransfer = gotFileTransfer;
     if(typeof SozvonE2EE !== 'undefined') {
         serverConnection.e2ee = new SozvonE2EE(serverConnection);
+        serverConnection.e2ee.wasEncrypted = e2eeWasEncrypted;
         serverConnection.e2ee.onsas = gotE2EESas;
         serverConnection.e2ee.onstate = gotE2EEState;
     }

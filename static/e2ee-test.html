@@ -83,7 +83,7 @@
         if(mitm && from === 'zzz' && dest === 'aaa' && payload && payload.t === 'dh') {
           const pub = C.unb64(payload.pub);
           pub[1] ^= 0x01;
-          payload = {t: 'dh', pub: C.b64(pub)};
+          payload = Object.assign({}, payload, {pub: C.b64(pub)});
         }
         queue.push({from, dest, payload});
       }
