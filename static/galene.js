@@ -1873,11 +1873,12 @@ getSelectElement('audioselect').onchange = function(e) {
         let c = findUpMedia('camera');
         let hasVideo = !!(c && c.stream && c.stream.getVideoTracks().length);
         if(hasVideo)
-            addLocalMedia(c.localId, {audio: false, video: true});
+            addLocalMedia(c.localId, {audio: false, video: true,
+                                      keepVideo: true});
         else if(c)
             closeUpMedia('camera');
     } else {
-        replaceCameraStream();
+        replaceCameraStream(true);
     }
 };
 
@@ -1965,8 +1966,9 @@ getInputElement('preprocessingbox').onchange = async function(e) {
         displayMessage(Sozvon.i18n.t('toast.settingNextCall'));
         return;
     }
-    // No live microphone to retune -- apply it via a (re)open if a stream exists.
-    replaceCameraStream();
+    // No live microphone to retune: the setting is saved and applies when
+    // one opens (addMicrophoneNow and addLocalMediaNow read it).  Publishing
+    // the camera again for it would change nothing but blink the picture.
 };
 
 getInputElement('hqaudiobox').onchange = function(e) {
@@ -1974,7 +1976,7 @@ getInputElement('hqaudiobox').onchange = function(e) {
     if(!(this instanceof HTMLInputElement))
         throw new Error('Unexpected type for this');
     updateSettings({hqaudio: this.checked});
-    replaceCameraStream();
+    replaceCameraStream(true);
 };
 
 document.getElementById('mutebutton').onclick = async function(e) {
@@ -3454,8 +3456,11 @@ async function replaceUpStreams(label) {
 
 /**
  * Closes and reopens the camera then replaces the camera stream.
+ *
+ * @param {boolean} [keepVideo] - only the sound changes: keep the camera
+ *     running rather than reopen it (see addLocalMediaNow)
  */
-function replaceCameraStream() {
+function replaceCameraStream(keepVideo) {
     let c = findUpMedia('camera');
     if(c)
         // preserve which tracks are currently live so a device/filter change
@@ -3463,6 +3468,7 @@ function replaceCameraStream() {
         addLocalMedia(c.localId, {
             audio: !!(c.stream && c.stream.getAudioTracks().length),
             video: !!(c.stream && c.stream.getVideoTracks().length),
+            keepVideo: !!keepVideo,
         });
 }
 
@@ -3479,11 +3485,13 @@ let addLocalMediaQueue = Promise.resolve();
 
 /**
  * @param {string} [localId]
- * @param {{audio?: boolean, video?: boolean}} [force]
+ * @param {{audio?: boolean, video?: boolean, keepVideo?: boolean}} [force]
  *     Optional overrides for which tracks to capture, independent of the saved
  *     device selection: the camera and microphone buttons pass explicit
  *     audio/video booleans so each toggles only its own track without
  *     disturbing the other.  An empty constraint object means "default device".
+ *     keepVideo: only the sound changes, so the camera already running is
+ *     carried over to the new stream instead of being closed and reopened.
  */
 async function addLocalMedia(localId, force) {
     let next = addLocalMediaQueue.then(
@@ -3532,7 +3540,8 @@ async function addMicrophoneNow(c) {
         !!c.stream && c.stream.getAudioTracks().length === 0 &&
         typeof c.userdata.addUpTrack === 'function';
     if(!usable() || !hasVideo)
-        return addLocalMediaNow(c.localId, {audio: true, video: hasVideo});
+        return addLocalMediaNow(c.localId, {audio: true, video: hasVideo,
+                                            keepVideo: true});
     if(!mayPublishLocalMedia()) {
         displayError(Sozvon.i18n.t('e2ee.blocked'));
         return;
@@ -3585,13 +3594,15 @@ async function addMicrophoneNow(c) {
             c.userdata.addUpTrack(track);
         }
     } catch(e) {
-        console.error(e);
+        // This browser would not add a track to the connection: republish
+        // with the microphone, keeping the camera as it is.
+        console.warn('adding the microphone in place', e);
         c.stream.removeTrack(track);
         if(f && f.inputStream)
             f.inputStream.removeTrack(track);
         track.stop();
-        displayError(e);
-        return;
+        return addLocalMediaNow(c.localId, {audio: true, video: true,
+                                            keepVideo: true});
     }
 
     mediaChoicesDone = false;
@@ -3793,7 +3804,7 @@ function mayPublishLocalMedia() {
  * addLocalMedia, which serialises these. (Sozvon)
  *
  * @param {string} [localId]
- * @param {{audio?: boolean, video?: boolean}} [force]
+ * @param {{audio?: boolean, video?: boolean, keepVideo?: boolean}} [force]
  */
 async function addLocalMediaNow(localId, force) {
     if(!mayPublishLocalMedia()) {
@@ -3854,7 +3865,31 @@ async function addLocalMediaNow(localId, force) {
     }
 
     let old = serverConnection.findByLocalId(localId);
-    if(old) {
+    // A change to the sound alone keeps the camera that is running.
+    // Closing it and opening it again is a gap in the picture at best, and
+    // some cameras come back white, or not at all (2026-10-14: a guest's
+    // picture went white when they turned the microphone on, and stayed
+    // white).  The old stream keeps its filter and goes on sending until the
+    // new one replaces it; only its microphone is released. (Sozvon)
+    /** @type {MediaStreamTrack} */
+    let keep = null;
+    if(old && video && force && force.keepVideo) {
+        let f = old.userdata.filter;
+        let raw = f && f.inputStream ? f.inputStream : old.stream;
+        keep = (raw ? raw.getVideoTracks() : [])
+            .find(t => t.readyState === 'live') || null;
+    }
+    if(old && keep) {
+        let f = old.userdata.filter;
+        let raws = [old.stream, f && f.inputStream].filter(s => s);
+        raws.forEach(s => s.getAudioTracks().forEach(t => {
+            try {
+                t.stop();
+            } catch(e) {
+                console.warn(e);
+            }
+        }));
+    } else if(old) {
         // make sure that the camera is released before we try to reopen it
         await removeFilter(old);
         stopStream(old.stream);
@@ -3866,7 +3901,7 @@ async function addLocalMediaNow(localId, force) {
         return;
     }
 
-    let constraints = {audio: audio, video: video};
+    let constraints = {audio: audio, video: keep ? false : video};
     /** @type {MediaStream} */
     let stream = null;
     // Some browsers (notably Xiaomi's Mi Browser) expose getUserMedia but never
@@ -3874,16 +3909,32 @@ async function addLocalMediaNow(localId, force) {
     // eventually succeeds.
     let hangTimer = setTimeout(showBrowserUnsupported, 12000);
     try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if(constraints.audio || constraints.video)
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+        else
+            stream = new MediaStream();
         clearTimeout(hangTimer);
         hideBrowserUnsupported();
         mediaHelpResolved(!!audio, !!video);
     } catch(e) {
         clearTimeout(hangTimer);
         hideBrowserUnsupported();
-        displayMediaError(e, audio && video ? 'both' : video ? 'video' : 'audio',
+        // With the camera kept, only the microphone was being opened, and
+        // the old stream still shows the picture: say which device failed.
+        displayMediaError(e,
+                          constraints.audio && constraints.video ? 'both' :
+                          constraints.video ? 'video' : 'audio',
                           () => addLocalMedia(localId, force));
         return;
+    }
+    if(keep) {
+        if(keep.readyState !== 'live') {
+            // the camera died while the microphone was opening: start over
+            stopStream(stream);
+            return addLocalMediaNow(localId,
+                                    {...force, keepVideo: false});
+        }
+        stream.addTrack(keep);
     }
 
     if(serverConnection !== sc || !sc.group) {
