@@ -150,11 +150,9 @@ test('a chosen microphone that is gone gives the default one, and says so', asyn
     await ctx.grantPermissions(['camera', 'microphone']);
     const A = await open(ctx, process.env.SOZVON_ROOM || 'smoke', 'alice');
     await connect(A);
-    // Wait for the server's answer to the first stream: replaced before it
-    // arrives, the answer finds no stream to go to (a separate race).
-    await expect.poll(() => A.evaluate(() => Object.values(serverConnection.up)
-        .every(c => c.pc && c.pc.connectionState === 'connected')),
-        {timeout: 20_000}).toBe(true);
+    // Replaced at once, before the server has answered the first stream:
+    // that answer arrives for a stream that is gone and must be let go
+    // (up-stream-close.test.js), not thrown into the page.
     const before = await upCamera(A);
     expect(before.mic).toBe(DEFAULT_MIC);
 
