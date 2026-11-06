@@ -396,6 +396,11 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     asked for exactly (`getChosenMedia`), in the call and in the device
     check; one that is no longer there gives the default device and a
     message saying so.
+  * **Quick changes of devices raise no errors.** The server's answer,
+    renegotiation request or abort for a stream the client has just closed
+    or replaced is let go instead of thrown as "unknown up stream"
+    (`protocol.js` remembers the closed ids); a message about an id the
+    client never published still is an error.
   * **State-reflecting mic/camera icons**: each colours by what is live right
     now — **blue + upright** when the device is on, **red + slashed** when off.
     The old neutral-grey in-between state is gone.
