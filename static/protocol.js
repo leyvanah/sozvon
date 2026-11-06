@@ -119,6 +119,14 @@ function ServerConnection() {
      */
     this.up = {};
     /**
+     * The ids of up streams this client has closed or replaced.  The
+     * server may still answer, renegotiate or abort one of them: its
+     * message was on the way when the stream went.  (Sozvon)
+     *
+     * @type {Set<string>}
+     */
+    this.closedUp = new Set();
+    /**
      * The set of all down streams, indexed by their id.
      *
      * @type {Record<string,Stream>}
@@ -1262,6 +1270,30 @@ ServerConnection.prototype.gotOffer = async function(id, label, source, username
 };
 
 /**
+ * The up stream a server message is about, or null when it is about one
+ * this client has already closed or replaced: the message crossed the
+ * stream's going on the way, and there is nothing left for it to act on.
+ * Upstream threw here, which surfaced as an uncaught error in the page on
+ * every quick change of devices.  A message about an id this client never
+ * published is still an error.  (Sozvon)
+ *
+ * @param {ServerConnection} sc
+ * @param {string} id
+ * @param {string} what - the message, for the log
+ * @returns {Stream|null}
+ */
+function upStreamFor(sc, id, what) {
+    let c = sc.up[id];
+    if(c)
+        return c;
+    if(sc.closedUp.has(id)) {
+        console.info(`${what} for up stream ${id}, closed meanwhile`);
+        return null;
+    }
+    throw new Error('unknown up stream');
+}
+
+/**
  * gotAnswer is called when we receive an answer from the server.  Don't
  * call this.
  *
@@ -1270,9 +1302,9 @@ ServerConnection.prototype.gotOffer = async function(id, label, source, username
  * @function
  */
 ServerConnection.prototype.gotAnswer = async function(id, sdp) {
-    let c = this.up[id];
+    let c = upStreamFor(this, id, 'answer');
     if(!c)
-        throw new Error('unknown up stream');
+        return;
     try {
         await c.pc.setRemoteDescription({
             type: 'answer',
@@ -1300,9 +1332,9 @@ ServerConnection.prototype.gotAnswer = async function(id, sdp) {
  * @function
  */
 ServerConnection.prototype.gotRenegotiate = function(id) {
-    let c = this.up[id];
+    let c = upStreamFor(this, id, 'renegotiate');
     if(!c)
-        throw new Error('unknown up stream');
+        return;
     c.restartIce();
 };
 
@@ -1328,9 +1360,9 @@ ServerConnection.prototype.gotClose = function(id) {
  * @param {string} id
  */
 ServerConnection.prototype.gotAbort = function(id) {
-    let c = this.up[id];
+    let c = upStreamFor(this, id, 'abort');
     if(!c)
-        throw new Error('unknown up stream');
+        return;
     c.close();
 };
 
@@ -1587,6 +1619,7 @@ Stream.prototype.close = function(replace) {
             delete(c.sc.up[c.id]);
         else
             console.warn('Closing unknown stream');
+        c.sc.closedUp.add(c.id);
     } else {
         userid = c.source;
         if(c.sc.down[c.id] === c)
