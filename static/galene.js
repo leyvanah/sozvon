@@ -2567,10 +2567,21 @@ async function applySendCap(c) {
         c.userdata.sentThroughput = setting;
     if(c.userdata.sentThroughput === t)
         return;
+    // Applied only once the browser has taken it.  Remembered before that,
+    // a refused setParameters -- Chrome sometimes throws InvalidStateError
+    // here -- left every later poll believing the cap was in place, and the
+    // stream went without one for the rest of the call.
+    let before = c.userdata.sentThroughput;
     c.userdata.sentThroughput = t;
+    try {
+        await setSendParameters(c, t, s);
+    } catch(e) {
+        if(c.userdata.sentThroughput === t)
+            c.userdata.sentThroughput = before;  // the next poll tries again
+        throw e;
+    }
     console.info('bitrate: sending', c.id, 'at', t === null ? 'full rate' : t);
     reportQuality('send', c.id, {cap: t});
-    await setSendParameters(c, t, s);
 }
 
 /**
@@ -2979,8 +2990,14 @@ async function reconsiderSendParameters() {
     for(let id in serverConnection.up) {
         let c = serverConnection.up[id];
         let tc = autoThroughput(c, t, s);
+        let before = c.userdata.sentThroughput;
         c.userdata.sentThroughput = tc;
-        promises.push(setSendParameters(c, tc, s));
+        // as in applySendCap: a cap the browser refused is not in place
+        promises.push(setSendParameters(c, tc, s).catch(e => {
+            if(c.userdata.sentThroughput === tc)
+                c.userdata.sentThroughput = before;
+            throw e;
+        }));
     }
     await Promise.all(promises);
 }
