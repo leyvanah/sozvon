@@ -306,6 +306,10 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     Starting or stopping the cut reopens the camera, as the rotation buttons
     do: Chromium accepts larger constraints on a running camera and goes on
     capturing at the old size. Between two cuts the camera stays open.
+    The bitrate ceiling counts 1280×960 and what is cut from it with 720p
+    (4 Mbit/s), not with 1080p's 6. A filter picked by hand takes the
+    canvas instead: the format is greyed with a note, and the camera is not
+    opened larger for a cut that cannot happen.
   * **Fit the video to the other person's screen** (a switch under the
     format). In a one-to-one call there is one person to send to, so the
     sender can pick the format for their screen: every receiver reports the
@@ -320,8 +324,11 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     stopped such a picture at 1:1, which left wide bars for nothing.
     The choice only changes when another format fits clearly better, since
     each change resizes the encoder; what remains, the receiver's
-    auto-framing fills. With a third person the format picked by hand
-    applies again; the drawer says which format is being sent and greys the
+    auto-framing fills. One-to-one counts people, not sessions: sessions
+    under one name are one person, whose latest report counts, and our own
+    other sessions are us — a session the other person left behind in
+    another app's browser no longer turns the call into one of three. With a
+    third person the format picked by hand applies again; the drawer says which format is being sent and greys the
     list while it is overridden. Older clients send no reports, and nothing
     is adapted to them. The shape crosses the server in clear, even in an
     encrypted room. Next: a face detector instead of the fixed point of
@@ -650,9 +657,12 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     (measured on 2026-11-09, Firefox 159). The ticks now come from a worker
     (`filter-tick.js`), whose timers are not held back, and a hidden page on
     a computer draws on every tick at the camera's rate; a phone keeps the
-    check, since its camera stops in the background. The clock also runs at
-    twice the camera's rate: at the same rate it drifted against the camera
-    and lost one frame in five.
+    check, since its camera stops in the background. Drawn blind, it draws at
+    the rate the camera was measured giving while the page was visible,
+    which can be well under the rate it reports. Where the worker cannot
+    start or its script does not load, the page's own timer takes over. The
+    clock also runs at twice the camera's rate when visible: at the same
+    rate it drifted against the camera and lost one frame in five.
     Two server fixes found on the way: **changes of a member's data reach
     the room in the order they were made** (each `setdata` was pushed from a
     goroutine of its own, so `{"muted": null}` then `{"away": true}` could
