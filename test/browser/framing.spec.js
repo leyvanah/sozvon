@@ -95,9 +95,22 @@ test('the chosen format reaches the far end, and each tile frames it', async ({b
     expect((await upCamera(alice)).canvas).toBe(false);
 
     // 16:9 is a cut: a canvas now, and Bob receives 16:9.
+    const before = (await upCamera(alice)).id;
     await setControl(alice, 'sendaspectselect', '16:9');
-    await expect.poll(() => upCamera(alice).then(u => u && [u.width, u.height]))
-        .toEqual([640, 360]);
+    // The camera is opened again, asked for 1280x720.  (What it gives here is
+    // 640x480 still: both clients share Chromium's one fake camera, and
+    // Bob's has it open at that size.  The second test, where Alice's opens
+    // it first, sees the 720 lines.)
+    await expect.poll(() => upCamera(alice).then(u => u && u.id)).not.toBe(before);
+    expect(await alice.evaluate(() => {
+        const c = Object.values(serverConnection.up)
+            .find(c => c.label === 'camera');
+        const t = c.userdata.filter.inputStream.getVideoTracks()[0];
+        const k = t.getConstraints();
+        return [k.width && (k.width.ideal || k.width), k.height && (k.height.ideal || k.height)];
+    })).toEqual([1280, 720]);
+    await expect.poll(() => upCamera(alice).then(u => u && u.width / u.height))
+        .toBeCloseTo(16 / 9, 1);
     const wide = await upCamera(alice);
     await expect.poll(() => remote(bob).then(shape)).toBe(1.78);
 
@@ -116,12 +129,13 @@ test('the chosen format reaches the far end, and each tile frames it', async ({b
     expect(r.position).toBe('');
     await setControl(bob, 'autoframingbox', true);
 
-    // From one cut to another: the same up stream, nothing republished.
+    // From one cut to another: the same up stream, nothing republished,
+    // and the camera stays open.
     await setControl(alice, 'sendaspectselect', '9:16');
     await expect.poll(() => remote(bob).then(shape)).toBe(0.56);
     expect((await upCamera(alice)).id).toBe(wide.id);
-    expect(await upCamera(alice).then(u => [u.width, u.height]))
-        .toEqual([270, 480]);
+    await expect.poll(() => upCamera(alice).then(u => u.width / u.height))
+        .toBeCloseTo(9 / 16, 1);
 
     // A portrait picture on a landscape stage would lose the face to a fill:
     // shown whole.
@@ -160,9 +174,13 @@ test('fitted to the other person\'s screen, one-to-one only', async ({browser}) 
     // alone: nothing to fit, and the note says when it will work
     expect(await adaptNote(alice)).toMatchObject({shown: true, active: false});
 
-    // Bob watches on an upright phone: Alice's 4:3 goes out as 9:16.
+    // Bob watches on an upright phone: Alice's picture goes out as 9:16,
+    // with all 720 lines of the camera she opened at 1280x720 for fitting
+    // -- 640x480 left 270x480.
     const bob = await join(browser, 'bob', {width: 390, height: 844});
     await expect.poll(() => remote(bob).then(shape)).toBe(0.56);
+    await expect.poll(() => upCamera(alice).then(u => [u.width, u.height]))
+        .toEqual([404, 720]);
     expect(await adaptNote(alice)).toEqual(
         {shown: true, active: true, format: '9:16', locked: true});
 
@@ -172,9 +190,11 @@ test('fitted to the other person\'s screen, one-to-one only', async ({browser}) 
     expect((await adaptNote(alice)).format).toBe('16:9');
 
     // A third person: one picture cannot fit two screens, so Alice's own
-    // choice -- the camera's format -- applies again.
+    // choice -- the camera's format -- applies again: no canvas.  With
+    // fitting on, the camera was opened at 1280x720, so that is 16:9 too.
     const carol = await join(browser, 'carol', {width: 1200, height: 1000});
-    await expect.poll(() => remote(bob).then(shape)).toBe(1.33);
+    await expect.poll(() => upCamera(alice).then(u => u && u.canvas)).toBe(false);
+    await expect.poll(() => remote(bob).then(shape)).toBe(1.78);
     expect(await adaptNote(alice)).toMatchObject({active: false, locked: false});
     // and still one camera from Alice: turning simulcast on replaces her
     // stream at the same moment, and two replacements published two
@@ -184,6 +204,7 @@ test('fitted to the other person\'s screen, one-to-one only', async ({browser}) 
 
     // Carol leaves: one-to-one again, fitted again.
     await carol.context().close();
+    await expect.poll(() => upCamera(alice).then(u => u && u.canvas)).toBe(true);
     await expect.poll(() => remote(bob).then(shape)).toBe(1.78);
 
     // Switched off: the camera's format.

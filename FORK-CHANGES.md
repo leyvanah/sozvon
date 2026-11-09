@@ -296,7 +296,13 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     a fixed 4:3 box cut a 9:16 picture to a strip. Picking “none” as the
     filter no longer leaves a phone's picture sideways until the camera is
     reopened: the canvas the camera needs is worked out in one place
-    (`cameraFilterFor`) on every change.
+    (`cameraFilterFor`) on every change. While the picture can be cut — a
+    format picked, or fitting to the other screen on — the camera is opened
+    at **1280×720** instead of the default 640×480, so every format keeps
+    720 lines: 9:16 out of 640×480 was 270×480, a blur on a laptop's screen.
+    Starting or stopping the cut reopens the camera, as the rotation buttons
+    do: Chromium accepts larger constraints on a running camera and goes on
+    capturing at the old size. Between two cuts the camera stays open.
   * **Fit the video to the other person's screen** (a switch under the
     format). In a one-to-one call there is one person to send to, so the
     sender can pick the format for their screen: every receiver reports the

@@ -2135,11 +2135,63 @@ async function refilterCameraNow() {
     await replaceUpStream(c);
 }
 
+/**
+ * Sozvon: the size to open the camera at.
+ *
+ * 640x480 by default, which is what a camera gives when asked for 4:3 and
+ * nothing more.  Cut to a format, that is too little: 9:16 out of it is
+ * 270x480, and seen on a laptop's whole screen it was a blur (2026-11-09).
+ * So while the picture can be cut -- a format picked, or fitting it to the
+ * other person's screen -- the camera is asked for 1280x720, and every
+ * format keeps the full 720 lines: 1280x720, 960x720, 720x720, 540x720,
+ * 405x720.  Only then: a bigger picture costs a phone more to draw and to
+ * encode, and the bitrate ceiling follows its size (bitrate-control.js).
+ *
+ * @param {settings} settings
+ * @returns {MediaTrackConstraints}
+ */
+function captureSize(settings) {
+    let resolution = settings.resolution;
+    if(resolution)
+        return {width: {ideal: resolution[0]}, height: {ideal: resolution[1]}};
+    if(settings.blackboardMode)
+        return {width: {min: 640, ideal: 1920}, height: {min: 400, ideal: 1080}};
+    if(sendAspect(settings) || settings.adaptToPeer)
+        return {width: {ideal: 1280}, height: {ideal: 720}};
+    return {aspectRatio: {ideal: 4/3}};
+}
+
+/**
+ * Sozvon: open the camera again if it was opened at another size than
+ * captureSize() now asks for.
+ *
+ * Asking a running camera for more (applyConstraints) does not do it:
+ * Chromium accepts the constraints and goes on capturing 640x480, since it
+ * only scales down a device it has already opened (measured 2026-11-09).
+ * Reopening is a short gap in the picture, as turning it with the rotation
+ * buttons always was; it only happens when the picture starts or stops
+ * being cut, not between two formats, which the canvas follows by itself.
+ *
+ * @returns {boolean} whether the camera is being reopened
+ */
+function reopenForCaptureSize() {
+    let c = findUpMedia('camera');
+    if(!c || !c.stream || !c.stream.getVideoTracks().length)
+        return false;
+    let key = JSON.stringify(captureSize(getSettings()));
+    if(c.userdata.captureSize === key)
+        return false;
+    replaceCameraStream();
+    return true;
+}
+
 getSelectElement('sendaspectselect').onchange = async function(e) {
     if(!(this instanceof HTMLSelectElement))
         throw new Error('Unexpected type for this');
     updateSettings({sendAspect: this.value});
-    await refilterCamera();
+    // reopening picks the canvas too (addLocalMedia)
+    if(!reopenForCaptureSize())
+        await refilterCamera();
 };
 
 getInputElement('autoframingbox').onchange = function(e) {
@@ -2262,7 +2314,10 @@ getInputElement('adaptpeerbox').onchange = function(e) {
     if(!(this instanceof HTMLInputElement))
         throw new Error('Unexpected type for this');
     updateSettings({adaptToPeer: this.checked});
-    adaptationChanged();
+    if(reopenForCaptureSize())
+        reflectAdaptation();
+    else
+        adaptationChanged();
 };
 
 /**
@@ -3846,6 +3901,9 @@ async function replaceUpStreamNow(c) {
         cn.userdata.filterDefinition = c.userdata.filterDefinition;
     if(c.userdata.onclose)
         cn.userdata.onclose = c.userdata.onclose;
+    // the same camera, at the size it was opened at (reopenForCaptureSize)
+    if(c.userdata.captureSize)
+        cn.userdata.captureSize = c.userdata.captureSize;
     let media = /** @type{HTMLVideoElement} */
         (document.getElementById('media-' + c.localId));
     try {
@@ -4267,18 +4325,8 @@ async function addLocalMediaNow(localId, force) {
         return;
     }
 
-    if(video) {
-        let resolution = settings.resolution;
-        if(resolution) {
-            video.width = { ideal: resolution[0] };
-            video.height = { ideal: resolution[1] };
-        } else if(settings.blackboardMode) {
-            video.width = { min: 640, ideal: 1920 };
-            video.height = { min: 400, ideal: 1080 };
-        } else {
-            video.aspectRatio = { ideal: 4/3 };
-        }
-    }
+    if(video)
+        Object.assign(video, captureSize(settings));
 
     if(audio) {
         // The "Noise suppression" checkbox toggles ONLY the browser's noise
@@ -4422,6 +4470,12 @@ async function addLocalMediaNow(localId, force) {
     let def = cameraFilterFor(settings, stream.getVideoTracks()[0]);
     if(def)
         c.userdata.filterDefinition = def;
+    // the size the camera was opened at (reopenForCaptureSize); one carried
+    // over from the stream before keeps that stream's
+    if(video && !keep)
+        c.userdata.captureSize = JSON.stringify(captureSize(settings));
+    else if(old && old.userdata.captureSize)
+        c.userdata.captureSize = old.userdata.captureSize;
 
     try {
         await setUpStream(c, stream);
