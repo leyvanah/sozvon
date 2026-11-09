@@ -427,6 +427,15 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     or replaced is let go instead of thrown as "unknown up stream"
     (`protocol.js` remembers the closed ids); a message about an id the
     client never published still is an error.
+  * **Two replacements in a row leave no frozen picture behind.** A new up
+    stream names the stream it replaces in its offer, and the server closes
+    that one — but a stream replaced again before its own offer went out was
+    never known to the server, so naming it closed nothing, and the stream
+    *it* was replacing went on being forwarded: everyone saw a second, frozen
+    picture of the same person. `newUpStream` now passes on what an unsent
+    stream was replacing. Found when a third person joined a call: simulcast
+    turning on and fitting the picture to one screen turning off replaced the
+    camera twice at once. An upstream bug too.
   * **State-reflecting mic/camera icons**: each colours by what is live right
     now — **blue + upright** when the device is on, **red + slashed** when off.
     The old neutral-grey in-between state is gone.
