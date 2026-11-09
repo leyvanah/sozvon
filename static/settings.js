@@ -41,6 +41,10 @@
  * @property {boolean} [selfHidden] - Sozvon: self-view hidden by the eye button
  * @property {string} [videoRotation] - Sozvon: fixed offset for mobile orientation
  * @property {boolean} [autoRotate] - Sozvon: follow the live device orientation
+ * @property {string} [sendAspect] - Sozvon: format the camera is cut to
+ *     before sending ("camera", "16:9", "4:3", "1:1", "9:16")
+ * @property {boolean} [autoFraming] - Sozvon: let each tile fill its box
+ *     when that cuts only a margin (off: always show the whole picture)
  * @property {boolean} [showCallTimer] - Sozvon: show the call clock (unset = follow the role)
  */
 

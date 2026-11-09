@@ -3107,10 +3107,12 @@ body.pre-join .login-container {
     padding-bottom: 0;
     object-fit: contain;
 }
-/* Sozvon — smart framing: fill the stage edge-to-edge when that crops only a
-   little off the sides (.framing-fill, toggled by applyRemoteFraming);
-   otherwise show the whole frame (contain). Top and bottom are never cut. */
-#peers.speaker .peer-remote.framing-fill .media {
+/* Sozvon — smart framing: a picture fills its tile edge to edge when that
+   cuts only a margin (.framing-fill, toggled by applyFraming, which also sets
+   the object-position that keeps the face in); otherwise the whole frame is
+   shown (contain).  Every view, not only this one: the selector carries the
+   id so it outweighs the contain just above. */
+#peers .peer.framing-fill .media {
     object-fit: cover;
 }
 #peers.speaker .peer-self {
@@ -3127,7 +3129,7 @@ body.pre-join .login-container {
     width: clamp(120px, 22%, 260px);
     min-width: 120px;
     max-width: 260px;
-    aspect-ratio: 4 / 3;
+    aspect-ratio: var(--self-ar, 4 / 3);
     min-height: 90px;
     margin: 0;
     z-index: 1100;
@@ -3212,7 +3214,7 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     width: clamp(120px, 22%, 260px);
     min-width: 120px;
     max-width: 260px;
-    aspect-ratio: 4 / 3;
+    aspect-ratio: var(--self-ar, 4 / 3);
     min-height: 90px;
     margin: 0;
     z-index: 1100;
@@ -3240,6 +3242,15 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
 #peers.speaker-many .peer-self .label,
 #peers.speaker-many .peer-self .video-controls {
     display: none;
+}
+/* The thumbnail takes the shape of what you send (--self-ar, set by
+   reflectSelfShape).  Standing up, it is made narrower, so a 9:16 picture is
+   about as tall as a 4:3 one is wide rather than half the stage. (Sozvon) */
+#peers.speaker .peer-self.thumb-portrait,
+#peers.speaker-many .peer-self.thumb-portrait {
+    width: clamp(90px, 13%, 160px);
+    min-width: 90px;
+    max-width: 160px;
 }
 
 /* ==========================================================================

@@ -509,12 +509,20 @@ let filters = {
 // the sign of `angle` is right and `base` alone picks the upright result.  When
 // auto-rotate is off, only `base` applies (a plain manual rotation).
 //
+// The same pass also cuts the upright picture to the format chosen in the
+// settings (settings.sendAspect: 16:9, 4:3, 1:1, 9:16), around the point where
+// a face usually is -- see framing.js.  Turning and cutting are one drawImage:
+// the canvas is the size of the cut, and the turned picture is drawn shifted
+// so that the cut lands on it.  Both are read from the settings on every
+// frame, so changing either takes effect at once, without reopening the
+// camera.
+//
 // Deliberately not added to `filters` (it is applied automatically, not
-// user-chosen).  We draw at the source's intrinsic size (no destination size)
-// so the aspect ratio is preserved and the image is never stretched. (Sozvon)
+// user-chosen).  The picture is never scaled, only turned and cut, so it is
+// never stretched. (Sozvon)
 /** @type {filterDefinition} */
-let mobileOrientationFilter = {
-    description: 'Upright (mobile orientation)',
+let cameraGeometryFilter = {
+    description: 'Upright and framed',
     draw: async function(src, ctx) {
         if(!(ctx instanceof CanvasRenderingContext2D))
             throw new Error('bad context type');
@@ -523,28 +531,52 @@ let mobileOrientationFilter = {
             return true;
 
         let settings = getSettings();
-        let base = parseInt(settings.videoRotation, 10) || 0;
-        let auto = settings.autoRotate !== false;
-        let angle = (auto && screen && screen.orientation &&
-                     typeof screen.orientation.angle === 'number') ?
-            screen.orientation.angle : 0;
-        let rot = (base + angle) % 360;
-
-        let swap = (rot === 90 || rot === 270);
-        let cw = swap ? vh : vw;
-        let ch = swap ? vw : vh;
-        if(ctx.canvas.width !== cw || ctx.canvas.height !== ch) {
-            ctx.canvas.width = cw;
-            ctx.canvas.height = ch;
+        let g = SozvonFraming.geometry(vw, vh, cameraRotation(settings),
+                                       sendAspect(settings));
+        let c = g.crop;
+        if(ctx.canvas.width !== c.w || ctx.canvas.height !== c.h) {
+            ctx.canvas.width = c.w;
+            ctx.canvas.height = c.h;
         }
         ctx.save();
-        ctx.translate(cw / 2, ch / 2);
-        ctx.rotate(rot * Math.PI / 180);
+        ctx.translate(g.uw / 2 - c.x, g.uh / 2 - c.y);
+        ctx.rotate(g.rot * Math.PI / 180);
         ctx.drawImage(src, -vw / 2, -vh / 2);
         ctx.restore();
         return true;
     },
 };
+
+/**
+ * The rotation the camera picture needs to be upright: the fixed base from
+ * the settings plus, with auto-rotation on, the live screen orientation.
+ * (Sozvon)
+ *
+ * @param {settings} settings
+ * @returns {number}
+ */
+function cameraRotation(settings) {
+    let base = parseInt(settings.videoRotation, 10) || 0;
+    let auto = settings.autoRotate !== false;
+    let angle = (auto && screen && screen.orientation &&
+                 typeof screen.orientation.angle === 'number') ?
+        screen.orientation.angle : 0;
+    return (base + angle) % 360;
+}
+
+/**
+ * The format the camera picture is cut to before it is sent, as width /
+ * height, or null to send it as the camera gives it.  Blackboard mode never
+ * cuts: it is a document camera, and its edges are the document. (Sozvon)
+ *
+ * @param {settings} settings
+ * @returns {number|null}
+ */
+function sendAspect(settings) {
+    if(settings.blackboardMode)
+        return null;
+    return SozvonFraming.aspectOf(settings.sendAspect || '');
+}
 
 async function addFilters() {
     for(let name in filters) {

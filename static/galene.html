@@ -620,6 +620,24 @@
               </span>
             </div>
 
+            <!-- What leaves this device: the camera picture cut to a format,
+                 around where a face usually is (framing.js).  Under the
+                 camera with the rotation, because it shapes the same
+                 picture.  The checkbox is the other half, how pictures fill
+                 the tiles on this screen. -->
+            <label for="sendaspectselect" class="sidenav-label" data-i18n="settings.sendAspect">Picture format</label>
+            <select id="sendaspectselect" class="select select-inline">
+              <option value="camera" selected data-i18n="opt.aspectCamera">as the camera</option>
+              <option value="16:9" data-i18n="opt.aspect169">16:9 wide</option>
+              <option value="4:3" data-i18n="opt.aspect43">4:3</option>
+              <option value="1:1" data-i18n="opt.aspect11">1:1 square</option>
+              <option value="9:16" data-i18n="opt.aspect916">9:16 portrait</option>
+            </select>
+            <form id="settings-autoframing">
+              <input id="autoframingbox" type="checkbox" checked/>
+              <label for="autoframingbox" data-i18n="settings.autoFraming">Auto-framing</label>
+            </form>
+
             <label for="audioselect" class="sidenav-label" data-i18n="settings.microphone">Microphone</label>
             <select id="audioselect" class="select select-inline">
               <option value="" data-i18n="opt.off">off</option>
@@ -842,6 +860,7 @@
     <script src="/password-change.js" defer></script>
     <script src="/e2ee.js" defer></script>
     <script src="/settings.js" defer></script>
+    <script src="/framing.js" defer></script>
     <script src="/filter.js" defer></script>
     <script src="/galene.js" defer></script>
   </body>

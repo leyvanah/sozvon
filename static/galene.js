@@ -421,6 +421,25 @@ function reflectSettings() {
         store = true;
     }
 
+    // A format this version does not know is a format it cannot draw: fall
+    // back to the camera's own rather than to a select showing nothing.
+    if(settings.hasOwnProperty('sendAspect') &&
+       selectOptionAvailable(getSelectElement('sendaspectselect'),
+                             settings.sendAspect)) {
+        getSelectElement('sendaspectselect').value = settings.sendAspect;
+    } else {
+        settings.sendAspect = 'camera';
+        getSelectElement('sendaspectselect').value = 'camera';
+        store = true;
+    }
+
+    if(settings.hasOwnProperty('autoFraming')) {
+        getInputElement('autoframingbox').checked = settings.autoFraming;
+    } else {
+        settings.autoFraming = getInputElement('autoframingbox').checked;
+        store = true;
+    }
+
     if(settings.hasOwnProperty('request')) {
         getSelectElement('requestselect').value = settings.request;
     } else {
@@ -2018,21 +2037,92 @@ getSelectElement('filterselect').onchange = async function(e) {
     if(!(this instanceof HTMLSelectElement))
         throw new Error('Unexpected type for this');
     updateSettings({filter: this.value});
+    await refilterCamera();
+};
+
+/**
+ * Sozvon: the canvas the camera picture goes through before it is sent, or
+ * null to send the camera track as it is.
+ *
+ * A filter the user picked wins: it draws from the same camera frame, and
+ * one canvas at a time is what Filter supports.  Otherwise the camera goes
+ * through cameraGeometryFilter (filter.js) when there is something for it to
+ * do:
+ *   - turning the picture upright: auto-rotate is on and this looks like a
+ *     phone or tablet (a mobile-style facingMode, a touch screen, or the
+ *     mobile layout), or a manual base rotation is set (which also lets a
+ *     desktop fix a sideways webcam).  We key off the device and camera, not
+ *     the CSS mobile layout alone -- a tablet uses the desktop layout yet
+ *     still needs this;
+ *   - cutting it to the format chosen in the settings.
+ * Never without a camera track (audio only -- we would send a blank canvas),
+ * in blackboard mode (a document camera we must not resample), or where
+ * canvas capture is unavailable.
+ *
+ * @param {settings} settings
+ * @param {MediaStreamTrack} vtrack - the camera track, before any canvas
+ * @returns {filterDefinition|null}
+ */
+function cameraFilterFor(settings, vtrack) {
+    if(settings.filter && filters[settings.filter])
+        return filters[settings.filter];
+    if(!vtrack || settings.blackboardMode ||
+       !HTMLCanvasElement.prototype.captureStream)
+        return null;
+    let facing = vtrack.getSettings ? vtrack.getSettings().facingMode : '';
+    let mobileDevice = facing === 'user' || facing === 'environment' ||
+        navigator.maxTouchPoints > 0 || isMobileLayout();
+    let base = parseInt(settings.videoRotation, 10) || 0;
+    let autoRotate = settings.autoRotate !== false;
+    if((autoRotate && mobileDevice) || base !== 0 || sendAspect(settings))
+        return cameraGeometryFilter;
+    return null;
+}
+
+/**
+ * Sozvon: put the running camera through the canvas the settings now call
+ * for, without reopening it.
+ *
+ * Nothing at all happens when that is the canvas it already goes through:
+ * cameraGeometryFilter reads the rotation and the format on every frame, so
+ * a new format shows on the next one.  Otherwise the up stream is replaced
+ * over the same camera track, as a filter change always did.
+ */
+async function refilterCamera() {
     let c = findUpMedia('camera');
-    if(c) {
-        let filter = (this.value && filters[this.value]) || null;
-        if(filter)
-            c.userdata.filterDefinition = filter;
-        else
-            delete c.userdata.filterDefinition;
-        replaceUpStream(c);
-    }
+    if(!c)
+        return;
+    let f = c.userdata.filter;
+    let raw = f && f.inputStream ? f.inputStream : c.stream;
+    let vtrack = raw ? raw.getVideoTracks()[0] : null;
+    let def = cameraFilterFor(getSettings(), vtrack);
+    if((c.userdata.filterDefinition || null) === def)
+        return;
+    if(def)
+        c.userdata.filterDefinition = def;
+    else
+        delete c.userdata.filterDefinition;
+    await replaceUpStream(c);
+}
+
+getSelectElement('sendaspectselect').onchange = async function(e) {
+    if(!(this instanceof HTMLSelectElement))
+        throw new Error('Unexpected type for this');
+    updateSettings({sendAspect: this.value});
+    await refilterCamera();
+};
+
+getInputElement('autoframingbox').onchange = function(e) {
+    if(!(this instanceof HTMLInputElement))
+        throw new Error('Unexpected type for this');
+    updateSettings({autoFraming: this.checked});
+    applyFraming();
 };
 
 // Video orientation: a fixed base rotation (to correct devices whose camera is
 // mounted oddly) that the auto-rotation builds on, plus a toggle for the
 // auto-rotation itself.  Both reopen the camera so addLocalMedia re-evaluates
-// whether the orientation canvas should be applied (see mobileOrientationFilter
+// whether the orientation canvas should be applied (see cameraGeometryFilter
 // and the gate in addLocalMedia). (Sozvon)
 
 /**
@@ -3324,7 +3414,7 @@ async function checkCamera(c, published) {
         ua: navigator.userAgent,
         touch: navigator.maxTouchPoints > 0,
         canvas: !f ? 'none' :
-            f.definition === mobileOrientationFilter ? 'orientation' :
+            f.definition === cameraGeometryFilter ? 'orientation' :
             'filter',
         track: {
             readyState: track.readyState,
@@ -4054,36 +4144,14 @@ async function addLocalMediaNow(localId, force) {
 
     c.label = 'camera';
 
-    if(settings.filter) {
-        let filter = filters[settings.filter];
-        if(filter)
-            c.userdata.filterDefinition = filter;
-        else
-            displayWarning(`Unknown filter ${settings.filter}`);
-    }
+    if(settings.filter && !filters[settings.filter])
+        displayWarning(`Unknown filter ${settings.filter}`);
 
-    // Route the camera through the orientation canvas (mobileOrientationFilter)
-    // when it can help: auto-rotate is on and this looks like a phone/tablet (a
-    // mobile-style facingMode, a touch screen, or the mobile layout), OR a
-    // manual base rotation is set (which also lets a desktop fix a sideways
-    // webcam).  We key off the device/camera, NOT the CSS "mobile layout" alone
-    // -- a tablet uses the desktop layout yet still needs this.  Skip it when
-    // there is no camera track (audio-only -- else we'd send a blank canvas),
-    // when the user already picked a filter (it draws from the same frame, so
-    // orientation is handled anyway), in blackboard mode (a document camera we
-    // must not resample), or when canvas capture is unavailable. (Sozvon)
-    let vtrack = stream.getVideoTracks()[0];
-    let facing = (vtrack && vtrack.getSettings) ?
-        vtrack.getSettings().facingMode : '';
-    let mobileDevice = facing === 'user' || facing === 'environment' ||
-        navigator.maxTouchPoints > 0 || isMobileLayout();
-    let base = parseInt(settings.videoRotation, 10) || 0;
-    let autoRotate = settings.autoRotate !== false;
-    if(!c.userdata.filterDefinition && vtrack &&
-       !settings.blackboardMode &&
-       HTMLCanvasElement.prototype.captureStream &&
-       ((autoRotate && mobileDevice) || base !== 0))
-        c.userdata.filterDefinition = mobileOrientationFilter;
+    // The user's filter, or the canvas that turns the picture upright and
+    // cuts it to the chosen format, or nothing (see cameraFilterFor). (Sozvon)
+    let def = cameraFilterFor(settings, stream.getVideoTracks()[0]);
+    if(def)
+        c.userdata.filterDefinition = def;
 
     try {
         await setUpStream(c, stream);
@@ -4458,10 +4526,12 @@ async function setMedia(c, mirror, video) {
         addCustomControls(media, div, c, !!video);
 
         // Recompute fill-vs-fit once the real video dimensions are known and
-        // whenever they change (e.g. the remote rotates their phone). (Sozvon)
+        // whenever they change: the remote rotates their phone, or picks
+        // another format -- and so do we, which reshapes our own tile.
+        // (Sozvon)
+        media.addEventListener('loadedmetadata', applyFraming);
+        media.addEventListener('resize', applyFraming);
         if(!c.up) {
-            media.addEventListener('loadedmetadata', applyRemoteFraming);
-            media.addEventListener('resize', applyRemoteFraming);
             // Send playback to the user's chosen speaker (Sozvon).
             applyAudioOutput(media);
         }
@@ -5065,71 +5135,73 @@ function refreshTileLabels(id) {
 }
 
 /**
- * Smart framing of the 1-on-1 remote (speaker view). The remote tile already
- * fills the stage; these helpers decide how the *picture* fills its box:
- *   - "fill" (object-fit: cover) edge-to-edge when the stage is narrower than
- *     the picture and filling crops only a little off its sides;
- *   - "fit" (object-fit: contain) showing the whole frame otherwise.
- * Filling never crops the top or the bottom: on a stage wider than the
- * picture that is the forehead and the chin, and in a call the face is the
- * picture. A shared screen is never cropped at all. (Sozvon)
- */
-const FRAMING_MIN_VISIBLE = 0.6;
-
-/**
- * Decide whether the remote picture should fill (cover) the stage. True only
- * when the crop falls on the sides and at least FRAMING_MIN_VISIBLE of the
- * frame's width survives it.
+ * Smart framing: how each picture fills its tile.  Every tile, in every view,
+ * gets the decision SozvonFraming.tile() makes for its box:
+ *   - "fill" (object-fit: cover) edge to edge, when that cuts only a margin --
+ *     at most 40% of the width off the sides, or a quarter of the height
+ *     weighted towards the chest -- placed by object-position so the cut
+ *     misses the face;
+ *   - "fit" (object-fit: contain), the whole frame, otherwise.
+ * A shared screen is never cut, and with auto-framing off in the settings
+ * nothing is.
  *
- * @param {HTMLElement} remote - the .peer-remote container
- * @param {HTMLVideoElement} media - its <video class="media">
- * @returns {boolean}
+ * This used to apply to the 1-on-1 speaker view only, and never cut the top
+ * or the bottom: the cut was centred, and a centred cut takes the forehead
+ * with the chin.  Weighted, a 4:3 picture fills a 16:9 screen with the
+ * forehead still in it.
+ *
+ * Your own tile is also given the shape of what you send, where it floats as
+ * the thumbnail: it is the only preview of the format you picked, and a
+ * fixed 4:3 box would cut a 9:16 picture down to a strip. (Sozvon)
  */
-function decideFill(remote, media) {
-    if(!remote || !media)
-        return false;
-    // A shared screen must stay fully visible — never crop it.
-    if(remote.dataset.label === 'screenshare')
-        return false;
-    let vw = media.videoWidth, vh = media.videoHeight;
-    if(!vw || !vh)
-        return false;   // real dimensions unknown yet → show the whole frame
-    let sw = remote.clientWidth, sh = remote.clientHeight;
-    if(!sw || !sh) {
-        let stage = document.getElementById('video-container');
-        if(stage) {
-            sw = stage.clientWidth;
-            sh = stage.clientHeight;
-        }
-    }
-    if(!sw || !sh)
-        return false;
-    let videoAR = vw / vh, stageAR = sw / sh;
-    // On a stage wider than the picture, filling would cut its top and
-    // bottom: show the whole height instead, with bars at the sides.
-    if(stageAR > videoAR)
-        return false;
-    return stageAR / videoAR >= FRAMING_MIN_VISIBLE;
-}
-
-/**
- * Apply the fill/fit decision to every remote tile. A no-op outside speaker
- * view (the framing CSS is scoped to #peers.speaker, so any stale classes left
- * behind are harmless). Called from resizePeers() and from the remote video's
- * loadedmetadata/resize events. (Sozvon)
- */
-function applyRemoteFraming() {
+function applyFraming() {
     let peers = document.getElementById('peers');
     if(!peers)
         return;
-    let speaker = peers.classList.contains('speaker');
-    peers.querySelectorAll('.peer-remote').forEach(remote => {
-        if(!(remote instanceof HTMLElement))
+    let enabled = getSettings().autoFraming !== false;
+    peers.querySelectorAll('.peer').forEach(tile => {
+        if(!(tile instanceof HTMLElement))
             return;
-        let media = /** @type {HTMLVideoElement} */
-            (remote.querySelector('video.media'));
-        remote.classList.toggle('framing-fill', speaker && decideFill(remote, media));
+        let media = tile.querySelector('video.media');
+        if(!(media instanceof HTMLVideoElement))
+            return;
+        let vw = media.videoWidth, vh = media.videoHeight;
+        if(tile.classList.contains('peer-self'))
+            reflectSelfShape(tile, vw, vh);
+        let cs = getComputedStyle(media);
+        let bw = media.clientWidth -
+            (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+        let bh = media.clientHeight -
+            (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+        let d = SozvonFraming.tile(bw, bh, vw, vh, {
+            enabled: enabled,
+            screen: tile.dataset.label === 'screenshare',
+        });
+        tile.classList.toggle('framing-fill', d.fit === 'fill');
+        media.style.objectPosition = d.fit === 'fill' ? d.position : '';
     });
+}
+
+/**
+ * Sozvon: give your own tile the shape of your picture, for the views where
+ * it floats as a thumbnail (the CSS reads --self-ar only there).  Clamped to
+ * 9:16 .. 16:9, so an odd camera cannot make it a needle; a portrait picture
+ * gets a narrower thumbnail, or it would stand half the stage tall.
+ *
+ * @param {HTMLElement} tile
+ * @param {number} vw
+ * @param {number} vh
+ */
+function reflectSelfShape(tile, vw, vh) {
+    if(!vw || !vh)
+        return;
+    let ar = Math.min(16 / 9, Math.max(9 / 16, vw / vh));
+    let value = String(Math.round(ar * 1000) / 1000);
+    if(tile.style.getPropertyValue('--self-ar') === value)
+        return;
+    tile.style.setProperty('--self-ar', value);
+    tile.classList.toggle('thumb-portrait', ar < 1);
+    clampSelfThumb();
 }
 
 /**
@@ -5663,7 +5735,7 @@ function resizePeers() {
                 m.style['max-height'] = '';
         });
         clampSelfThumb();   // keep a moved self-thumbnail on-screen
-        applyRemoteFraming();   // fill vs fit (Sozvon)
+        applyFraming();   // fill vs fit (Sozvon)
         reflectStageEmpty();
         return;
     }
@@ -5679,6 +5751,7 @@ function resizePeers() {
         peers.style['grid-template-columns'] = '';
         clampSelfThumb();
         reflectStageEmpty();
+        applyFraming();
         return;
     }
     if (useSpeakerMany) {
@@ -5722,8 +5795,10 @@ function resizePeers() {
     } else {
         peers.style['grid-template-columns'] = `repeat(${columns}, 1fr)`;
     }
-    if (count === 1)
+    if (count === 1) {
+        applyFraming();
         return;
+    }
     let max_video_height = (peers.offsetHeight - margins) / rows;
     let media_list = peers.querySelectorAll(".media");
     for(let i = 0; i < media_list.length; i++) {
@@ -5741,7 +5816,7 @@ function resizePeers() {
         if(tile instanceof HTMLElement)
             tile.style['max-height'] = max_video_height + "px";
     });
-    applyRemoteFraming();   // keep framing classes in sync (Sozvon)
+    applyFraming();   // keep framing classes in sync (Sozvon)
 }
 
 /**
@@ -10185,7 +10260,7 @@ function makePrecheck(prefix) {
 
     /**
      * Show the preview the way the call will show it: the fixed base rotation
-     * the outgoing canvas applies (mobileOrientationFilter draws at
+     * the outgoing canvas applies (cameraGeometryFilter draws at
      * settings.videoRotation), and then the self-view mirror on top — the same
      * order, so the arrow turns the picture the way it points here too.
      *

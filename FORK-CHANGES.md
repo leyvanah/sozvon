@@ -273,6 +273,32 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     sealed inside it and the placeholder — a sibling of the container — was
     painted over the thumbnail. Firefox only, narrow windows only, and only
     with somebody else in the call whose camera was off.
+  * **Picture format and auto-framing** (`static/framing.js`). The settings
+    offer a **picture format** — as the camera gives it, 16:9, 4:3, 1:1 or
+    9:16 — and the camera is cut to it *before* it is encoded: the server
+    forwards one encoding to everybody, and with end-to-end encryption cannot
+    see it, so only the sender can make the picture another shape, and what it
+    cuts no receiver gets back. The cut is drawn by the same canvas pass that
+    turns a phone's picture upright (`cameraGeometryFilter`, which replaces
+    the orientation-only filter): one `drawImage`, read from the settings
+    every frame, so going from one format to another takes effect on the next
+    frame without publishing again. It is placed around where a face sits in
+    a webcam picture — centred across, a little above the middle — so a cut
+    at the top and bottom takes more from the chest than from the forehead.
+    Blackboard mode never cuts. On the receiving side, the **auto-framing**
+    switch extends the 1-on-1 speaker view's fill-or-fit to every tile in
+    every view: a picture fills its box when that costs at most 40% of its
+    width at the sides or a quarter of its height, the latter weighted the
+    same way (the old rule never cut the top or bottom, because a centred cut
+    took the forehead with the chin); otherwise it is shown whole. With the
+    switch off nothing is cut, and a shared screen never is. Your own
+    thumbnail takes the shape of what you send, narrower when it stands up —
+    a fixed 4:3 box cut a 9:16 picture to a strip. Picking “none” as the
+    filter no longer leaves a phone's picture sideways until the camera is
+    reopened: the canvas the camera needs is worked out in one place
+    (`cameraFilterFor`) on every change. A face detector, an automatic format,
+    and receivers telling the sender their tile shapes are the next steps;
+    for now the point of interest is a fixed guess.
   * The **“show self-view” pill** is offset by the open settings drawer. It is
     fixed to the viewport, so when the drawer pushed the call area aside the
     pill stayed against the window edge — underneath the drawer, which left
