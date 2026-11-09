@@ -2142,10 +2142,16 @@ async function refilterCameraNow() {
  * nothing more.  Cut to a format, that is too little: 9:16 out of it is
  * 270x480, and seen on a laptop's whole screen it was a blur (2026-11-09).
  * So while the picture can be cut -- a format picked, or fitting it to the
- * other person's screen -- the camera is asked for 1280x720, and every
- * format keeps the full 720 lines: 1280x720, 960x720, 720x720, 540x720,
- * 405x720.  Only then: a bigger picture costs a phone more to draw and to
- * encode, and the bitrate ceiling follows its size (bitrate-control.js).
+ * other person's screen -- the camera is asked for more of the same shape,
+ * 1280x960: 960 lines for every format cut from it.
+ *
+ * The same shape, not 1280x720.  A phone's sensor is 4:3, and its 16:9 modes
+ * are cut out of it along the long side, which is left and right on a phone
+ * held upright: asked for 1280x720 it gave 720x1280, and a 16:9 picture cut
+ * from that for a laptop had lost the sides of the room besides its top and
+ * bottom (seen in a call the same evening).  A bigger picture costs a phone
+ * more to draw and to encode, so only while there is a cut; the bitrate
+ * ceiling follows its size (bitrate-control.js).
  *
  * @param {settings} settings
  * @returns {MediaTrackConstraints}
@@ -2157,7 +2163,8 @@ function captureSize(settings) {
     if(settings.blackboardMode)
         return {width: {min: 640, ideal: 1920}, height: {min: 400, ideal: 1080}};
     if(sendAspect(settings) || settings.adaptToPeer)
-        return {width: {ideal: 1280}, height: {ideal: 720}};
+        return {aspectRatio: {ideal: 4/3},
+                width: {ideal: 1280}, height: {ideal: 960}};
     return {aspectRatio: {ideal: 4/3}};
 }
 
