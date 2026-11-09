@@ -2052,10 +2052,9 @@ getSelectElement('filterselect').onchange = async function(e) {
         throw new Error('Unexpected type for this');
     updateSettings({filter: this.value});
     // a filter takes the place of the format, and of the bigger capture it
-    // needs (captureSize); reopening picks the canvas too (addLocalMedia)
+    // needs (captureSize)
     decideAdaptation();
-    if(!reopenForCaptureSize())
-        await refilterCamera();
+    await refilterCamera();
 };
 
 /**
@@ -2113,8 +2112,9 @@ function cameraFilterFor(settings, vtrack) {
 }
 
 /**
- * Sozvon: put the running camera through the canvas the settings now call
- * for, without reopening it.
+ * Sozvon: bring the running camera in line with the settings without
+ * reopening it: the size it captures at (resizeCapture), and the canvas it
+ * goes through.
  *
  * Nothing at all happens when that is the canvas it already goes through:
  * cameraGeometryFilter reads the rotation and the format on every frame, so
@@ -2149,7 +2149,10 @@ async function refilterCameraNow() {
     let f = c.userdata.filter;
     let raw = f && f.inputStream ? f.inputStream : c.stream;
     let vtrack = raw ? raw.getVideoTracks()[0] : null;
-    let def = cameraFilterFor(getSettings(), vtrack);
+    let settings = getSettings();
+    if(vtrack)
+        await resizeCapture(c, vtrack, settings);
+    let def = cameraFilterFor(settings, vtrack);
     if((c.userdata.filterDefinition || null) === def)
         return;
     if(def)
@@ -2190,40 +2193,50 @@ function captureSize(settings) {
     if(!userFilter(settings) && (sendAspect(settings) || settings.adaptToPeer))
         return {aspectRatio: {ideal: 4/3},
                 width: {ideal: 1280}, height: {ideal: 960}};
-    return {aspectRatio: {ideal: 4/3}};
+    // Spelled out, rather than left to the camera's default: a camera
+    // asked for 4:3 alone after 1280x960 stays there (resizeCapture).
+    return {aspectRatio: {ideal: 4/3},
+            width: {ideal: 640}, height: {ideal: 480}};
 }
 
 /**
- * Sozvon: open the camera again if it was opened at another size than
- * captureSize() now asks for.
+ * Sozvon: ask the running camera for the size captureSize() now wants,
+ * without closing it.
  *
- * Asking a running camera for more (applyConstraints) does not do it:
- * Chromium accepts the constraints and goes on capturing 640x480, since it
- * only scales down a device it has already opened (measured 2026-11-09).
- * Reopening is a short gap in the picture, as turning it with the rotation
- * buttons always was; it only happens when the picture starts or stops
- * being cut, not between two formats, which the canvas follows by itself.
+ * The camera used to be closed and opened again for this, and Firefox on
+ * Windows refused the second opening ("Failed to allocate videosource"):
+ * it lets go of a camera some time after it is stopped, and the request
+ * came first, so the call was left without a picture until the page was
+ * reloaded (2026-11-09; the rotation buttons did the same).  The reopening
+ * rested on a measurement that Chromium does not raise the size of a
+ * running camera; that measurement had two test clients sharing one fake
+ * camera, the other holding it at 640x480.  On its own a camera does
+ * change size in place (640x480 to 1280x960, measured the same evening).
+ * Called from refilterCamera(), behind any camera still being opened.
  *
- * @returns {boolean} whether the camera is being reopened
+ * @param {Stream} c
+ * @param {MediaStreamTrack} track - the camera's own track, before any canvas
+ * @param {settings} settings
  */
-function reopenForCaptureSize() {
-    let c = findUpMedia('camera');
-    if(!c || !c.stream || !c.stream.getVideoTracks().length)
-        return false;
-    let key = JSON.stringify(captureSize(getSettings()));
+async function resizeCapture(c, track, settings) {
+    let want = captureSize(settings);
+    let key = JSON.stringify(want);
     if(c.userdata.captureSize === key)
-        return false;
-    replaceCameraStream();
-    return true;
+        return;
+    try {
+        await track.applyConstraints(want);
+        c.userdata.captureSize = key;
+    } catch(e) {
+        // the camera goes on at the size it has, which is still a picture
+        console.warn('Could not resize the camera', e);
+    }
 }
 
 getSelectElement('sendaspectselect').onchange = async function(e) {
     if(!(this instanceof HTMLSelectElement))
         throw new Error('Unexpected type for this');
     updateSettings({sendAspect: this.value});
-    // reopening picks the canvas too (addLocalMedia)
-    if(!reopenForCaptureSize())
-        await refilterCamera();
+    await refilterCamera();
 };
 
 getInputElement('autoframingbox').onchange = function(e) {
@@ -2389,10 +2402,7 @@ getInputElement('adaptpeerbox').onchange = function(e) {
     if(!(this instanceof HTMLInputElement))
         throw new Error('Unexpected type for this');
     updateSettings({adaptToPeer: this.checked});
-    if(reopenForCaptureSize())
-        decideAdaptation();
-    else
-        adaptationChanged();
+    adaptationChanged();
 };
 
 /**
@@ -2520,10 +2530,10 @@ function gotViewReport(id, message) {
 }
 
 // Video orientation: a fixed base rotation (to correct devices whose camera is
-// mounted oddly) that the auto-rotation builds on, plus a toggle for the
-// auto-rotation itself.  Both reopen the camera so addLocalMedia re-evaluates
-// whether the orientation canvas should be applied (see cameraGeometryFilter
-// and the gate in addLocalMedia). (Sozvon)
+// mounted oddly), plus a toggle for putting a phone's camera through the
+// canvas that keeps it upright.  Neither closes the camera: refilterCamera()
+// decides the canvas again, and the canvas reads the rotation on every frame
+// (see cameraGeometryFilter and cameraFilterFor). (Sozvon)
 
 /**
  * Sozvon: turn the camera a quarter turn, the direction the arrow points.
@@ -2553,7 +2563,9 @@ function rotateVideo(quarters) {
     // filter switches on the value and addLocalMedia parses it back.
     let next = ((base + delta) % 360 + 360) % 360;
     updateSettings({videoRotation: String(next)});
-    replaceCameraStream();
+    // the canvas reads the rotation on every frame: no need to close the
+    // camera, which Firefox on Windows then refused to open again
+    refilterCamera().catch(e => console.error(e));
 }
 
 getButtonElement('rotate-left').onclick = function(e) {
@@ -2571,7 +2583,7 @@ getInputElement('autorotatebox').onchange = function(e) {
     if(!(this instanceof HTMLInputElement))
         throw new Error('Unexpected type for this');
     updateSettings({autoRotate: this.checked});
-    replaceCameraStream();
+    refilterCamera().catch(e => console.error(e));
 };
 
 /**
@@ -3987,7 +3999,7 @@ async function replaceUpStreamNow(c) {
         cn.userdata.filterDefinition = c.userdata.filterDefinition;
     if(c.userdata.onclose)
         cn.userdata.onclose = c.userdata.onclose;
-    // the same camera, at the size it was opened at (reopenForCaptureSize)
+    // the same camera, at the size it captures at (resizeCapture)
     if(c.userdata.captureSize)
         cn.userdata.captureSize = c.userdata.captureSize;
     let media = /** @type{HTMLVideoElement} */
@@ -4556,7 +4568,7 @@ async function addLocalMediaNow(localId, force) {
     let def = cameraFilterFor(settings, stream.getVideoTracks()[0]);
     if(def)
         c.userdata.filterDefinition = def;
-    // the size the camera was opened at (reopenForCaptureSize); one carried
+    // the size the camera captures at (resizeCapture); one carried
     // over from the stream before keeps that stream's
     if(video && !keep)
         c.userdata.captureSize = JSON.stringify(captureSize(settings));
