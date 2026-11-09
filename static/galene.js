@@ -1806,16 +1806,35 @@ function publishAwayState(away) {
         return;
     if(away && !pausesWhenHidden())
         return;
-    let me = serverConnection.users[serverConnection.id];
-    if(me && !!me.data.away === !!away)
+    // Not our own data as the server last sent it back: that copy is late
+    // after the background (see Announcer in away.js).
+    let a = getAwayAnnouncer();
+    let id = serverConnection.id;
+    if(a && !a.due(id, away))
         return;
     try {
         serverConnection.userAction(
-            'setdata', serverConnection.id, {'away': away ? true : null},
+            'setdata', id, {'away': away ? true : null},
         );
+        if(a)
+            a.sent(id, away);
     } catch(e) {
         console.warn('Could not publish away state', e);
     }
+}
+
+/** @type {any} */
+let awayAnnouncer = null;
+
+/**
+ * Sozvon: what this page last told the room about the background
+ * (away.js), or null before away.js has loaded.
+ */
+function getAwayAnnouncer() {
+    let A = awayApi();
+    if(!awayAnnouncer && A)
+        awayAnnouncer = new A.Announcer();
+    return awayAnnouncer;
 }
 
 /**
