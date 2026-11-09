@@ -74,3 +74,86 @@ test('one outage is judged by how it began', () => {
     t.lost(500_000);
     assert.strictEqual(t.back(), false);
 });
+
+// publishAwayState() lives in galene.js, which wants a browser: lift it out
+// of the source, as e2ee-policy.test.js does, and run it against a fake
+// connection whose copy of our own data comes back only when told to.
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+function lift(name) {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'galene.js'), 'utf8');
+    const start = src.indexOf('function ' + name + '(');
+    if(start < 0)
+        return '';
+    const end = src.indexOf('\n}\n', start);
+    assert.ok(end > start, `${name}() does not end at column 0`);
+    return src.slice(start, end + 3);
+}
+
+function phone() {
+    const sent = [];
+    const echoes = [];
+    const me = {data: {}};
+    const ctx = vm.createContext({
+        console: {warn() {}},
+        awayApi: () => a,
+        pausesWhenHidden: () => true,
+        serverConnection: {
+            id: 'me',
+            users: {me},
+            userAction(kind, dest, value) {
+                assert.strictEqual(kind, 'setdata');
+                sent.push(value.away);
+                echoes.push(value.away);
+            },
+        },
+    });
+    vm.runInContext('var awayAnnouncer = null;\n' +
+                    lift('getAwayAnnouncer') + lift('publishAwayState'), ctx);
+    return {
+        ctx, sent,
+        // the server's copy of our data arrives
+        echo() {
+            while(echoes.length)
+                me.data.away = echoes.shift() || undefined;
+        },
+    };
+}
+
+test('back in front before our own data came back, the room is told', () => {
+    // A page in the background gets the server's copy of its own data only
+    // once it is in front again.  Judged by that copy, coming back looked
+    // like nothing to say, and the late copy then left the room seeing
+    // someone in another app who was in the call -- every other time.
+    const p = phone();
+    p.ctx.publishAwayState(true);       // to the background
+    p.ctx.publishAwayState(false);      // back, before the copy came
+    p.echo();
+    p.ctx.publishAwayState(true);
+    p.ctx.publishAwayState(false);
+    p.echo();
+    assert.deepStrictEqual(p.sent, [true, null, true, null]);
+});
+
+test('each change is said once', () => {
+    const p = phone();
+    p.ctx.publishAwayState(false);      // joined in front: nothing to say
+    p.ctx.publishAwayState(true);
+    p.echo();
+    p.ctx.publishAwayState(true);       // hidden again, without showing
+    p.ctx.publishAwayState(false);
+    p.ctx.publishAwayState(false);
+    assert.deepStrictEqual(p.sent, [true, null]);
+});
+
+test('a new session starts from not in the background', () => {
+    // per-user data does not survive a join
+    const p = phone();
+    p.ctx.publishAwayState(true);
+    p.ctx.serverConnection.id = 'again';
+    p.ctx.publishAwayState(true);       // rejoined while hidden
+    p.ctx.publishAwayState(false);
+    assert.deepStrictEqual(p.sent, [true, true, null]);
+});

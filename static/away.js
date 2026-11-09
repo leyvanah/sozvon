@@ -119,7 +119,57 @@
         return away;
     };
 
-    const api = {RETURN_GRACE, pausesWhenHidden, Tracker};
+    /**
+     * What this page last told the room about being in the background, so
+     * that it says each change once.
+     *
+     * It goes by what was sent, not by the copy of our own data the server
+     * sends back.  That copy reaches a page that was in the background only
+     * after the page is back in front: "in the background" was sent on the
+     * way out, the page came back, its own copy still said "not in the
+     * background", so nothing was sent -- and then the late copy arrived, and
+     * the room was left seeing someone in another app who was in the call.
+     * The next time round it came right again, so the note was wrong every
+     * other time (seen on 2026-11-09, Chrome on Android).
+     *
+     * Per-user data does not survive a join, so a new session starts from
+     * "not in the background".
+     *
+     * @constructor
+     */
+    function Announcer() {
+        /** @type {string|null} */
+        this.session = null;
+        /** @type {boolean} */
+        this.away = false;
+    }
+
+    /**
+     * Whether the room has to be told: this is not what was last sent in
+     * this session.
+     *
+     * @param {string} session - our id in the group
+     * @param {boolean} away
+     * @returns {boolean}
+     */
+    Announcer.prototype.due = function(session, away) {
+        if(session !== this.session)
+            return !!away;
+        return !!away !== this.away;
+    };
+
+    /**
+     * The room was told.
+     *
+     * @param {string} session
+     * @param {boolean} away
+     */
+    Announcer.prototype.sent = function(session, away) {
+        this.session = session;
+        this.away = !!away;
+    };
+
+    const api = {RETURN_GRACE, pausesWhenHidden, Tracker, Announcer};
 
     global.SozvonAway = api;
     if(typeof module !== 'undefined' && module.exports)
