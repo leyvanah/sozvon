@@ -2159,8 +2159,8 @@ getInputElement('autoframingbox').onchange = function(e) {
  * of the box it shows a camera picture in (VIEW_MESSAGE, below), the sender
  * keeps the latest report from each user in peerViews, and while the
  * setting is on and the call is one-to-one, cameraAspect() hands the canvas
- * the format SozvonFraming.adapt() picks for it -- which also refuses to cut
- * a face to fit (an upright phone seen on a laptop goes no wider than 1:1).
+ * the format SozvonFraming.adapt() picks for it (an upright phone seen on a
+ * laptop goes out as 16:9, cut around where the face is).
  * With three or more people one picture cannot fit them all, and the format
  * picked in the settings applies again.
  */
@@ -2215,13 +2215,12 @@ function adaptingToPeer(settings) {
  * every frame, so it only touches the page when the choice changes.
  *
  * @param {settings} settings
- * @param {number} source - the upright camera picture, width / height
  * @returns {number|null}
  */
-function cameraAspect(settings, source) {
+function cameraAspect(settings) {
     let format = null;
     if(adaptingToPeer(settings))
-        format = SozvonFraming.adapt(adaptPeer(), source, adaptedFormat);
+        format = SozvonFraming.adapt(adaptPeer(), adaptedFormat);
     if(format !== adaptedFormat) {
         adaptedFormat = format;
         reflectAdaptation();

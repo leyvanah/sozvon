@@ -532,11 +532,8 @@ let cameraGeometryFilter = {
             return true;
 
         let settings = getSettings();
-        let rot = cameraRotation(settings);
-        let quarter = rot === 90 || rot === 270;
-        let upright = quarter ? vh / vw : vw / vh;
-        let g = SozvonFraming.geometry(vw, vh, rot,
-                                       cameraAspect(settings, upright));
+        let g = SozvonFraming.geometry(vw, vh, cameraRotation(settings),
+                                       cameraAspect(settings));
         let c = g.crop;
         if(ctx.canvas.width !== c.w || ctx.canvas.height !== c.h) {
             ctx.canvas.width = c.w;

@@ -304,10 +304,11 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     message, sent when a picture arrives and after each relayout — the
     stage in the speaker view, the column width and row cap in the grid,
     never the picture's own element, which takes the picture's shape), and
-    the sender cuts to the nearest format. Only formats that keep the face
-    are candidates: narrowing is free down to 9:16, widening may cut at most
-    a quarter of the height, so a laptop seen on an upright phone goes out
-    as 9:16 while an upright phone seen on a laptop goes no wider than 1:1.
+    the sender cuts to the nearest format: a laptop seen on an upright phone
+    goes out as 9:16, an upright phone seen on a laptop as 16:9. The latter
+    keeps under half the phone's height, but the cut is weighted towards the
+    chest, and on a real phone the face was all there — a first version
+    stopped such a picture at 1:1, which left wide bars for nothing.
     The choice only changes when another format fits clearly better, since
     each change resizes the encoder; what remains, the receiver's
     auto-framing fills. With a third person the format picked by hand

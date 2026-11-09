@@ -140,41 +140,30 @@ test('a shared screen, auto-framing off, or unknown sizes: the whole picture', (
     assert.strictEqual(F.tile(1280, 720, 640, 360).fit, 'fit');
 });
 
-test('adapting picks the format nearest the far end\'s screen', () => {
-    // a laptop camera (4:3) seen on an upright phone: 9:16
-    assert.strictEqual(F.adapt(390 / 760, 4 / 3), '9:16');
-    // seen on a wide-screen laptop: 16:9, a quarter of the height cut
-    assert.strictEqual(F.adapt(1.7, 4 / 3), '16:9');
+test('adapting picks the format nearest the far end screen', () => {
+    // seen on an upright phone: 9:16
+    assert.strictEqual(F.adapt(390 / 760), '9:16');
+    // on a wide-screen laptop: 16:9
+    assert.strictEqual(F.adapt(1.7), '16:9');
     // on a tablet held upright: 3:4
-    assert.strictEqual(F.adapt(0.74, 4 / 3), '3:4');
+    assert.strictEqual(F.adapt(0.74), '3:4');
     // on a square-ish window: 1:1
-    assert.strictEqual(F.adapt(1.05, 4 / 3), '1:1');
-});
-
-test('adapting never widens a picture past the face', () => {
-    // an upright phone picture (3:4) seen on a laptop: at most 1:1, never
-    // the strip through the eyes that 16:9 would be
-    assert.strictEqual(F.adapt(16 / 9, 3 / 4), '1:1');
-    assert.strictEqual(F.adapt(4 / 3, 3 / 4), '1:1');
-    // a 9:16 picture cannot be widened at all beyond 3:4
-    assert.strictEqual(F.adapt(16 / 9, 9 / 16), '3:4');
-    // narrowing is always allowed: the face is in the middle across
-    assert.strictEqual(F.adapt(9 / 16, 16 / 9), '9:16');
+    assert.strictEqual(F.adapt(1.05), '1:1');
 });
 
 test('adapting keeps its format until another fits clearly better', () => {
     // between 1:1 and 4:3 the nearer one wins from nothing...
-    assert.strictEqual(F.adapt(1.17, 4 / 3), '4:3');
+    assert.strictEqual(F.adapt(1.17), '4:3');
     // ...but a picture already 1:1 stays 1:1 that close to the line
-    assert.strictEqual(F.adapt(1.17, 4 / 3, '1:1'), '1:1');
+    assert.strictEqual(F.adapt(1.17, '1:1'), '1:1');
     // and changes once the screen is clearly 4:3
-    assert.strictEqual(F.adapt(1.3, 4 / 3, '1:1'), '4:3');
-    // a current format that is no longer allowed is not kept
-    assert.strictEqual(F.adapt(16 / 9, 3 / 4, '16:9'), '1:1');
+    assert.strictEqual(F.adapt(1.3, '1:1'), '4:3');
+    // a format no longer known is not kept
+    assert.strictEqual(F.adapt(1.7, '21:9'), '16:9');
 });
 
 test('adapting with nothing known chooses nothing', () => {
-    assert.strictEqual(F.adapt(0, 4 / 3), null);
-    assert.strictEqual(F.adapt(1.5, 0), null);
-    assert.strictEqual(F.adapt(NaN, 4 / 3), null);
+    assert.strictEqual(F.adapt(0), null);
+    assert.strictEqual(F.adapt(NaN), null);
+    assert.strictEqual(F.adapt(Infinity), null);
 });

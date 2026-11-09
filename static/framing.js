@@ -211,15 +211,14 @@
     /**
      * The format to send so that it fits the far end's screen: the one of
      * ASPECTS nearest to the shape of the box our picture is shown in there.
+     * What remains between the format and the screen, the receiver's
+     * auto-framing fills or shows with bars.
      *
-     * Only formats that keep the face are candidates.  Narrowing a picture
-     * cuts its sides, and a face is in the middle across, so any format down
-     * to 9:16 is fine.  Widening it cuts the top and bottom, which is where a
-     * face runs out first -- a phone's upright picture cut to 16:9 is a strip
-     * through the eyes -- so a format wider than the camera's is allowed only
-     * while it keeps MIN_VISIBLE_HEIGHT of the height, the same limit a
-     * receiver fills by.  What remains between the format and the screen,
-     * the receiver's auto-framing fills or shows with bars.
+     * Any format is a candidate, whatever the camera's own shape.  A phone
+     * held upright and seen on a laptop goes out as 16:9: that keeps under
+     * half of its height, but the cut is weighted towards the chest (FOCUS),
+     * and tried on a real phone on 2026-11-09 the face was all there -- the
+     * owner preferred it to a guard that stopped at 1:1.
      *
      * Formats are names, not the far end's exact shape: that one changes
      * whenever a panel opens over there, and each change resizes the encoder.
@@ -227,18 +226,14 @@
      * clearly better (ADAPT_HYSTERESIS).
      *
      * @param {number} view - the far end's box, width / height
-     * @param {number} source - our upright camera picture, width / height
      * @param {string} [current] - the format chosen last time
      * @returns {string|null} a key of ASPECTS, or null if nothing is known
      */
-    function adapt(view, source, current) {
-        if(!(view > 0) || !(source > 0))
+    function adapt(view, current) {
+        if(!(view > 0) || !isFinite(view))
             return null;
-        let widest = source / MIN_VISIBLE_HEIGHT * 1.001;
         let best = null, bestDist = Infinity;
         for(let name of Object.keys(ASPECTS)) {
-            if(ASPECTS[name] > widest)
-                continue;
             let d = Math.abs(Math.log(view / ASPECTS[name]));
             if(d < bestDist) {
                 best = name;
@@ -246,8 +241,7 @@
             }
         }
         if(current && current !== best &&
-           Object.prototype.hasOwnProperty.call(ASPECTS, current) &&
-           ASPECTS[current] <= widest) {
+           Object.prototype.hasOwnProperty.call(ASPECTS, current)) {
             let d = Math.abs(Math.log(view / ASPECTS[current]));
             if(d - bestDist < ADAPT_HYSTERESIS)
                 return current;
