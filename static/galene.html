@@ -623,8 +623,21 @@
             <!-- What leaves this device: the camera picture cut to a format,
                  around where a face usually is (framing.js).  Under the
                  camera with the rotation, because it shapes the same
-                 picture.  The checkbox is the other half, how pictures fill
-                 the tiles on this screen. -->
+                 picture.  First the switch that fits it to the other
+                 person's screen in a one-to-one call (adaptPeer in
+                 galene.js), with a note on what is being sent; then the
+                 format picked by hand, which applies when nothing is being
+                 fitted and is greyed out while something is (or while a
+                 filter takes the canvas).  Last, auto-framing: the other
+                 half, how pictures fill the tiles on this screen. -->
+            <form id="settings-adaptpeer">
+              <input id="adaptpeerbox" type="checkbox"/>
+              <label for="adaptpeerbox" data-i18n="settings.adaptToPeer">Fit video to the other person's screen</label>
+            </form>
+            <p id="adapt-status" class="pref-note invisible">
+              <span id="adapt-active" class="invisible"><span data-i18n="adapt.now">Now sending</span> <b id="adapt-format"></b></span>
+              <span id="adapt-idle" data-i18n="adapt.idle">Works in a one-to-one call</span>
+            </p>
             <label for="sendaspectselect" class="sidenav-label" data-i18n="settings.sendAspect">Picture format</label>
             <select id="sendaspectselect" class="select select-inline">
               <option value="camera" selected data-i18n="opt.aspectCamera">as the camera</option>
@@ -639,18 +652,6 @@
               <input id="autoframingbox" type="checkbox" checked/>
               <label for="autoframingbox" data-i18n="settings.autoFraming">Auto-framing</label>
             </form>
-            <!-- In a one-to-one call, send the format that fits the other
-                 person's screen instead of the one picked above (see
-                 adaptPeer in galene.js).  The note says what is being sent,
-                 since the format list no longer does. -->
-            <form id="settings-adaptpeer">
-              <input id="adaptpeerbox" type="checkbox"/>
-              <label for="adaptpeerbox" data-i18n="settings.adaptToPeer">Fit video to the other person's screen</label>
-            </form>
-            <p id="adapt-status" class="pref-note invisible">
-              <span id="adapt-active" class="invisible"><span data-i18n="adapt.now">Now sending</span> <b id="adapt-format"></b></span>
-              <span id="adapt-idle" data-i18n="adapt.idle">Works in a one-to-one call</span>
-            </p>
 
             <label for="audioselect" class="sidenav-label" data-i18n="settings.microphone">Microphone</label>
             <select id="audioselect" class="select select-inline">

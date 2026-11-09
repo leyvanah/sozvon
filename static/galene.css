@@ -3259,6 +3259,22 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     font-size: var(--fs-sm);
     color: var(--text-2);
 }
+/* The note under the format list sits under a select, not a switch. */
+.select + .pref-note {
+    margin-top: 6px;
+}
+
+/* A setting that does not apply right now -- the picture format while the
+   picture is fitted to the other person's screen, or while a filter takes
+   the canvas -- looks it, label and all.  A disabled select alone looked
+   exactly like an enabled one (2026-11-09). (Sozvon) */
+.select:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+.sidenav-label:has(+ .select:disabled) {
+    opacity: .45;
+}
 
 /* ==========================================================================
    Sozvon — self-view hidden: floating controls pill
