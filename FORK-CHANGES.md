@@ -303,13 +303,23 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     The same 4:3 shape on purpose: a phone's sensor is 4:3, and its 16:9
     modes cut the long side of it, which on a phone held upright is left and
     right — asked for 1280×720 it sent a picture narrower than the room.
-    Starting or stopping the cut reopens the camera, as the rotation buttons
-    do: Chromium accepts larger constraints on a running camera and goes on
-    capturing at the old size. Between two cuts the camera stays open.
+    The running camera is asked for the new size (`applyConstraints`) and
+    is **never closed for it** — nor for the rotation buttons, auto-rotate
+    or a filter, which only decide the canvas: closing and reopening it
+    made Firefox on Windows refuse the camera ("Failed to allocate
+    videosource") until the page was reloaded.
     The bitrate ceiling counts 1280×960 and what is cut from it with 720p
-    (4 Mbit/s), not with 1080p's 6. A filter picked by hand takes the
-    canvas instead: the format is greyed with a note, and the camera is not
-    opened larger for a cut that cannot happen.
+    (4 Mbit/s), not with 1080p's 6, and **a phone's camera never sends more
+    than 2.5 Mbit/s**, held by the phone itself: at 3.5–4 Mbit/s a phone lost
+    4–35% of its packets over home Wi-Fi three times in an hour. A filter
+    picked by hand takes the canvas instead: the format is greyed with a
+    note, and the camera is not asked for more for a cut that cannot
+    happen. The format list sits under the fitting switch and is greyed,
+    label and all, whenever it does not apply.
+    **A phone turned on its side stays upright.** Chrome and Firefox on
+    Android already turn the camera's frames to the screen; the canvas
+    added the screen's angle on top and laid the picture on its side until
+    the arrows were pressed. It now draws only the fixed base rotation.
   * **Fit the video to the other person's screen** (a switch under the
     format). In a one-to-one call there is one person to send to, so the
     sender can pick the format for their screen: every receiver reports the
