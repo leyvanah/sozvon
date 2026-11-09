@@ -631,12 +631,25 @@
               <option value="16:9" data-i18n="opt.aspect169">16:9 wide</option>
               <option value="4:3" data-i18n="opt.aspect43">4:3</option>
               <option value="1:1" data-i18n="opt.aspect11">1:1 square</option>
+              <option value="3:4" data-i18n="opt.aspect34">3:4</option>
               <option value="9:16" data-i18n="opt.aspect916">9:16 portrait</option>
             </select>
             <form id="settings-autoframing">
               <input id="autoframingbox" type="checkbox" checked/>
               <label for="autoframingbox" data-i18n="settings.autoFraming">Auto-framing</label>
             </form>
+            <!-- In a one-to-one call, send the format that fits the other
+                 person's screen instead of the one picked above (see
+                 adaptPeer in galene.js).  The note says what is being sent,
+                 since the format list no longer does. -->
+            <form id="settings-adaptpeer">
+              <input id="adaptpeerbox" type="checkbox"/>
+              <label for="adaptpeerbox" data-i18n="settings.adaptToPeer">Fit video to the other person's screen</label>
+            </form>
+            <p id="adapt-status" class="pref-note invisible">
+              <span id="adapt-active" class="invisible"><span data-i18n="adapt.now">Now sending</span> <b id="adapt-format"></b></span>
+              <span id="adapt-idle" data-i18n="adapt.idle">Works in a one-to-one call</span>
+            </p>
 
             <label for="audioselect" class="sidenav-label" data-i18n="settings.microphone">Microphone</label>
             <select id="audioselect" class="select select-inline">

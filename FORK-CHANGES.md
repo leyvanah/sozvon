@@ -274,8 +274,8 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     painted over the thumbnail. Firefox only, narrow windows only, and only
     with somebody else in the call whose camera was off.
   * **Picture format and auto-framing** (`static/framing.js`). The settings
-    offer a **picture format** — as the camera gives it, 16:9, 4:3, 1:1 or
-    9:16 — and the camera is cut to it *before* it is encoded: the server
+    offer a **picture format** — as the camera gives it, 16:9, 4:3, 1:1, 3:4
+    or 9:16 — and the camera is cut to it *before* it is encoded: the server
     forwards one encoding to everybody, and with end-to-end encryption cannot
     see it, so only the sender can make the picture another shape, and what it
     cuts no receiver gets back. The cut is drawn by the same canvas pass that
@@ -296,9 +296,26 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     a fixed 4:3 box cut a 9:16 picture to a strip. Picking “none” as the
     filter no longer leaves a phone's picture sideways until the camera is
     reopened: the canvas the camera needs is worked out in one place
-    (`cameraFilterFor`) on every change. A face detector, an automatic format,
-    and receivers telling the sender their tile shapes are the next steps;
-    for now the point of interest is a fixed guess.
+    (`cameraFilterFor`) on every change.
+  * **Fit the video to the other person's screen** (a switch under the
+    format). In a one-to-one call there is one person to send to, so the
+    sender can pick the format for their screen: every receiver reports the
+    shape of the box it shows each camera picture in (a `sozvon-view` user
+    message, sent when a picture arrives and after each relayout — the
+    stage in the speaker view, the column width and row cap in the grid,
+    never the picture's own element, which takes the picture's shape), and
+    the sender cuts to the nearest format. Only formats that keep the face
+    are candidates: narrowing is free down to 9:16, widening may cut at most
+    a quarter of the height, so a laptop seen on an upright phone goes out
+    as 9:16 while an upright phone seen on a laptop goes no wider than 1:1.
+    The choice only changes when another format fits clearly better, since
+    each change resizes the encoder; what remains, the receiver's
+    auto-framing fills. With a third person the format picked by hand
+    applies again; the drawer says which format is being sent and greys the
+    list while it is overridden. Older clients send no reports, and nothing
+    is adapted to them. The shape crosses the server in clear, even in an
+    encrypted room. Next: a face detector instead of the fixed point of
+    interest.
   * The **“show self-view” pill** is offset by the open settings drawer. It is
     fixed to the viewport, so when the drawer pushed the call area aside the
     pill stayed against the window edge — underneath the drawer, which left

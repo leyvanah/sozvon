@@ -51,8 +51,17 @@
         '16:9': 16 / 9,
         '4:3': 4 / 3,
         '1:1': 1,
+        '3:4': 3 / 4,
         '9:16': 9 / 16,
     };
+
+    /**
+     * How much better another format must fit the far end's screen before an
+     * adapted picture changes to it, in log-ratio terms.  Every change of
+     * format resizes the encoder, so a screen whose shape sits on the line
+     * between two formats must not flip between them.
+     */
+    const ADAPT_HYSTERESIS = 0.06;
 
     /**
      * Where the face is assumed to be, as fractions of the upright frame.
@@ -199,9 +208,57 @@
         return (Math.round(f * 1000) / 10) + '%';
     }
 
+    /**
+     * The format to send so that it fits the far end's screen: the one of
+     * ASPECTS nearest to the shape of the box our picture is shown in there.
+     *
+     * Only formats that keep the face are candidates.  Narrowing a picture
+     * cuts its sides, and a face is in the middle across, so any format down
+     * to 9:16 is fine.  Widening it cuts the top and bottom, which is where a
+     * face runs out first -- a phone's upright picture cut to 16:9 is a strip
+     * through the eyes -- so a format wider than the camera's is allowed only
+     * while it keeps MIN_VISIBLE_HEIGHT of the height, the same limit a
+     * receiver fills by.  What remains between the format and the screen,
+     * the receiver's auto-framing fills or shows with bars.
+     *
+     * Formats are names, not the far end's exact shape: that one changes
+     * whenever a panel opens over there, and each change resizes the encoder.
+     * For the same reason the current format is kept until another fits
+     * clearly better (ADAPT_HYSTERESIS).
+     *
+     * @param {number} view - the far end's box, width / height
+     * @param {number} source - our upright camera picture, width / height
+     * @param {string} [current] - the format chosen last time
+     * @returns {string|null} a key of ASPECTS, or null if nothing is known
+     */
+    function adapt(view, source, current) {
+        if(!(view > 0) || !(source > 0))
+            return null;
+        let widest = source / MIN_VISIBLE_HEIGHT * 1.001;
+        let best = null, bestDist = Infinity;
+        for(let name of Object.keys(ASPECTS)) {
+            if(ASPECTS[name] > widest)
+                continue;
+            let d = Math.abs(Math.log(view / ASPECTS[name]));
+            if(d < bestDist) {
+                best = name;
+                bestDist = d;
+            }
+        }
+        if(current && current !== best &&
+           Object.prototype.hasOwnProperty.call(ASPECTS, current) &&
+           ASPECTS[current] <= widest) {
+            let d = Math.abs(Math.log(view / ASPECTS[current]));
+            if(d - bestDist < ADAPT_HYSTERESIS)
+                return current;
+        }
+        return best;
+    }
+
     const api = {
         ASPECTS, FOCUS, MIN_VISIBLE_WIDTH, MIN_VISIBLE_HEIGHT,
-        aspectOf, crop, geometry, tile,
+        ADAPT_HYSTERESIS,
+        aspectOf, crop, geometry, tile, adapt,
     };
 
     global.SozvonFraming = api;

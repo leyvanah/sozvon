@@ -3252,6 +3252,13 @@ body.nav-hidden #peers.speaker-many .peer-self .top-video-controls {
     min-width: 90px;
     max-width: 160px;
 }
+/* What fitting the video to the other person's screen is doing, under its
+   switch in the drawer. (Sozvon) */
+.pref-note {
+    margin: -6px 0 12px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+}
 
 /* ==========================================================================
    Sozvon — self-view hidden: floating controls pill

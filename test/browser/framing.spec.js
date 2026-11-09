@@ -96,9 +96,9 @@ test('the chosen format reaches the far end, and each tile frames it', async ({b
 
     // 16:9 is a cut: a canvas now, and Bob receives 16:9.
     await setControl(alice, 'sendaspectselect', '16:9');
-    await expect.poll(() => upCamera(alice).then(u => u && u.canvas)).toBe(true);
+    await expect.poll(() => upCamera(alice).then(u => u && [u.width, u.height]))
+        .toEqual([640, 360]);
     const wide = await upCamera(alice);
-    expect([wide.width, wide.height]).toEqual([640, 360]);
     await expect.poll(() => remote(bob).then(shape)).toBe(1.78);
 
     // Bob's stage is a little taller than wide-screen: a 16:9 picture fills
@@ -120,8 +120,8 @@ test('the chosen format reaches the far end, and each tile frames it', async ({b
     await setControl(alice, 'sendaspectselect', '9:16');
     await expect.poll(() => remote(bob).then(shape)).toBe(0.56);
     expect((await upCamera(alice)).id).toBe(wide.id);
-    const tall = await upCamera(alice);
-    expect([tall.width, tall.height]).toEqual([270, 480]);
+    expect(await upCamera(alice).then(u => [u.width, u.height]))
+        .toEqual([270, 480]);
 
     // A portrait picture on a landscape stage would lose the face to a fill:
     // shown whole.
@@ -141,6 +141,55 @@ test('the chosen format reaches the far end, and each tile frames it', async ({b
     await setControl(alice, 'sendaspectselect', 'camera');
     await expect.poll(() => upCamera(alice).then(u => u && u.canvas)).toBe(false);
     await expect.poll(() => remote(bob).then(shape)).toBe(1.33);
+
+    expect(alice.errors).toEqual([]);
+    expect(bob.errors).toEqual([]);
+});
+
+/** What Alice's settings say adapting is doing. */
+const adaptNote = page => page.evaluate(() => ({
+    shown: !document.getElementById('adapt-status').classList.contains('invisible'),
+    active: !document.getElementById('adapt-active').classList.contains('invisible'),
+    format: document.getElementById('adapt-format').textContent,
+    locked: document.getElementById('sendaspectselect').disabled,
+}));
+
+test('fitted to the other person\'s screen, one-to-one only', async ({browser}) => {
+    const alice = await join(browser, 'alice', {width: 1200, height: 1000});
+    await setControl(alice, 'adaptpeerbox', true);
+    // alone: nothing to fit, and the note says when it will work
+    expect(await adaptNote(alice)).toMatchObject({shown: true, active: false});
+
+    // Bob watches on an upright phone: Alice's 4:3 goes out as 9:16.
+    const bob = await join(browser, 'bob', {width: 390, height: 844});
+    await expect.poll(() => remote(bob).then(shape)).toBe(0.56);
+    expect(await adaptNote(alice)).toEqual(
+        {shown: true, active: true, format: '9:16', locked: true});
+
+    // Bob turns his phone: 16:9, a quarter of the height cut, no more.
+    await bob.setViewportSize({width: 844, height: 390});
+    await expect.poll(() => remote(bob).then(shape)).toBe(1.78);
+    expect((await adaptNote(alice)).format).toBe('16:9');
+
+    // A third person: one picture cannot fit two screens, so Alice's own
+    // choice -- the camera's format -- applies again.
+    const carol = await join(browser, 'carol', {width: 1200, height: 1000});
+    await expect.poll(() => remote(bob).then(shape)).toBe(1.33);
+    expect(await adaptNote(alice)).toMatchObject({active: false, locked: false});
+    // and still one camera from Alice: turning simulcast on replaces her
+    // stream at the same moment, and two replacements published two
+    await expect.poll(() => alice.evaluate(() => Object.values(serverConnection.up)
+        .filter(c => c.label === 'camera').length)).toBe(1);
+    await expect.poll(() => bob.locator('#peers .peer-remote').count()).toBe(2);
+
+    // Carol leaves: one-to-one again, fitted again.
+    await carol.context().close();
+    await expect.poll(() => remote(bob).then(shape)).toBe(1.78);
+
+    // Switched off: the camera's format.
+    await setControl(alice, 'adaptpeerbox', false);
+    await expect.poll(() => remote(bob).then(shape)).toBe(1.33);
+    expect(await adaptNote(alice)).toMatchObject({shown: false, locked: false});
 
     expect(alice.errors).toEqual([]);
     expect(bob.errors).toEqual([]);

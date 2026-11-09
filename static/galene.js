@@ -440,6 +440,14 @@ function reflectSettings() {
         store = true;
     }
 
+    if(settings.hasOwnProperty('adaptToPeer')) {
+        getInputElement('adaptpeerbox').checked = settings.adaptToPeer;
+    } else {
+        settings.adaptToPeer = getInputElement('adaptpeerbox').checked;
+        store = true;
+    }
+    setVisibility('adapt-status', !!settings.adaptToPeer);
+
     if(settings.hasOwnProperty('request')) {
         getSelectElement('requestselect').value = settings.request;
     } else {
@@ -2074,7 +2082,8 @@ function cameraFilterFor(settings, vtrack) {
         navigator.maxTouchPoints > 0 || isMobileLayout();
     let base = parseInt(settings.videoRotation, 10) || 0;
     let autoRotate = settings.autoRotate !== false;
-    if((autoRotate && mobileDevice) || base !== 0 || sendAspect(settings))
+    if((autoRotate && mobileDevice) || base !== 0 || sendAspect(settings) ||
+       adaptingToPeer(settings))
         return cameraGeometryFilter;
     return null;
 }
@@ -2087,9 +2096,30 @@ function cameraFilterFor(settings, vtrack) {
  * cameraGeometryFilter reads the rotation and the format on every frame, so
  * a new format shows on the next one.  Otherwise the up stream is replaced
  * over the same camera track, as a filter change always did.
+ *
+ * Queued behind any camera that is still opening, and behind itself: a
+ * second replacement started before the first is done would find the old
+ * stream and publish a second one beside it.
+ *
+ * @returns {Promise<void>}
  */
-async function refilterCamera() {
+function refilterCamera() {
+    let next = addLocalMediaQueue.then(refilterCameraNow, refilterCameraNow);
+    addLocalMediaQueue = next.catch(() => {});
+    return next;
+}
+
+async function refilterCameraNow() {
     let c = findUpMedia('camera');
+    // A replacement under way (simulcast turning on, say) copies the canvas
+    // the old stream had: wait for it, and decide on the stream it leaves.
+    while(c && c.userdata.replacement) {
+        await c.userdata.replacement;
+        let next = findUpMedia('camera');
+        if(next === c)
+            break;
+        c = next;
+    }
     if(!c)
         return;
     let f = c.userdata.filter;
@@ -2118,6 +2148,236 @@ getInputElement('autoframingbox').onchange = function(e) {
     updateSettings({autoFraming: this.checked});
     applyFraming();
 };
+
+/*
+ * Sozvon: fitting the picture to the other person's screen.
+ *
+ * In a one-to-one call there is a single person to send to, so the format
+ * that fits their screen is a single choice and the sender can make it: a
+ * laptop's camera seen on an upright phone goes out as 9:16 and fills it,
+ * rather than as a band across the middle.  Each receiver reports the shape
+ * of the box it shows a camera picture in (VIEW_MESSAGE, below), the sender
+ * keeps the latest report from each user in peerViews, and while the
+ * setting is on and the call is one-to-one, cameraAspect() hands the canvas
+ * the format SozvonFraming.adapt() picks for it -- which also refuses to cut
+ * a face to fit (an upright phone seen on a laptop goes no wider than 1:1).
+ * With three or more people one picture cannot fit them all, and the format
+ * picked in the settings applies again.
+ */
+
+/** @type {string} */
+const VIEW_MESSAGE = 'sozvon-view';
+
+/**
+ * The box each user shows our camera picture in, width / height, by user id.
+ *
+ * @type {Map<string, number>}
+ */
+let peerViews = new Map();
+
+/**
+ * The format cameraAspect() chose last, or null when it is not adapting.
+ * Kept so the choice does not flip at a boundary (SozvonFraming.adapt), and
+ * shown in the settings.
+ *
+ * @type {string|null}
+ */
+let adaptedFormat = null;
+
+/**
+ * The shape of the other person's view, while this is a one-to-one call
+ * and they have reported one.
+ *
+ * @returns {number|null}
+ */
+function adaptPeer() {
+    if(!serverConnection || !serverConnection.users)
+        return null;
+    let others = Object.keys(serverConnection.users)
+        .filter(id => id !== serverConnection.id);
+    if(others.length !== 1)
+        return null;
+    return peerViews.get(others[0]) || null;
+}
+
+/**
+ * @param {settings} settings
+ * @returns {boolean}
+ */
+function adaptingToPeer(settings) {
+    return !!settings.adaptToPeer && !settings.blackboardMode && !!adaptPeer();
+}
+
+/**
+ * The format the camera picture is cut to on this frame, width / height, or
+ * null for none: fitted to the other person's screen while that applies,
+ * else the one picked in the settings.  Called by cameraGeometryFilter on
+ * every frame, so it only touches the page when the choice changes.
+ *
+ * @param {settings} settings
+ * @param {number} source - the upright camera picture, width / height
+ * @returns {number|null}
+ */
+function cameraAspect(settings, source) {
+    let format = null;
+    if(adaptingToPeer(settings))
+        format = SozvonFraming.adapt(adaptPeer(), source, adaptedFormat);
+    if(format !== adaptedFormat) {
+        adaptedFormat = format;
+        reflectAdaptation();
+    }
+    return format ? SozvonFraming.aspectOf(format) : sendAspect(settings);
+}
+
+/**
+ * Show in the settings what fitting to the other person's screen is doing:
+ * the format being sent while it is, a note that it waits for a one-to-one
+ * call while it is not.  The format list is greyed while it is overridden.
+ */
+function reflectAdaptation() {
+    let settings = getSettings();
+    let on = !!settings.adaptToPeer;
+    let active = on && adaptingToPeer(settings) && !!adaptedFormat;
+    setVisibility('adapt-status', on);
+    setVisibility('adapt-active', active);
+    setVisibility('adapt-idle', !active);
+    let f = document.getElementById('adapt-format');
+    if(f)
+        f.textContent = active ? adaptedFormat : '';
+    getSelectElement('sendaspectselect').disabled = active;
+}
+
+/**
+ * Something that decides the adapted format changed: the setting, who is in
+ * the call, or a report of the other person's screen.  The canvas reads the
+ * format on every frame by itself; what has to be done here is putting the
+ * camera through the canvas, or taking it out, when adapting starts or
+ * stops on a device that needs no canvas otherwise.
+ */
+function adaptationChanged() {
+    reflectAdaptation();
+    refilterCamera().catch(e => console.error(e));
+}
+
+getInputElement('adaptpeerbox').onchange = function(e) {
+    if(!(this instanceof HTMLInputElement))
+        throw new Error('Unexpected type for this');
+    updateSettings({adaptToPeer: this.checked});
+    adaptationChanged();
+};
+
+/**
+ * The last shape reported to each user, so a relayout that changes nothing
+ * sends nothing.
+ *
+ * @type {Map<string, number>}
+ */
+let viewReported = new Map();
+
+/** @type {ReturnType<typeof setTimeout>|null} */
+let viewReportTimer = null;
+
+/**
+ * Report, a little later, the shape of our view to whoever sends us a
+ * camera.  Called on every relayout; the delay lets a resize, an opening
+ * panel or a turned phone settle into one report.
+ */
+function scheduleViewReport() {
+    if(viewReportTimer)
+        return;
+    viewReportTimer = setTimeout(function() {
+        viewReportTimer = null;
+        reportViews(false);
+    }, 700);
+}
+
+/**
+ * Tell the sender of each camera picture we receive the shape of the box we
+ * show it in.  The receiver reports whatever the sender's settings: the
+ * sender decides whether to use it.
+ *
+ * @param {boolean} force - send even what was sent before (a new stream
+ *     from them: they may have reloaded and forgotten it)
+ * @param {string} [only] - report to this user only
+ */
+function reportViews(force, only) {
+    if(!serverConnection || !serverConnection.socket)
+        return;
+    for(let id in serverConnection.down) {
+        let c = serverConnection.down[id];
+        if(c.label !== 'camera' || !c.source)
+            continue;
+        if(only && c.source !== only)
+            continue;
+        let shape = viewShape(c);
+        if(!shape)
+            continue;
+        let last = viewReported.get(c.source);
+        if(!force && last && Math.abs(Math.log(shape / last)) < 0.02)
+            continue;
+        viewReported.set(c.source, shape);
+        try {
+            serverConnection.userMessage(VIEW_MESSAGE, c.source, {
+                aspect: Math.round(shape * 1000) / 1000,
+            }, true);
+        } catch(e) {
+            console.warn(e);
+        }
+    }
+}
+
+/**
+ * The box a received camera picture is shown in, width / height, or null.
+ *
+ * Not the size of the picture's own element: in the grid that takes the
+ * shape of the picture, and reporting it would only ever confirm the format
+ * already sent.  In the speaker view the picture has the whole stage; in the
+ * grid it has its column's width and the row's height cap.
+ *
+ * @param {Stream} c
+ * @returns {number|null}
+ */
+function viewShape(c) {
+    let stage = document.getElementById('video-container');
+    let peers = document.getElementById('peers');
+    if(!stage || !peers)
+        return null;
+    let w = stage.clientWidth, h = stage.clientHeight;
+    let media = document.getElementById('media-' + c.localId);
+    if(!peers.classList.contains('speaker') && media &&
+       media.offsetParent !== null) {
+        let cs = getComputedStyle(media);
+        let padX = (parseFloat(cs.paddingLeft) || 0) +
+            (parseFloat(cs.paddingRight) || 0);
+        let padY = (parseFloat(cs.paddingTop) || 0) +
+            (parseFloat(cs.paddingBottom) || 0);
+        let maxH = parseFloat(cs.maxHeight);
+        w = media.clientWidth - padX;
+        if(isFinite(maxH))
+            h = cs.boxSizing === 'border-box' ? maxH - padY : maxH;
+        else
+            h = stage.clientHeight - padY;
+    }
+    if(!(w > 0) || !(h > 0))
+        return null;
+    return w / h;
+}
+
+/**
+ * A report of how a user shows our picture.
+ *
+ * @param {string} id
+ * @param {any} message
+ */
+function gotViewReport(id, message) {
+    let a = message && message.aspect;
+    if(typeof a !== 'number' || !(a > 0.2 && a < 5))
+        return;
+    let before = peerViews.get(id);
+    peerViews.set(id, a);
+    if(before !== a)
+        adaptationChanged();
+}
 
 // Video orientation: a fixed base rotation (to correct devices whose camera is
 // mounted oddly) that the auto-rotation builds on, plus a toggle for the
@@ -3569,6 +3829,17 @@ async function recoverMicrophone(c, lost) {
  * @returns {Promise<Stream>}
  */
 async function replaceUpStream(c) {
+    // Kept on the old stream, so that refilterCamera can wait for a
+    // replacement under way and decide on the stream it leaves. (Sozvon)
+    let p = replaceUpStreamNow(c);
+    c.userdata.replacement = p;
+    return await p;
+}
+
+/**
+ * @param {Stream} c
+ */
+async function replaceUpStreamNow(c) {
     await removeFilter(c);
     let cn = newUpStream(c.localId);
     cn.label = c.label;
@@ -4534,6 +4805,12 @@ async function setMedia(c, mirror, video) {
         if(!c.up) {
             // Send playback to the user's chosen speaker (Sozvon).
             applyAudioOutput(media);
+        }
+        // A new camera picture from somebody: tell them how we show it,
+        // once the layout has placed it (Sozvon).
+        if(!c.up && c.label === 'camera' && c.source) {
+            let source = c.source;
+            setTimeout(() => reportViews(true, source), 300);
         }
     }
 
@@ -5658,6 +5935,8 @@ function resizePeers() {
     // Window resize can call this method too early
     if (!serverConnection)
         return;
+    // the shape we show a sender's picture in may have changed (Sozvon)
+    scheduleViewReport();
     let up = Object.keys(serverConnection.up).length;
     let down = Object.keys(serverConnection.down).length;
     // Participants with no stream of their own get a cell too, and it takes
@@ -6553,6 +6832,9 @@ function gotUser(id, kind) {
         updateCallTimer();
         if(Object.keys(serverConnection.users).length === 3)
             reconsiderSendParameters();
+        // a third person ends fitting to one screen (Sozvon)
+        if(id !== serverConnection.id)
+            adaptationChanged();
         break;
     case 'delete':
         delUser(id);
@@ -6561,6 +6843,10 @@ function gotUser(id, kind) {
         if(e2eeActive())
             serverConnection.e2ee.delUser(id);
         forgetBitrateRequests(id);
+        peerViews.delete(id);
+        viewReported.delete(id);
+        // back to one-to-one, or alone (Sozvon)
+        adaptationChanged();
         maybeClearChatOnSolo();
         updateCallTimer();
         if(Object.keys(serverConnection.users).length < 3)
@@ -7870,6 +8156,10 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
     case 'sozvon-bitrate':
         if(id && id !== serverConnection.id)
             gotBitrateRequest(id, message);
+        return;
+    case 'sozvon-view':     // VIEW_MESSAGE
+        if(id && id !== serverConnection.id)
+            gotViewReport(id, message);
         return;
     case 'e2ee':
         if(e2eeActive())

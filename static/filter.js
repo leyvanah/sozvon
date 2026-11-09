@@ -510,7 +510,8 @@ let filters = {
 // auto-rotate is off, only `base` applies (a plain manual rotation).
 //
 // The same pass also cuts the upright picture to the format chosen in the
-// settings (settings.sendAspect: 16:9, 4:3, 1:1, 9:16), around the point where
+// settings (settings.sendAspect: 16:9, 4:3, 1:1, 3:4, 9:16) or fitted to the
+// other person's screen (cameraAspect in galene.js), around the point where
 // a face usually is -- see framing.js.  Turning and cutting are one drawImage:
 // the canvas is the size of the cut, and the turned picture is drawn shifted
 // so that the cut lands on it.  Both are read from the settings on every
@@ -531,8 +532,11 @@ let cameraGeometryFilter = {
             return true;
 
         let settings = getSettings();
-        let g = SozvonFraming.geometry(vw, vh, cameraRotation(settings),
-                                       sendAspect(settings));
+        let rot = cameraRotation(settings);
+        let quarter = rot === 90 || rot === 270;
+        let upright = quarter ? vh / vw : vw / vh;
+        let g = SozvonFraming.geometry(vw, vh, rot,
+                                       cameraAspect(settings, upright));
         let c = g.crop;
         if(ctx.canvas.width !== c.w || ctx.canvas.height !== c.h) {
             ctx.canvas.width = c.w;
@@ -565,9 +569,11 @@ function cameraRotation(settings) {
 }
 
 /**
- * The format the camera picture is cut to before it is sent, as width /
- * height, or null to send it as the camera gives it.  Blackboard mode never
- * cuts: it is a document camera, and its edges are the document. (Sozvon)
+ * The format picked in the settings, as width / height, or null to send the
+ * picture as the camera gives it.  Blackboard mode never cuts: it is a
+ * document camera, and its edges are the document.  What is actually sent
+ * can differ, when the picture is fitted to the other person's screen: see
+ * cameraAspect in galene.js. (Sozvon)
  *
  * @param {settings} settings
  * @returns {number|null}
