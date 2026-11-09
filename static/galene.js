@@ -1198,9 +1198,54 @@ document.addEventListener('visibilitychange', function() {
             t.shown(Date.now());
     }
     publishAwayState(hidden);
-    if(!hidden)
+    if(!hidden) {
         reconnectSoon();
+        checkCameraAfterReturn();
+    }
 });
+
+/**
+ * Sozvon: how long a phone's camera has to give a frame after the page
+ * comes back to the front before it is opened again.
+ */
+const CAMERA_RETURN_CHECK = 2500;
+
+/**
+ * Sozvon: open a phone's camera again if it did not come back with the page.
+ *
+ * The system closes the camera of a call put in the background (away.js).
+ * Chrome on Android opens it again when the page is back in front; Firefox
+ * on Android does not, and says nothing: the track stays "live", not muted
+ * and enabled, the element showing it stays "playing", and no frame comes
+ * -- given a new stream, the element showed one and stopped.  The other
+ * side kept the last picture until the page was reloaded (measured on
+ * 2026-11-09, Firefox on Android).  Nothing in the track says so, so what
+ * is checked is the frames: the canvas a phone's camera goes through counts
+ * those it draws, and draws only new ones (Filter.newFrame).
+ */
+function checkCameraAfterReturn() {
+    if(!pausesWhenHidden())
+        return;
+    let c = findUpMedia('camera');
+    let f = c && c.userdata.filter;
+    if(!f || !(f instanceof Filter))
+        return;
+    let before = f.drawn;
+    setTimeout(() => {
+        if(document.visibilityState !== 'visible')
+            return;
+        // replaced, closed, or another canvas since: not this camera's case
+        if(findUpMedia('camera') !== c || c.userdata.filter !== f)
+            return;
+        if(f.drawn !== before)
+            return;
+        let track = f.inputStream && f.inputStream.getVideoTracks()[0];
+        if(!track || track.readyState !== 'live' || !track.enabled)
+            return;
+        console.warn('The camera did not come back with the page: reopening');
+        replaceCameraStream();
+    }, CAMERA_RETURN_CHECK);
+}
 
 /** Rejoin the group after a reconnect, using the saved credentials. (Sozvon) */
 /**
@@ -1838,16 +1883,35 @@ function publishAwayState(away) {
         return;
     if(away && !pausesWhenHidden())
         return;
-    let me = serverConnection.users[serverConnection.id];
-    if(me && !!me.data.away === !!away)
+    // Not our own data as the server last sent it back: that copy is late
+    // after the background (see Announcer in away.js).
+    let a = getAwayAnnouncer();
+    let id = serverConnection.id;
+    if(a && !a.due(id, away))
         return;
     try {
         serverConnection.userAction(
-            'setdata', serverConnection.id, {'away': away ? true : null},
+            'setdata', id, {'away': away ? true : null},
         );
+        if(a)
+            a.sent(id, away);
     } catch(e) {
         console.warn('Could not publish away state', e);
     }
+}
+
+/** @type {any} */
+let awayAnnouncer = null;
+
+/**
+ * Sozvon: what this page last told the room about the background
+ * (away.js), or null before away.js has loaded.
+ */
+function getAwayAnnouncer() {
+    let A = awayApi();
+    if(!awayAnnouncer && A)
+        awayAnnouncer = new A.Announcer();
+    return awayAnnouncer;
 }
 
 /**
