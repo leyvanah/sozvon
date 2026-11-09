@@ -118,10 +118,12 @@
     // picture, so a phone held upright (480x640) counts as the 640x480 it
     // is, not as 720p: by its height it was given 4 Mbit/s, more than a
     // mobile uplink carries, and the cap kept climbing into it and breaking
-    // the audio every few minutes (2026-10-14).
+    // the audio every few minutes (2026-10-14).  A camera whose picture is
+    // cut to a format (framing.js) captures 1280x960 instead: 720p with a
+    // third more lines, still the 720p ceiling and not 1080p's.
     const CAMERA_CEILING = [
         [540, 2500000],             // 640x480, the default capture
-        [800, 4000000],             // 720p
+        [960, 4000000],             // 720p, and 1280x960 and what is cut from it
         [Infinity, 6000000],        // 1080p and above (the blackboard mode)
     ];
     const START_CAP = 1000000;      // what a new stream is first asked for
