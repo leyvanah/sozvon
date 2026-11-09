@@ -54,8 +54,24 @@ function Filter(stream, definition) {
     this.context = this.canvas.getContext('2d');
     /** @type {MediaStream} */
     this.outputStream = null;
+    /**
+     * Whether the filter is running: set by start(), cleared by stop().
+     *
+     * @type {boolean}
+     */
+    this.timer = false;
+    /**
+     * The clock draw() is called by: a worker (filter-tick.js), or where
+     * there cannot be one, a timer of this page.  (Sozvon)
+     *
+     * @type {Worker|null}
+     */
+    this.ticker = null;
+    /** @type {ReturnType<typeof setInterval>|null} */
+    this.interval = null;
+    /** The interval the clock runs at, in milliseconds. */
     /** @type {number} */
-    this.timer = null;
+    this.tickMs = 0;
     /** @type {number} */
     this.count = 0;
     /** @type {boolean} */
@@ -113,7 +129,8 @@ Filter.prototype.start = async function() {
         this.playState = 'ok';
     if(this.definition.init)
         await this.definition.init.call(this);
-    this.timer = setInterval(() => this.draw(), 1000 / this.frameRate);
+    this.timer = true;
+    this.tick(this.tickInterval());
     /** @type {any} */
     let video = this.video;
     if(video.requestVideoFrameCallback) {
@@ -125,6 +142,77 @@ Filter.prototype.start = async function() {
         video.requestVideoFrameCallback(counted);
     }
 }
+
+/**
+ * How often to look for a new camera frame: twice per frame.  (Sozvon)
+ *
+ * A tick that finds nothing new draws nothing (newFrame), so it costs
+ * little; a clock at the camera's own rate drifts against it, two frames
+ * land between two ticks, and one of them is never drawn -- 16 frames out
+ * of 20 in Chromium, measured on 2026-11-09.
+ *
+ * @returns {number} milliseconds
+ */
+Filter.prototype.tickInterval = function() {
+    return 1000 / ((this.drawsBlind() ? 1 : 2) * this.frameRate);
+};
+
+/**
+ * Whether to draw on every tick without asking whether the camera gave a new
+ * frame.  (Sozvon)
+ *
+ * In a page in the background the counters newFrame() reads cannot be
+ * trusted: requestVideoFrameCallback runs with the page's rendering, and a
+ * hidden page is not rendered -- in Firefox 159 it fell to a frame a second
+ * while the camera went on at fifteen (2026-11-09).  A computer keeps its
+ * camera running in the background (away.js), so there every tick is drawn,
+ * at the camera's rate rather than twice it, which would only send each
+ * frame twice.  A phone stops its camera in the background, and keeps the
+ * check, or it would send its last picture over and over as if live.
+ *
+ * @returns {boolean}
+ */
+Filter.prototype.drawsBlind = function() {
+    if(typeof document === 'undefined' ||
+       document.visibilityState !== 'hidden')
+        return false;
+    return !(typeof pausesWhenHidden === 'function' && pausesWhenHidden());
+};
+
+/**
+ * Run draw() every ms milliseconds, or stop with 0.  (Sozvon)
+ *
+ * The ticks come from a worker (filter-tick.js) rather than from a timer of
+ * this page: a page in the background has its timers held to one a second,
+ * and a canvas drawn by one sent one frame a second whenever another window
+ * covered the call (measured in Firefox 159, 2026-11-09).  Before the
+ * picture format was added only phones drew through a canvas, and a phone
+ * stops the camera in the background anyway; a computer does not, and goes
+ * on sending whatever the canvas gives it.  Where a worker cannot be made,
+ * a timer of the page does, as before.
+ *
+ * @param {number} ms
+ */
+Filter.prototype.tick = function(ms) {
+    this.tickMs = ms;
+    if(this.interval !== null) {
+        clearInterval(this.interval);
+        this.interval = null;
+    }
+    if(!this.ticker && ms > 0 && typeof Worker !== 'undefined') {
+        try {
+            this.ticker = new Worker('/filter-tick.js');
+            this.ticker.onmessage = () => this.draw();
+        } catch(e) {
+            console.warn('Filter: no worker clock', e);
+            this.ticker = null;
+        }
+    }
+    if(this.ticker)
+        this.ticker.postMessage(ms);
+    else if(ms > 0)
+        this.interval = setInterval(() => this.draw(), ms);
+};
 
 /**
  * Whether the camera has given the element a frame that has not been drawn
@@ -145,6 +233,8 @@ Filter.prototype.start = async function() {
  * @returns {boolean}
  */
 Filter.prototype.newFrame = function() {
+    if(this.drawsBlind())
+        return true;
     let n = null;
     if(this.video.getVideoPlaybackQuality) {
         let t = this.video.getVideoPlaybackQuality().totalVideoFrames;
@@ -177,12 +267,12 @@ Filter.prototype.draw = async function() {
                     frameRate = r;
             }
         });
-        if(frameRate && frameRate !== this.frameRate) {
-            clearInterval(this.timer);
+        if(frameRate && frameRate !== this.frameRate)
             this.frameRate = frameRate;
-            this.timer = setInterval(() => this.draw(), 1000 / this.frameRate);
-        }
     }
+    // the camera's rate, or the page went into or out of the background
+    if(this.timer && this.tickInterval() !== this.tickMs)
+        this.tick(this.tickInterval());
 
     if(this.busy) {
         // drop frame
@@ -218,8 +308,12 @@ Filter.prototype.stop = async function() {
     if(!this.timer)
         return;
     this.captureStream.getTracks()[0].stop();
-    clearInterval(this.timer);
-    this.timer = null;
+    this.tick(0);
+    if(this.ticker) {
+        this.ticker.terminate();
+        this.ticker = null;
+    }
+    this.timer = false;
     if(this.definition.cleanup)
         await this.definition.cleanup.call(this);
 };

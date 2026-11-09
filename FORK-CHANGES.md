@@ -631,6 +631,19 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     the receiver's freeze counter at zero. It now draws when the element has
     a frame it has not drawn (`getVideoPlaybackQuality()`, or
     `requestVideoFrameCallback` where Firefox reports no count).
+    **The canvas keeps its frame rate in the background.** With the picture
+    format a computer's camera goes through it too, and a computer, unlike a
+    phone, keeps its camera running when the call is behind another window:
+    there Firefox held the canvas's timer to one tick a second, and the
+    frame check (requestVideoFrameCallback, which runs with the page's
+    rendering) to one frame a second, so the other side got a frame a second
+    with freezes, and the bitrate controller cut the stream to its floor
+    (measured on 2026-11-09, Firefox 159). The ticks now come from a worker
+    (`filter-tick.js`), whose timers are not held back, and a hidden page on
+    a computer draws on every tick at the camera's rate; a phone keeps the
+    check, since its camera stops in the background. The clock also runs at
+    twice the camera's rate: at the same rate it drifted against the camera
+    and lost one frame in five.
     Two server fixes found on the way: **changes of a member's data reach
     the room in the order they were made** (each `setdata` was pushed from a
     goroutine of its own, so `{"muted": null}` then `{"away": true}` could
