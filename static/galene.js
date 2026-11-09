@@ -3049,9 +3049,26 @@ function gotBitrateRequest(from, value) {
 function autoThroughput(c, setting, simulcast) {
     let B = bitrateApi();
     let caps = getSendCaps();
-    if(!B || !caps || (simulcast && c.label !== 'screenshare'))
-        return setting;
-    return B.combine(setting, caps.get(c.id, Date.now()));
+    let t = setting;
+    if(B && caps && !(simulcast && c.label !== 'screenshare'))
+        t = B.combine(setting, caps.get(c.id, Date.now()));
+    return withDeviceCeiling(c, t);
+}
+
+/**
+ * Sozvon: a throughput held to what this device's camera may send: on a
+ * phone or a tablet, PHONE_CAMERA_CEILING (bitrate-control.js), however
+ * large its picture and whatever its receivers allow.
+ *
+ * @param {Stream} c
+ * @param {number|null} bps
+ * @returns {number|null}
+ */
+function withDeviceCeiling(c, bps) {
+    let B = bitrateApi();
+    if(!B || c.label !== 'camera' || !pausesWhenHidden())
+        return bps;
+    return B.combine(bps, B.PHONE_CAMERA_CEILING);
 }
 
 /**
@@ -3661,7 +3678,7 @@ async function setUpStream(c, stream) {
             // per-stream frame counter, and we don't split layers.
             simulcast = false;
         if(t.kind === 'video') {
-            let bps = getMaxVideoThroughput();
+            let bps = withDeviceCeiling(c, getMaxVideoThroughput());
             // Firefox doesn't like us setting the RID if we're not
             // simulcasting.
             if(simulcast) {
