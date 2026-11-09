@@ -446,7 +446,12 @@ function reflectSettings() {
         settings.adaptToPeer = getInputElement('adaptpeerbox').checked;
         store = true;
     }
-    setVisibility('adapt-status', !!settings.adaptToPeer);
+    // a filter takes the format's place: see reflectAdaptation
+    let filtered = !!userFilter(settings);
+    setVisibility('adapt-status', !!settings.adaptToPeer && !filtered);
+    setVisibility('format-filter-note', filtered);
+    getSelectElement('sendaspectselect').disabled = filtered;
+    getInputElement('adaptpeerbox').disabled = filtered;
 
     if(settings.hasOwnProperty('request')) {
         getSelectElement('requestselect').value = settings.request;
@@ -1964,6 +1969,7 @@ getInputElement('blackboardbox').onchange = function(e) {
     if(!(this instanceof HTMLInputElement))
         throw new Error('Unexpected type for this');
     updateSettings({blackboardMode: this.checked});
+    decideAdaptation();
     replaceCameraStream();
 };
 
@@ -2045,8 +2051,25 @@ getSelectElement('filterselect').onchange = async function(e) {
     if(!(this instanceof HTMLSelectElement))
         throw new Error('Unexpected type for this');
     updateSettings({filter: this.value});
-    await refilterCamera();
+    // a filter takes the place of the format, and of the bigger capture it
+    // needs (captureSize); reopening picks the canvas too (addLocalMedia)
+    decideAdaptation();
+    if(!reopenForCaptureSize())
+        await refilterCamera();
 };
+
+/**
+ * Sozvon: the filter picked in the settings, or null.  It wins over the
+ * picture format: both would draw the camera through a canvas, and one
+ * canvas at a time is what Filter supports, so the format is greyed out in
+ * the settings while a filter is on (reflectAdaptation).
+ *
+ * @param {settings} settings
+ * @returns {filterDefinition|null}
+ */
+function userFilter(settings) {
+    return (settings.filter && filters[settings.filter]) || null;
+}
 
 /**
  * Sozvon: the canvas the camera picture goes through before it is sent, or
@@ -2072,8 +2095,9 @@ getSelectElement('filterselect').onchange = async function(e) {
  * @returns {filterDefinition|null}
  */
 function cameraFilterFor(settings, vtrack) {
-    if(settings.filter && filters[settings.filter])
-        return filters[settings.filter];
+    let picked = userFilter(settings);
+    if(picked)
+        return picked;
     if(!vtrack || settings.blackboardMode ||
        !HTMLCanvasElement.prototype.captureStream)
         return null;
@@ -2150,7 +2174,8 @@ async function refilterCameraNow() {
  * held upright: asked for 1280x720 it gave 720x1280, and a 16:9 picture cut
  * from that for a laptop had lost the sides of the room besides its top and
  * bottom (seen in a call the same evening).  A bigger picture costs a phone
- * more to draw and to encode, so only while there is a cut; the bitrate
+ * more to draw and to encode, so only while there can be a cut -- not with
+ * a filter on, which takes the format's place (userFilter); the bitrate
  * ceiling follows its size (bitrate-control.js).
  *
  * @param {settings} settings
@@ -2162,7 +2187,7 @@ function captureSize(settings) {
         return {width: {ideal: resolution[0]}, height: {ideal: resolution[1]}};
     if(settings.blackboardMode)
         return {width: {min: 640, ideal: 1920}, height: {min: 400, ideal: 1080}};
-    if(sendAspect(settings) || settings.adaptToPeer)
+    if(!userFilter(settings) && (sendAspect(settings) || settings.adaptToPeer))
         return {aspectRatio: {ideal: 4/3},
                 width: {ideal: 1280}, height: {ideal: 960}};
     return {aspectRatio: {ideal: 4/3}};
@@ -2228,16 +2253,18 @@ getInputElement('autoframingbox').onchange = function(e) {
 const VIEW_MESSAGE = 'sozvon-view';
 
 /**
- * The box each user shows our camera picture in, width / height, by user id.
+ * The box each user shows our camera picture in, width / height, and when
+ * they reported it, by user id.
  *
- * @type {Map<string, number>}
+ * @type {Map<string, {aspect: number, at: number}>}
  */
 let peerViews = new Map();
 
 /**
- * The format cameraAspect() chose last, or null when it is not adapting.
- * Kept so the choice does not flip at a boundary (SozvonFraming.adapt), and
- * shown in the settings.
+ * The format the picture is fitted to, or null when it is not.  Decided by
+ * decideAdaptation() whenever something it depends on changes, and read by
+ * the canvas on every frame (cameraAspect); kept so the choice does not flip
+ * at a boundary (SozvonFraming.adapt), and shown in the settings.
  *
  * @type {string|null}
  */
@@ -2247,44 +2274,82 @@ let adaptedFormat = null;
  * The shape of the other person's view, while this is a one-to-one call
  * and they have reported one.
  *
+ * One-to-one counts people, not sessions.  A session left behind by the
+ * other person -- the call opened in Telegram's browser and then again in
+ * Chrome (2026-11-09) -- is still a user in the group, and counted as one it
+ * made every call with them a call of three: sessions under one name are one
+ * person, whose latest report counts.  Our own other sessions are us, and
+ * how our picture looks to us is not what is fitted.  A session without a
+ * name is a person of its own.  Someone who only watches still counts: our
+ * picture is on their screen too, and one format cannot fit both.
+ *
  * @returns {number|null}
  */
 function adaptPeer() {
     if(!serverConnection || !serverConnection.users)
         return null;
-    let others = Object.keys(serverConnection.users)
-        .filter(id => id !== serverConnection.id);
-    if(others.length !== 1)
+    let me = serverConnection.username;
+    /** @type {Map<string, {aspect: number, at: number}|null>} */
+    let people = new Map();
+    for(let id in serverConnection.users) {
+        if(id === serverConnection.id)
+            continue;
+        let name = serverConnection.users[id].username;
+        if(name && name === me)
+            continue;
+        let key = name ? 'name:' + name : 'id:' + id;
+        let view = peerViews.get(id) || null;
+        let known = people.get(key) || null;
+        if(!known || (view && view.at > known.at))
+            people.set(key, view);
+    }
+    if(people.size !== 1)
         return null;
-    return peerViews.get(others[0]) || null;
+    let [view] = people.values();
+    return view ? view.aspect : null;
 }
 
 /**
+ * Whether the picture is fitted to the other person's screen: the setting
+ * is on, the call is one-to-one and they have said what they show it in.
+ * Not in blackboard mode, which never cuts, nor with a filter, which takes
+ * the canvas (userFilter).
+ *
  * @param {settings} settings
  * @returns {boolean}
  */
 function adaptingToPeer(settings) {
-    return !!settings.adaptToPeer && !settings.blackboardMode && !!adaptPeer();
+    return !!settings.adaptToPeer && !settings.blackboardMode &&
+        !userFilter(settings) && !!adaptPeer();
 }
 
 /**
  * The format the camera picture is cut to on this frame, width / height, or
  * null for none: fitted to the other person's screen while that applies,
  * else the one picked in the settings.  Called by cameraGeometryFilter on
- * every frame, so it only touches the page when the choice changes.
+ * every frame, so it only reads what decideAdaptation() decided.
  *
  * @param {settings} settings
  * @returns {number|null}
  */
 function cameraAspect(settings) {
-    let format = null;
-    if(adaptingToPeer(settings))
-        format = SozvonFraming.adapt(adaptPeer(), adaptedFormat);
-    if(format !== adaptedFormat) {
-        adaptedFormat = format;
-        reflectAdaptation();
-    }
-    return format ? SozvonFraming.aspectOf(format) : sendAspect(settings);
+    if(adaptedFormat && !settings.blackboardMode)
+        return SozvonFraming.aspectOf(adaptedFormat);
+    return sendAspect(settings);
+}
+
+/**
+ * Decide the format the picture is fitted to, and show it in the settings.
+ * Called on everything that can change it -- the settings involved, who is
+ * in the call, a report of a screen -- whether or not the camera goes
+ * through the canvas at the moment, so that what the settings say is never
+ * left over from the last time it did.
+ */
+function decideAdaptation() {
+    let settings = getSettings();
+    adaptedFormat = adaptingToPeer(settings) ?
+        SozvonFraming.adapt(adaptPeer(), adaptedFormat) : null;
+    reflectAdaptation();
 }
 
 /**
@@ -2295,14 +2360,17 @@ function cameraAspect(settings) {
 function reflectAdaptation() {
     let settings = getSettings();
     let on = !!settings.adaptToPeer;
-    let active = on && adaptingToPeer(settings) && !!adaptedFormat;
-    setVisibility('adapt-status', on);
+    let filtered = !!userFilter(settings);
+    let active = on && !!adaptedFormat;
+    setVisibility('adapt-status', on && !filtered);
     setVisibility('adapt-active', active);
     setVisibility('adapt-idle', !active);
+    setVisibility('format-filter-note', filtered);
     let f = document.getElementById('adapt-format');
     if(f)
         f.textContent = active ? adaptedFormat : '';
-    getSelectElement('sendaspectselect').disabled = active;
+    getSelectElement('sendaspectselect').disabled = active || filtered;
+    getInputElement('adaptpeerbox').disabled = filtered;
 }
 
 /**
@@ -2313,7 +2381,7 @@ function reflectAdaptation() {
  * stops on a device that needs no canvas otherwise.
  */
 function adaptationChanged() {
-    reflectAdaptation();
+    decideAdaptation();
     refilterCamera().catch(e => console.error(e));
 }
 
@@ -2322,7 +2390,7 @@ getInputElement('adaptpeerbox').onchange = function(e) {
         throw new Error('Unexpected type for this');
     updateSettings({adaptToPeer: this.checked});
     if(reopenForCaptureSize())
-        reflectAdaptation();
+        decideAdaptation();
     else
         adaptationChanged();
 };
@@ -2408,20 +2476,31 @@ function viewShape(c) {
     if(!peers.classList.contains('speaker') && media &&
        media.offsetParent !== null) {
         let cs = getComputedStyle(media);
-        let padX = (parseFloat(cs.paddingLeft) || 0) +
-            (parseFloat(cs.paddingRight) || 0);
-        let padY = (parseFloat(cs.paddingTop) || 0) +
-            (parseFloat(cs.paddingBottom) || 0);
+        let pad = mediaPadding(cs);
         let maxH = parseFloat(cs.maxHeight);
-        w = media.clientWidth - padX;
+        w = media.clientWidth - pad.x;
         if(isFinite(maxH))
-            h = cs.boxSizing === 'border-box' ? maxH - padY : maxH;
+            h = cs.boxSizing === 'border-box' ? maxH - pad.y : maxH;
         else
-            h = stage.clientHeight - padY;
+            h = stage.clientHeight - pad.y;
     }
     if(!(w > 0) || !(h > 0))
         return null;
     return w / h;
+}
+
+/**
+ * The padding of a picture's element, across and down: the picture is drawn
+ * inside it, so it is not part of the box the picture is framed in.
+ *
+ * @param {CSSStyleDeclaration} cs - the element's computed style
+ * @returns {{x: number, y: number}}
+ */
+function mediaPadding(cs) {
+    return {
+        x: (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0),
+        y: (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0),
+    };
 }
 
 /**
@@ -2434,10 +2513,10 @@ function gotViewReport(id, message) {
     let a = message && message.aspect;
     if(typeof a !== 'number' || !(a > 0.2 && a < 5))
         return;
-    let before = peerViews.get(id);
-    peerViews.set(id, a);
-    if(before !== a)
-        adaptationChanged();
+    peerViews.set(id, {aspect: a, at: Date.now()});
+    // even the same shape: from another of the person's sessions, it is
+    // now the one that counts (adaptPeer)
+    adaptationChanged();
 }
 
 // Video orientation: a fixed base rotation (to correct devices whose camera is
@@ -5505,12 +5584,9 @@ function applyFraming() {
         let vw = media.videoWidth, vh = media.videoHeight;
         if(tile.classList.contains('peer-self'))
             reflectSelfShape(tile, vw, vh);
-        let cs = getComputedStyle(media);
-        let bw = media.clientWidth -
-            (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-        let bh = media.clientHeight -
-            (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
-        let d = SozvonFraming.tile(bw, bh, vw, vh, {
+        let pad = mediaPadding(getComputedStyle(media));
+        let d = SozvonFraming.tile(media.clientWidth - pad.x,
+                                   media.clientHeight - pad.y, vw, vh, {
             enabled: enabled,
             screen: tile.dataset.label === 'screenshare',
         });
