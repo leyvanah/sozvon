@@ -56,10 +56,12 @@ function Filter(stream, definition) {
     this.outputStream = null;
     /**
      * Whether the filter is running: set by start(), cleared by stop().
+     * (Sozvon: upstream keeps its timer here; the clock is now this.ticker
+     * or this.interval.)
      *
      * @type {boolean}
      */
-    this.timer = false;
+    this.running = false;
     /**
      * The clock draw() is called by: a worker (filter-tick.js), or where
      * there cannot be one, a timer of this page.  (Sozvon)
@@ -67,6 +69,9 @@ function Filter(stream, definition) {
      * @type {Worker|null}
      */
     this.ticker = null;
+    /** Whether the worker could not be started, so the page's timer runs. */
+    /** @type {boolean} */
+    this.noWorker = false;
     /** @type {ReturnType<typeof setInterval>|null} */
     this.interval = null;
     /** The interval the clock runs at, in milliseconds. */
@@ -95,6 +100,15 @@ function Filter(stream, definition) {
     this.lastFrame = -1;
     /** @type {number|null} */
     this.callbackFrames = null;
+    // The rate the camera really gives frames at, measured while the page
+    // is visible: what a hidden page draws at (tickInterval).  Where and
+    // when the measurement started.  (Sozvon)
+    /** @type {number|null} */
+    this.cameraRate = null;
+    /** @type {number|null} */
+    this.sampleAt = null;
+    /** @type {number} */
+    this.sampleFrames = 0;
 }
 
 Filter.prototype.start = async function() {
@@ -129,14 +143,14 @@ Filter.prototype.start = async function() {
         this.playState = 'ok';
     if(this.definition.init)
         await this.definition.init.call(this);
-    this.timer = true;
+    this.running = true;
     this.tick(this.tickInterval());
     /** @type {any} */
     let video = this.video;
     if(video.requestVideoFrameCallback) {
         let counted = () => {
             this.callbackFrames = (this.callbackFrames || 0) + 1;
-            if(this.timer)
+            if(this.running)
                 video.requestVideoFrameCallback(counted);
         };
         video.requestVideoFrameCallback(counted);
@@ -154,7 +168,25 @@ Filter.prototype.start = async function() {
  * @returns {number} milliseconds
  */
 Filter.prototype.tickInterval = function() {
-    return 1000 / ((this.drawsBlind() ? 1 : 2) * this.frameRate);
+    if(this.drawsBlind())
+        return 1000 / this.blindRate();
+    return 1000 / (2 * this.frameRate);
+};
+
+/**
+ * The rate a hidden page draws at: the camera's, as measured while the page
+ * was visible, since a camera often gives fewer frames than the rate it
+ * reports -- twenty a second where it says thirty, and every third frame
+ * drawn blind would be a copy of the one before.  The reported rate where
+ * nothing was measured.  (Sozvon)
+ *
+ * @returns {number} frames per second
+ */
+Filter.prototype.blindRate = function() {
+    let r = this.cameraRate;
+    if(r === null || !(r >= 1) || r > this.frameRate)
+        return this.frameRate;
+    return Math.round(r);
 };
 
 /**
@@ -189,7 +221,9 @@ Filter.prototype.drawsBlind = function() {
  * picture format was added only phones drew through a canvas, and a phone
  * stops the camera in the background anyway; a computer does not, and goes
  * on sending whatever the canvas gives it.  Where a worker cannot be made,
- * a timer of the page does, as before.
+ * or its script does not load, a timer of the page does, as before: a clock
+ * held back in the background, rather than none and a canvas that never
+ * draws.
  *
  * @param {number} ms
  */
@@ -199,13 +233,28 @@ Filter.prototype.tick = function(ms) {
         clearInterval(this.interval);
         this.interval = null;
     }
-    if(!this.ticker && ms > 0 && typeof Worker !== 'undefined') {
+    if(!this.ticker && !this.noWorker && ms > 0 &&
+       typeof Worker !== 'undefined') {
         try {
-            this.ticker = new Worker('/filter-tick.js');
-            this.ticker.onmessage = () => this.draw();
+            let w = new Worker('/filter-tick.js');
+            w.onmessage = () => this.draw();
+            w.onerror = e => {
+                if(e && e.preventDefault)
+                    e.preventDefault();
+                console.warn('Filter: the worker clock failed', e);
+                w.terminate();
+                if(this.ticker !== w)
+                    return;
+                this.ticker = null;
+                this.noWorker = true;
+                if(this.running)
+                    this.tick(this.tickMs);
+            };
+            this.ticker = w;
         } catch(e) {
             console.warn('Filter: no worker clock', e);
             this.ticker = null;
+            this.noWorker = true;
         }
     }
     if(this.ticker)
@@ -233,8 +282,10 @@ Filter.prototype.tick = function(ms) {
  * @returns {boolean}
  */
 Filter.prototype.newFrame = function() {
-    if(this.drawsBlind())
+    if(this.drawsBlind()) {
+        this.sampleAt = null;
         return true;
+    }
     let n = null;
     if(this.video.getVideoPlaybackQuality) {
         let t = this.video.getVideoPlaybackQuality().totalVideoFrames;
@@ -245,10 +296,29 @@ Filter.prototype.newFrame = function() {
         n = this.callbackFrames;
     if(n === null)
         return true;
+    this.measure(n);
     if(n === this.lastFrame)
         return false;
     this.lastFrame = n;
     return true;
+};
+
+/**
+ * Measure the camera's rate from its frame count, over two seconds at a
+ * time, for blindRate().  (Sozvon)
+ *
+ * @param {number} n - frames the element has been given so far
+ */
+Filter.prototype.measure = function(n) {
+    let now = Date.now();
+    if(this.sampleAt === null || n < this.sampleFrames) {
+        this.sampleAt = now;
+        this.sampleFrames = n;
+    } else if(now - this.sampleAt >= 2000) {
+        this.cameraRate = (n - this.sampleFrames) * 1000 / (now - this.sampleAt);
+        this.sampleAt = now;
+        this.sampleFrames = n;
+    }
 };
 
 Filter.prototype.draw = async function() {
@@ -271,7 +341,7 @@ Filter.prototype.draw = async function() {
             this.frameRate = frameRate;
     }
     // the camera's rate, or the page went into or out of the background
-    if(this.timer && this.tickInterval() !== this.tickMs)
+    if(this.running && this.tickInterval() !== this.tickMs)
         this.tick(this.tickInterval());
 
     if(this.busy) {
@@ -305,7 +375,7 @@ Filter.prototype.draw = async function() {
 };
 
 Filter.prototype.stop = async function() {
-    if(!this.timer)
+    if(!this.running)
         return;
     this.captureStream.getTracks()[0].stop();
     this.tick(0);
@@ -313,7 +383,7 @@ Filter.prototype.stop = async function() {
         this.ticker.terminate();
         this.ticker = null;
     }
-    this.timer = false;
+    this.running = false;
     if(this.definition.cleanup)
         await this.definition.cleanup.call(this);
 };
