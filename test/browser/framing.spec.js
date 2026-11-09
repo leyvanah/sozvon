@@ -266,8 +266,8 @@ test('the grid reports its box, a session left behind is the same person, a filt
     await bob2.context().close();
 
     // A filter takes the canvas: the format is greyed with a note, the
-    // camera is not opened at 1280x960 for a cut that cannot happen, and
-    // fitting stops.
+    // camera is asked for the plain 640x480 rather than 1280x960 for a cut
+    // that cannot happen, and fitting stops.
     await setControl(alice, 'filterselect', 'mirror-h');
     await expect.poll(() => alice.evaluate(() => ({
         note: !document.getElementById('format-filter-note').classList.contains('invisible'),
@@ -283,7 +283,7 @@ test('the grid reports its box, a session left behind is the same person, a filt
             return null;
         const k = f.inputStream.getVideoTracks()[0].getConstraints();
         return k.height ? (k.height.ideal || k.height) : 'none';
-    })).toBe('none');
+    })).toBe(480);
     await expect.poll(() => remote(bob).then(shape)).toBe(1.33);
 
     // Taken off: fitting again, at 1280x960.
