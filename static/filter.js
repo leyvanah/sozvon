@@ -662,16 +662,21 @@ let filters = {
 // our SFU strips the video-orientation RTP header (see readLoop in
 // rtpconn/rtpreader.go), so the far end sees us sideways even though the
 // browser rotates the camera correctly for *local* display.  We redraw the
-// frame into a canvas with an explicit rotation and send the canvas, so the
-// encoded frames are upright too; because draw() runs every frame the output
-// follows the device as it is turned.
+// frame into a canvas -- drawing it is what turns the pixels -- and send the
+// canvas, so the encoded frames are upright too; because draw() runs every
+// frame the output follows the device as it is turned.
 //
-// The rotation is rot = (base + angle): `angle` is the live device
-// orientation, and `base` (the "Video orientation" setting) is a fixed offset
-// that corrects devices whose camera sensor is mounted oddly (some tablets).
-// On-device tests showed the orientation stays *constant* for base + angle, so
-// the sign of `angle` is right and `base` alone picks the upright result.  When
-// auto-rotate is off, only `base` applies (a plain manual rotation).
+// The browser already turns the camera's frames to match the screen: held
+// upright a phone's camera gives 480x640, turned on its side 640x480, without
+// being reopened -- Chrome and Firefox on Android alike (measured on
+// 2026-11-09, in both directions).  What it does not do is turn the pixels it
+// encodes, so the canvas is still what makes the far end see it upright.  The
+// rotation drawn is only `base`, the "Video orientation" setting, a fixed
+// offset for devices whose camera sensor is mounted oddly (some tablets).  It
+// used to add the screen's own angle on top, which turned the picture a
+// second time: upright, at angle 0, it looked right, and a phone turned on its
+// side sent a picture lying on its side until the arrows were pressed.
+// "Auto-rotate" decides whether a phone goes through the canvas at all.
 //
 // The same pass also cuts the upright picture to the format chosen in the
 // settings (settings.sendAspect: 16:9, 4:3, 1:1, 3:4, 9:16) or fitted to the
@@ -714,19 +719,14 @@ let cameraGeometryFilter = {
 
 /**
  * The rotation the camera picture needs to be upright: the fixed base from
- * the settings plus, with auto-rotation on, the live screen orientation.
- * (Sozvon)
+ * the settings.  Not the screen's angle: the browser has turned the frames
+ * by that already (see above). (Sozvon)
  *
  * @param {settings} settings
  * @returns {number}
  */
 function cameraRotation(settings) {
-    let base = parseInt(settings.videoRotation, 10) || 0;
-    let auto = settings.autoRotate !== false;
-    let angle = (auto && screen && screen.orientation &&
-                 typeof screen.orientation.angle === 'number') ?
-        screen.orientation.angle : 0;
-    return (base + angle) % 360;
+    return (parseInt(settings.videoRotation, 10) || 0) % 360;
 }
 
 /**
