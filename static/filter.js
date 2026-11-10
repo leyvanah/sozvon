@@ -54,8 +54,29 @@ function Filter(stream, definition) {
     this.context = this.canvas.getContext('2d');
     /** @type {MediaStream} */
     this.outputStream = null;
+    /**
+     * Whether the filter is running: set by start(), cleared by stop().
+     * (Sozvon: upstream keeps its timer here; the clock is now this.ticker
+     * or this.interval.)
+     *
+     * @type {boolean}
+     */
+    this.running = false;
+    /**
+     * The clock draw() is called by: a worker (filter-tick.js), or where
+     * there cannot be one, a timer of this page.  (Sozvon)
+     *
+     * @type {Worker|null}
+     */
+    this.ticker = null;
+    /** Whether the worker could not be started, so the page's timer runs. */
+    /** @type {boolean} */
+    this.noWorker = false;
+    /** @type {ReturnType<typeof setInterval>|null} */
+    this.interval = null;
+    /** The interval the clock runs at, in milliseconds. */
     /** @type {number} */
-    this.timer = null;
+    this.tickMs = 0;
     /** @type {number} */
     this.count = 0;
     /** @type {boolean} */
@@ -79,6 +100,15 @@ function Filter(stream, definition) {
     this.lastFrame = -1;
     /** @type {number|null} */
     this.callbackFrames = null;
+    // The rate the camera really gives frames at, measured while the page
+    // is visible: what a hidden page draws at (tickInterval).  Where and
+    // when the measurement started.  (Sozvon)
+    /** @type {number|null} */
+    this.cameraRate = null;
+    /** @type {number|null} */
+    this.sampleAt = null;
+    /** @type {number} */
+    this.sampleFrames = 0;
 }
 
 Filter.prototype.start = async function() {
@@ -113,18 +143,125 @@ Filter.prototype.start = async function() {
         this.playState = 'ok';
     if(this.definition.init)
         await this.definition.init.call(this);
-    this.timer = setInterval(() => this.draw(), 1000 / this.frameRate);
+    this.running = true;
+    this.tick(this.tickInterval());
     /** @type {any} */
     let video = this.video;
     if(video.requestVideoFrameCallback) {
         let counted = () => {
             this.callbackFrames = (this.callbackFrames || 0) + 1;
-            if(this.timer)
+            if(this.running)
                 video.requestVideoFrameCallback(counted);
         };
         video.requestVideoFrameCallback(counted);
     }
 }
+
+/**
+ * How often to look for a new camera frame: twice per frame.  (Sozvon)
+ *
+ * A tick that finds nothing new draws nothing (newFrame), so it costs
+ * little; a clock at the camera's own rate drifts against it, two frames
+ * land between two ticks, and one of them is never drawn -- 16 frames out
+ * of 20 in Chromium, measured on 2026-11-09.
+ *
+ * @returns {number} milliseconds
+ */
+Filter.prototype.tickInterval = function() {
+    if(this.drawsBlind())
+        return 1000 / this.blindRate();
+    return 1000 / (2 * this.frameRate);
+};
+
+/**
+ * The rate a hidden page draws at: the camera's, as measured while the page
+ * was visible, since a camera often gives fewer frames than the rate it
+ * reports -- twenty a second where it says thirty, and every third frame
+ * drawn blind would be a copy of the one before.  The reported rate where
+ * nothing was measured.  (Sozvon)
+ *
+ * @returns {number} frames per second
+ */
+Filter.prototype.blindRate = function() {
+    let r = this.cameraRate;
+    if(r === null || !(r >= 1) || r > this.frameRate)
+        return this.frameRate;
+    return Math.round(r);
+};
+
+/**
+ * Whether to draw on every tick without asking whether the camera gave a new
+ * frame.  (Sozvon)
+ *
+ * In a page in the background the counters newFrame() reads cannot be
+ * trusted: requestVideoFrameCallback runs with the page's rendering, and a
+ * hidden page is not rendered -- in Firefox 159 it fell to a frame a second
+ * while the camera went on at fifteen (2026-11-09).  A computer keeps its
+ * camera running in the background (away.js), so there every tick is drawn,
+ * at the camera's rate rather than twice it, which would only send each
+ * frame twice.  A phone stops its camera in the background, and keeps the
+ * check, or it would send its last picture over and over as if live.
+ *
+ * @returns {boolean}
+ */
+Filter.prototype.drawsBlind = function() {
+    if(typeof document === 'undefined' ||
+       document.visibilityState !== 'hidden')
+        return false;
+    return !(typeof pausesWhenHidden === 'function' && pausesWhenHidden());
+};
+
+/**
+ * Run draw() every ms milliseconds, or stop with 0.  (Sozvon)
+ *
+ * The ticks come from a worker (filter-tick.js) rather than from a timer of
+ * this page: a page in the background has its timers held to one a second,
+ * and a canvas drawn by one sent one frame a second whenever another window
+ * covered the call (measured in Firefox 159, 2026-11-09).  Before the
+ * picture format was added only phones drew through a canvas, and a phone
+ * stops the camera in the background anyway; a computer does not, and goes
+ * on sending whatever the canvas gives it.  Where a worker cannot be made,
+ * or its script does not load, a timer of the page does, as before: a clock
+ * held back in the background, rather than none and a canvas that never
+ * draws.
+ *
+ * @param {number} ms
+ */
+Filter.prototype.tick = function(ms) {
+    this.tickMs = ms;
+    if(this.interval !== null) {
+        clearInterval(this.interval);
+        this.interval = null;
+    }
+    if(!this.ticker && !this.noWorker && ms > 0 &&
+       typeof Worker !== 'undefined') {
+        try {
+            let w = new Worker('/filter-tick.js');
+            w.onmessage = () => this.draw();
+            w.onerror = e => {
+                if(e && e.preventDefault)
+                    e.preventDefault();
+                console.warn('Filter: the worker clock failed', e);
+                w.terminate();
+                if(this.ticker !== w)
+                    return;
+                this.ticker = null;
+                this.noWorker = true;
+                if(this.running)
+                    this.tick(this.tickMs);
+            };
+            this.ticker = w;
+        } catch(e) {
+            console.warn('Filter: no worker clock', e);
+            this.ticker = null;
+            this.noWorker = true;
+        }
+    }
+    if(this.ticker)
+        this.ticker.postMessage(ms);
+    else if(ms > 0)
+        this.interval = setInterval(() => this.draw(), ms);
+};
 
 /**
  * Whether the camera has given the element a frame that has not been drawn
@@ -145,6 +282,10 @@ Filter.prototype.start = async function() {
  * @returns {boolean}
  */
 Filter.prototype.newFrame = function() {
+    if(this.drawsBlind()) {
+        this.sampleAt = null;
+        return true;
+    }
     let n = null;
     if(this.video.getVideoPlaybackQuality) {
         let t = this.video.getVideoPlaybackQuality().totalVideoFrames;
@@ -155,10 +296,29 @@ Filter.prototype.newFrame = function() {
         n = this.callbackFrames;
     if(n === null)
         return true;
+    this.measure(n);
     if(n === this.lastFrame)
         return false;
     this.lastFrame = n;
     return true;
+};
+
+/**
+ * Measure the camera's rate from its frame count, over two seconds at a
+ * time, for blindRate().  (Sozvon)
+ *
+ * @param {number} n - frames the element has been given so far
+ */
+Filter.prototype.measure = function(n) {
+    let now = Date.now();
+    if(this.sampleAt === null || n < this.sampleFrames) {
+        this.sampleAt = now;
+        this.sampleFrames = n;
+    } else if(now - this.sampleAt >= 2000) {
+        this.cameraRate = (n - this.sampleFrames) * 1000 / (now - this.sampleAt);
+        this.sampleAt = now;
+        this.sampleFrames = n;
+    }
 };
 
 Filter.prototype.draw = async function() {
@@ -177,12 +337,12 @@ Filter.prototype.draw = async function() {
                     frameRate = r;
             }
         });
-        if(frameRate && frameRate !== this.frameRate) {
-            clearInterval(this.timer);
+        if(frameRate && frameRate !== this.frameRate)
             this.frameRate = frameRate;
-            this.timer = setInterval(() => this.draw(), 1000 / this.frameRate);
-        }
     }
+    // the camera's rate, or the page went into or out of the background
+    if(this.running && this.tickInterval() !== this.tickMs)
+        this.tick(this.tickInterval());
 
     if(this.busy) {
         // drop frame
@@ -215,11 +375,15 @@ Filter.prototype.draw = async function() {
 };
 
 Filter.prototype.stop = async function() {
-    if(!this.timer)
+    if(!this.running)
         return;
     this.captureStream.getTracks()[0].stop();
-    clearInterval(this.timer);
-    this.timer = null;
+    this.tick(0);
+    if(this.ticker) {
+        this.ticker.terminate();
+        this.ticker = null;
+    }
+    this.running = false;
     if(this.definition.cleanup)
         await this.definition.cleanup.call(this);
 };
@@ -498,23 +662,37 @@ let filters = {
 // our SFU strips the video-orientation RTP header (see readLoop in
 // rtpconn/rtpreader.go), so the far end sees us sideways even though the
 // browser rotates the camera correctly for *local* display.  We redraw the
-// frame into a canvas with an explicit rotation and send the canvas, so the
-// encoded frames are upright too; because draw() runs every frame the output
-// follows the device as it is turned.
+// frame into a canvas -- drawing it is what turns the pixels -- and send the
+// canvas, so the encoded frames are upright too; because draw() runs every
+// frame the output follows the device as it is turned.
 //
-// The rotation is rot = (base + angle): `angle` is the live device
-// orientation, and `base` (the "Video orientation" setting) is a fixed offset
-// that corrects devices whose camera sensor is mounted oddly (some tablets).
-// On-device tests showed the orientation stays *constant* for base + angle, so
-// the sign of `angle` is right and `base` alone picks the upright result.  When
-// auto-rotate is off, only `base` applies (a plain manual rotation).
+// The browser already turns the camera's frames to match the screen: held
+// upright a phone's camera gives 480x640, turned on its side 640x480, without
+// being reopened -- Chrome and Firefox on Android alike (measured on
+// 2026-11-09, in both directions).  What it does not do is turn the pixels it
+// encodes, so the canvas is still what makes the far end see it upright.  The
+// rotation drawn is only `base`, the "Video orientation" setting, a fixed
+// offset for devices whose camera sensor is mounted oddly (some tablets).  It
+// used to add the screen's own angle on top, which turned the picture a
+// second time: upright, at angle 0, it looked right, and a phone turned on its
+// side sent a picture lying on its side until the arrows were pressed.
+// "Auto-rotate" decides whether a phone goes through the canvas at all.
+//
+// The same pass also cuts the upright picture to the format chosen in the
+// settings (settings.sendAspect: 16:9, 4:3, 1:1, 3:4, 9:16) or fitted to the
+// other person's screen (cameraAspect in galene.js), around the point where
+// a face usually is -- see framing.js.  Turning and cutting are one drawImage:
+// the canvas is the size of the cut, and the turned picture is drawn shifted
+// so that the cut lands on it.  Both are read from the settings on every
+// frame, so changing either takes effect at once, without reopening the
+// camera.
 //
 // Deliberately not added to `filters` (it is applied automatically, not
-// user-chosen).  We draw at the source's intrinsic size (no destination size)
-// so the aspect ratio is preserved and the image is never stretched. (Sozvon)
+// user-chosen).  The picture is never scaled, only turned and cut, so it is
+// never stretched. (Sozvon)
 /** @type {filterDefinition} */
-let mobileOrientationFilter = {
-    description: 'Upright (mobile orientation)',
+let cameraGeometryFilter = {
+    description: 'Upright and framed',
     draw: async function(src, ctx) {
         if(!(ctx instanceof CanvasRenderingContext2D))
             throw new Error('bad context type');
@@ -523,28 +701,49 @@ let mobileOrientationFilter = {
             return true;
 
         let settings = getSettings();
-        let base = parseInt(settings.videoRotation, 10) || 0;
-        let auto = settings.autoRotate !== false;
-        let angle = (auto && screen && screen.orientation &&
-                     typeof screen.orientation.angle === 'number') ?
-            screen.orientation.angle : 0;
-        let rot = (base + angle) % 360;
-
-        let swap = (rot === 90 || rot === 270);
-        let cw = swap ? vh : vw;
-        let ch = swap ? vw : vh;
-        if(ctx.canvas.width !== cw || ctx.canvas.height !== ch) {
-            ctx.canvas.width = cw;
-            ctx.canvas.height = ch;
+        let g = SozvonFraming.geometry(vw, vh, cameraRotation(settings),
+                                       cameraAspect(settings));
+        let c = g.crop;
+        if(ctx.canvas.width !== c.w || ctx.canvas.height !== c.h) {
+            ctx.canvas.width = c.w;
+            ctx.canvas.height = c.h;
         }
         ctx.save();
-        ctx.translate(cw / 2, ch / 2);
-        ctx.rotate(rot * Math.PI / 180);
+        ctx.translate(g.uw / 2 - c.x, g.uh / 2 - c.y);
+        ctx.rotate(g.rot * Math.PI / 180);
         ctx.drawImage(src, -vw / 2, -vh / 2);
         ctx.restore();
         return true;
     },
 };
+
+/**
+ * The rotation the camera picture needs to be upright: the fixed base from
+ * the settings.  Not the screen's angle: the browser has turned the frames
+ * by that already (see above). (Sozvon)
+ *
+ * @param {settings} settings
+ * @returns {number}
+ */
+function cameraRotation(settings) {
+    return (parseInt(settings.videoRotation, 10) || 0) % 360;
+}
+
+/**
+ * The format picked in the settings, as width / height, or null to send the
+ * picture as the camera gives it.  Blackboard mode never cuts: it is a
+ * document camera, and its edges are the document.  What is actually sent
+ * can differ, when the picture is fitted to the other person's screen: see
+ * cameraAspect in galene.js. (Sozvon)
+ *
+ * @param {settings} settings
+ * @returns {number|null}
+ */
+function sendAspect(settings) {
+    if(settings.blackboardMode)
+        return null;
+    return SozvonFraming.aspectOf(settings.sendAspect || '');
+}
 
 async function addFilters() {
     for(let name in filters) {

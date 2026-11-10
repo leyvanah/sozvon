@@ -122,3 +122,35 @@ test('a message about a stream never published is still an error', async () => {
     assert.throws(() => sc.gotAbort('never-published'),
                   /unknown up stream/);
 });
+
+// A replacement names the stream it replaces in its offer, and the server
+// closes that one.  A stream replaced before its own offer went out never
+// reached the server, so the stream after it has to name what that one was
+// replacing -- or the first goes on being forwarded beside the last, a
+// frozen second picture of the same person.  (2026-11-09: a third person
+// joining replaced the camera twice in a row, simulcast on and fitting to
+// one screen off.)
+test('a stream replaced before its offer passes on what it replaced', () => {
+    const sc = connected();
+    const first = published(sc, 'camera');
+    const second = sc.newUpStream('camera');    // no offer sent yet
+    assert.strictEqual(second.replace, first.id);
+    const third = sc.newUpStream('camera');
+    assert.strictEqual(third.replace, first.id);
+    assert.deepStrictEqual(Object.keys(sc.up), [third.id]);
+});
+
+test('a stream replaced after its offer is the one named', () => {
+    const sc = connected();
+    published(sc, 'camera');
+    const second = published(sc, 'camera');
+    const third = sc.newUpStream('camera');
+    assert.strictEqual(third.replace, second.id);
+});
+
+test('a fresh stream replaced before its offer leaves nothing to replace', () => {
+    const sc = connected();
+    sc.newUpStream('camera');
+    const second = sc.newUpStream('camera');
+    assert.strictEqual(second.replace, null);
+});

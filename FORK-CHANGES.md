@@ -273,6 +273,76 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     sealed inside it and the placeholder — a sibling of the container — was
     painted over the thumbnail. Firefox only, narrow windows only, and only
     with somebody else in the call whose camera was off.
+  * **Picture format and auto-framing** (`static/framing.js`). The settings
+    offer a **picture format** — as the camera gives it, 16:9, 4:3, 1:1, 3:4
+    or 9:16 — and the camera is cut to it *before* it is encoded: the server
+    forwards one encoding to everybody, and with end-to-end encryption cannot
+    see it, so only the sender can make the picture another shape, and what it
+    cuts no receiver gets back. The cut is drawn by the same canvas pass that
+    turns a phone's picture upright (`cameraGeometryFilter`, which replaces
+    the orientation-only filter): one `drawImage`, read from the settings
+    every frame, so going from one format to another takes effect on the next
+    frame without publishing again. It is placed around where a face sits in
+    a webcam picture — centred across, a little above the middle — so a cut
+    at the top and bottom takes more from the chest than from the forehead.
+    Blackboard mode never cuts. On the receiving side, the **auto-framing**
+    switch extends the 1-on-1 speaker view's fill-or-fit to every tile in
+    every view: a picture fills its box when that costs at most 40% of its
+    width at the sides or a quarter of its height, the latter weighted the
+    same way (the old rule never cut the top or bottom, because a centred cut
+    took the forehead with the chin); otherwise it is shown whole. With the
+    switch off nothing is cut, and a shared screen never is. Your own
+    thumbnail takes the shape of what you send, narrower when it stands up —
+    a fixed 4:3 box cut a 9:16 picture to a strip. Picking “none” as the
+    filter no longer leaves a phone's picture sideways until the camera is
+    reopened: the canvas the camera needs is worked out in one place
+    (`cameraFilterFor`) on every change. While the picture can be cut — a
+    format picked, or fitting to the other screen on — the camera is opened
+    at **1280×960** instead of the default 640×480, so every format keeps
+    960 lines: 9:16 out of 640×480 was 270×480, a blur on a laptop's screen.
+    The same 4:3 shape on purpose: a phone's sensor is 4:3, and its 16:9
+    modes cut the long side of it, which on a phone held upright is left and
+    right — asked for 1280×720 it sent a picture narrower than the room.
+    The running camera is asked for the new size (`applyConstraints`) and
+    is **never closed for it** — nor for the rotation buttons, auto-rotate
+    or a filter, which only decide the canvas: closing and reopening it
+    made Firefox on Windows refuse the camera ("Failed to allocate
+    videosource") until the page was reloaded.
+    The bitrate ceiling counts 1280×960 and what is cut from it with 720p
+    (4 Mbit/s), not with 1080p's 6, and **a phone's camera never sends more
+    than 2.5 Mbit/s**, held by the phone itself: at 3.5–4 Mbit/s a phone lost
+    4–35% of its packets over home Wi-Fi three times in an hour. A filter
+    picked by hand takes the canvas instead: the format is greyed with a
+    note, and the camera is not asked for more for a cut that cannot
+    happen. The format list sits under the fitting switch and is greyed,
+    label and all, whenever it does not apply.
+    **A phone turned on its side stays upright.** Chrome and Firefox on
+    Android already turn the camera's frames to the screen; the canvas
+    added the screen's angle on top and laid the picture on its side until
+    the arrows were pressed. It now draws only the fixed base rotation.
+  * **Fit the video to the other person's screen** (a switch under the
+    format). In a one-to-one call there is one person to send to, so the
+    sender can pick the format for their screen: every receiver reports the
+    shape of the box it shows each camera picture in (a `sozvon-view` user
+    message, sent when a picture arrives and after each relayout — the
+    stage in the speaker view, the column width and row cap in the grid,
+    never the picture's own element, which takes the picture's shape), and
+    the sender cuts to the nearest format: a laptop seen on an upright phone
+    goes out as 9:16, an upright phone seen on a laptop as 16:9. The latter
+    keeps under half the phone's height, but the cut is weighted towards the
+    chest, and on a real phone the face was all there — a first version
+    stopped such a picture at 1:1, which left wide bars for nothing.
+    The choice only changes when another format fits clearly better, since
+    each change resizes the encoder; what remains, the receiver's
+    auto-framing fills. One-to-one counts people, not sessions: sessions
+    under one name are one person, whose latest report counts, and our own
+    other sessions are us — a session the other person left behind in
+    another app's browser no longer turns the call into one of three. With a
+    third person the format picked by hand applies again; the drawer says which format is being sent and greys the
+    list while it is overridden. Older clients send no reports, and nothing
+    is adapted to them. The shape crosses the server in clear, even in an
+    encrypted room. Next: a face detector instead of the fixed point of
+    interest.
   * The **“show self-view” pill** is offset by the open settings drawer. It is
     fixed to the viewport, so when the drawer pushed the call area aside the
     pill stayed against the window edge — underneath the drawer, which left
@@ -401,6 +471,15 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     or replaced is let go instead of thrown as "unknown up stream"
     (`protocol.js` remembers the closed ids); a message about an id the
     client never published still is an error.
+  * **Two replacements in a row leave no frozen picture behind.** A new up
+    stream names the stream it replaces in its offer, and the server closes
+    that one — but a stream replaced again before its own offer went out was
+    never known to the server, so naming it closed nothing, and the stream
+    *it* was replacing went on being forwarded: everyone saw a second, frozen
+    picture of the same person. `newUpStream` now passes on what an unsent
+    stream was replacing. Found when a third person joined a call: simulcast
+    turning on and fitting the picture to one screen turning off replaced the
+    camera twice at once. An upstream bug too.
   * **State-reflecting mic/camera icons**: each colours by what is live right
     now — **blue + upright** when the device is on, **red + slashed** when off.
     The old neutral-grey in-between state is gone.
@@ -578,6 +657,22 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     the receiver's freeze counter at zero. It now draws when the element has
     a frame it has not drawn (`getVideoPlaybackQuality()`, or
     `requestVideoFrameCallback` where Firefox reports no count).
+    **The canvas keeps its frame rate in the background.** With the picture
+    format a computer's camera goes through it too, and a computer, unlike a
+    phone, keeps its camera running when the call is behind another window:
+    there Firefox held the canvas's timer to one tick a second, and the
+    frame check (requestVideoFrameCallback, which runs with the page's
+    rendering) to one frame a second, so the other side got a frame a second
+    with freezes, and the bitrate controller cut the stream to its floor
+    (measured on 2026-11-09, Firefox 159). The ticks now come from a worker
+    (`filter-tick.js`), whose timers are not held back, and a hidden page on
+    a computer draws on every tick at the camera's rate; a phone keeps the
+    check, since its camera stops in the background. Drawn blind, it draws at
+    the rate the camera was measured giving while the page was visible,
+    which can be well under the rate it reports. Where the worker cannot
+    start or its script does not load, the page's own timer takes over. The
+    clock also runs at twice the camera's rate when visible: at the same
+    rate it drifted against the camera and lost one frame in five.
     Two server fixes found on the way: **changes of a member's data reach
     the room in the order they were made** (each `setdata` was pushed from a
     goroutine of its own, so `{"muted": null}` then `{"away": true}` could

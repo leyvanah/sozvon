@@ -580,6 +580,19 @@ test('a picture held upright gets the ceiling of its short side', () => {
     assert.strictEqual(ctl.cap, 4000000);
 });
 
+test('the capture a picture format cuts from is not 1080p', () => {
+    // framing.js captures 1280x960 when it cuts; uncut, or cut to 4:3 or
+    // 1:1, the picture keeps all 960 lines (960x960 for a square)
+    for(let [width, height] of [[1280, 960], [960, 1280], [960, 960]]) {
+        let ctl = new b.Controller(b.START_CAP, 'camera');
+        obeying(ctl, receiver(), 200, {width, height});
+        assert.strictEqual(ctl.ceiling(), 4000000, `${width}x${height}`);
+    }
+    let ctl = new b.Controller(b.START_CAP, 'camera');
+    obeying(ctl, receiver(), 200, {width: 1920, height: 1080});
+    assert.strictEqual(ctl.ceiling(), 6000000, '1080p keeps its own');
+});
+
 test('a camera at its ceiling is still cut when playback suffers', () => {
     let ctl = new b.Controller(b.START_CAP, 'camera');
     let rx = receiver();

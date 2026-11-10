@@ -421,6 +421,38 @@ function reflectSettings() {
         store = true;
     }
 
+    // A format this version does not know is a format it cannot draw: fall
+    // back to the camera's own rather than to a select showing nothing.
+    if(settings.hasOwnProperty('sendAspect') &&
+       selectOptionAvailable(getSelectElement('sendaspectselect'),
+                             settings.sendAspect)) {
+        getSelectElement('sendaspectselect').value = settings.sendAspect;
+    } else {
+        settings.sendAspect = 'camera';
+        getSelectElement('sendaspectselect').value = 'camera';
+        store = true;
+    }
+
+    if(settings.hasOwnProperty('autoFraming')) {
+        getInputElement('autoframingbox').checked = settings.autoFraming;
+    } else {
+        settings.autoFraming = getInputElement('autoframingbox').checked;
+        store = true;
+    }
+
+    if(settings.hasOwnProperty('adaptToPeer')) {
+        getInputElement('adaptpeerbox').checked = settings.adaptToPeer;
+    } else {
+        settings.adaptToPeer = getInputElement('adaptpeerbox').checked;
+        store = true;
+    }
+    // a filter takes the format's place: see reflectAdaptation
+    let filtered = !!userFilter(settings);
+    setVisibility('adapt-status', !!settings.adaptToPeer && !filtered);
+    setVisibility('format-filter-note', filtered);
+    getSelectElement('sendaspectselect').disabled = filtered;
+    getInputElement('adaptpeerbox').disabled = filtered;
+
     if(settings.hasOwnProperty('request')) {
         getSelectElement('requestselect').value = settings.request;
     } else {
@@ -2001,6 +2033,7 @@ getInputElement('blackboardbox').onchange = function(e) {
     if(!(this instanceof HTMLInputElement))
         throw new Error('Unexpected type for this');
     updateSettings({blackboardMode: this.checked});
+    decideAdaptation();
     replaceCameraStream();
 };
 
@@ -2082,22 +2115,489 @@ getSelectElement('filterselect').onchange = async function(e) {
     if(!(this instanceof HTMLSelectElement))
         throw new Error('Unexpected type for this');
     updateSettings({filter: this.value});
-    let c = findUpMedia('camera');
-    if(c) {
-        let filter = (this.value && filters[this.value]) || null;
-        if(filter)
-            c.userdata.filterDefinition = filter;
-        else
-            delete c.userdata.filterDefinition;
-        replaceUpStream(c);
-    }
+    // a filter takes the place of the format, and of the bigger capture it
+    // needs (captureSize)
+    decideAdaptation();
+    await refilterCamera();
 };
 
+/**
+ * Sozvon: the filter picked in the settings, or null.  It wins over the
+ * picture format: both would draw the camera through a canvas, and one
+ * canvas at a time is what Filter supports, so the format is greyed out in
+ * the settings while a filter is on (reflectAdaptation).
+ *
+ * @param {settings} settings
+ * @returns {filterDefinition|null}
+ */
+function userFilter(settings) {
+    return (settings.filter && filters[settings.filter]) || null;
+}
+
+/**
+ * Sozvon: the canvas the camera picture goes through before it is sent, or
+ * null to send the camera track as it is.
+ *
+ * A filter the user picked wins: it draws from the same camera frame, and
+ * one canvas at a time is what Filter supports.  Otherwise the camera goes
+ * through cameraGeometryFilter (filter.js) when there is something for it to
+ * do:
+ *   - turning the picture upright: auto-rotate is on and this looks like a
+ *     phone or tablet (a mobile-style facingMode, a touch screen, or the
+ *     mobile layout), or a manual base rotation is set (which also lets a
+ *     desktop fix a sideways webcam).  We key off the device and camera, not
+ *     the CSS mobile layout alone -- a tablet uses the desktop layout yet
+ *     still needs this;
+ *   - cutting it to the format chosen in the settings.
+ * Never without a camera track (audio only -- we would send a blank canvas),
+ * in blackboard mode (a document camera we must not resample), or where
+ * canvas capture is unavailable.
+ *
+ * @param {settings} settings
+ * @param {MediaStreamTrack} vtrack - the camera track, before any canvas
+ * @returns {filterDefinition|null}
+ */
+function cameraFilterFor(settings, vtrack) {
+    let picked = userFilter(settings);
+    if(picked)
+        return picked;
+    if(!vtrack || settings.blackboardMode ||
+       !HTMLCanvasElement.prototype.captureStream)
+        return null;
+    let facing = vtrack.getSettings ? vtrack.getSettings().facingMode : '';
+    let mobileDevice = facing === 'user' || facing === 'environment' ||
+        navigator.maxTouchPoints > 0 || isMobileLayout();
+    let base = parseInt(settings.videoRotation, 10) || 0;
+    let autoRotate = settings.autoRotate !== false;
+    if((autoRotate && mobileDevice) || base !== 0 || sendAspect(settings) ||
+       adaptingToPeer(settings))
+        return cameraGeometryFilter;
+    return null;
+}
+
+/**
+ * Sozvon: bring the running camera in line with the settings without
+ * reopening it: the size it captures at (resizeCapture), and the canvas it
+ * goes through.
+ *
+ * Nothing at all happens when that is the canvas it already goes through:
+ * cameraGeometryFilter reads the rotation and the format on every frame, so
+ * a new format shows on the next one.  Otherwise the up stream is replaced
+ * over the same camera track, as a filter change always did.
+ *
+ * Queued behind any camera that is still opening, and behind itself: a
+ * second replacement started before the first is done would find the old
+ * stream and publish a second one beside it.
+ *
+ * @returns {Promise<void>}
+ */
+function refilterCamera() {
+    let next = addLocalMediaQueue.then(refilterCameraNow, refilterCameraNow);
+    addLocalMediaQueue = next.catch(() => {});
+    return next;
+}
+
+async function refilterCameraNow() {
+    let c = findUpMedia('camera');
+    // A replacement under way (simulcast turning on, say) copies the canvas
+    // the old stream had: wait for it, and decide on the stream it leaves.
+    while(c && c.userdata.replacement) {
+        await c.userdata.replacement;
+        let next = findUpMedia('camera');
+        if(next === c)
+            break;
+        c = next;
+    }
+    if(!c)
+        return;
+    let f = c.userdata.filter;
+    let raw = f && f.inputStream ? f.inputStream : c.stream;
+    let vtrack = raw ? raw.getVideoTracks()[0] : null;
+    let settings = getSettings();
+    if(vtrack)
+        await resizeCapture(c, vtrack, settings);
+    let def = cameraFilterFor(settings, vtrack);
+    if((c.userdata.filterDefinition || null) === def)
+        return;
+    if(def)
+        c.userdata.filterDefinition = def;
+    else
+        delete c.userdata.filterDefinition;
+    await replaceUpStream(c);
+}
+
+/**
+ * Sozvon: the size to open the camera at.
+ *
+ * 640x480 by default, which is what a camera gives when asked for 4:3 and
+ * nothing more.  Cut to a format, that is too little: 9:16 out of it is
+ * 270x480, and seen on a laptop's whole screen it was a blur (2026-11-09).
+ * So while the picture can be cut -- a format picked, or fitting it to the
+ * other person's screen -- the camera is asked for more of the same shape,
+ * 1280x960: 960 lines for every format cut from it.
+ *
+ * The same shape, not 1280x720.  A phone's sensor is 4:3, and its 16:9 modes
+ * are cut out of it along the long side, which is left and right on a phone
+ * held upright: asked for 1280x720 it gave 720x1280, and a 16:9 picture cut
+ * from that for a laptop had lost the sides of the room besides its top and
+ * bottom (seen in a call the same evening).  A bigger picture costs a phone
+ * more to draw and to encode, so only while there can be a cut -- not with
+ * a filter on, which takes the format's place (userFilter); the bitrate
+ * ceiling follows its size (bitrate-control.js).
+ *
+ * @param {settings} settings
+ * @returns {MediaTrackConstraints}
+ */
+function captureSize(settings) {
+    let resolution = settings.resolution;
+    if(resolution)
+        return {width: {ideal: resolution[0]}, height: {ideal: resolution[1]}};
+    if(settings.blackboardMode)
+        return {width: {min: 640, ideal: 1920}, height: {min: 400, ideal: 1080}};
+    if(!userFilter(settings) && (sendAspect(settings) || settings.adaptToPeer))
+        return {aspectRatio: {ideal: 4/3},
+                width: {ideal: 1280}, height: {ideal: 960}};
+    // Spelled out, rather than left to the camera's default: a camera
+    // asked for 4:3 alone after 1280x960 stays there (resizeCapture).
+    return {aspectRatio: {ideal: 4/3},
+            width: {ideal: 640}, height: {ideal: 480}};
+}
+
+/**
+ * Sozvon: ask the running camera for the size captureSize() now wants,
+ * without closing it.
+ *
+ * The camera used to be closed and opened again for this, and Firefox on
+ * Windows refused the second opening ("Failed to allocate videosource"):
+ * it lets go of a camera some time after it is stopped, and the request
+ * came first, so the call was left without a picture until the page was
+ * reloaded (2026-11-09; the rotation buttons did the same).  The reopening
+ * rested on a measurement that Chromium does not raise the size of a
+ * running camera; that measurement had two test clients sharing one fake
+ * camera, the other holding it at 640x480.  On its own a camera does
+ * change size in place (640x480 to 1280x960, measured the same evening).
+ * Called from refilterCamera(), behind any camera still being opened.
+ *
+ * @param {Stream} c
+ * @param {MediaStreamTrack} track - the camera's own track, before any canvas
+ * @param {settings} settings
+ */
+async function resizeCapture(c, track, settings) {
+    let want = captureSize(settings);
+    let key = JSON.stringify(want);
+    if(c.userdata.captureSize === key)
+        return;
+    try {
+        await track.applyConstraints(want);
+        c.userdata.captureSize = key;
+    } catch(e) {
+        // the camera goes on at the size it has, which is still a picture
+        console.warn('Could not resize the camera', e);
+    }
+}
+
+getSelectElement('sendaspectselect').onchange = async function(e) {
+    if(!(this instanceof HTMLSelectElement))
+        throw new Error('Unexpected type for this');
+    updateSettings({sendAspect: this.value});
+    await refilterCamera();
+};
+
+getInputElement('autoframingbox').onchange = function(e) {
+    if(!(this instanceof HTMLInputElement))
+        throw new Error('Unexpected type for this');
+    updateSettings({autoFraming: this.checked});
+    applyFraming();
+};
+
+/*
+ * Sozvon: fitting the picture to the other person's screen.
+ *
+ * In a one-to-one call there is a single person to send to, so the format
+ * that fits their screen is a single choice and the sender can make it: a
+ * laptop's camera seen on an upright phone goes out as 9:16 and fills it,
+ * rather than as a band across the middle.  Each receiver reports the shape
+ * of the box it shows a camera picture in (VIEW_MESSAGE, below), the sender
+ * keeps the latest report from each user in peerViews, and while the
+ * setting is on and the call is one-to-one, cameraAspect() hands the canvas
+ * the format SozvonFraming.adapt() picks for it (an upright phone seen on a
+ * laptop goes out as 16:9, cut around where the face is).
+ * With three or more people one picture cannot fit them all, and the format
+ * picked in the settings applies again.
+ */
+
+/** @type {string} */
+const VIEW_MESSAGE = 'sozvon-view';
+
+/**
+ * The box each user shows our camera picture in, width / height, and when
+ * they reported it, by user id.
+ *
+ * @type {Map<string, {aspect: number, at: number}>}
+ */
+let peerViews = new Map();
+
+/**
+ * The format the picture is fitted to, or null when it is not.  Decided by
+ * decideAdaptation() whenever something it depends on changes, and read by
+ * the canvas on every frame (cameraAspect); kept so the choice does not flip
+ * at a boundary (SozvonFraming.adapt), and shown in the settings.
+ *
+ * @type {string|null}
+ */
+let adaptedFormat = null;
+
+/**
+ * The shape of the other person's view, while this is a one-to-one call
+ * and they have reported one.
+ *
+ * One-to-one counts people, not sessions.  A session left behind by the
+ * other person -- the call opened in Telegram's browser and then again in
+ * Chrome (2026-11-09) -- is still a user in the group, and counted as one it
+ * made every call with them a call of three: sessions under one name are one
+ * person, whose latest report counts.  Our own other sessions are us, and
+ * how our picture looks to us is not what is fitted.  A session without a
+ * name is a person of its own.  Someone who only watches still counts: our
+ * picture is on their screen too, and one format cannot fit both.
+ *
+ * @returns {number|null}
+ */
+function adaptPeer() {
+    if(!serverConnection || !serverConnection.users)
+        return null;
+    let me = serverConnection.username;
+    /** @type {Map<string, {aspect: number, at: number}|null>} */
+    let people = new Map();
+    for(let id in serverConnection.users) {
+        if(id === serverConnection.id)
+            continue;
+        let name = serverConnection.users[id].username;
+        if(name && name === me)
+            continue;
+        let key = name ? 'name:' + name : 'id:' + id;
+        let view = peerViews.get(id) || null;
+        let known = people.get(key) || null;
+        if(!known || (view && view.at > known.at))
+            people.set(key, view);
+    }
+    if(people.size !== 1)
+        return null;
+    let [view] = people.values();
+    return view ? view.aspect : null;
+}
+
+/**
+ * Whether the picture is fitted to the other person's screen: the setting
+ * is on, the call is one-to-one and they have said what they show it in.
+ * Not in blackboard mode, which never cuts, nor with a filter, which takes
+ * the canvas (userFilter).
+ *
+ * @param {settings} settings
+ * @returns {boolean}
+ */
+function adaptingToPeer(settings) {
+    return !!settings.adaptToPeer && !settings.blackboardMode &&
+        !userFilter(settings) && !!adaptPeer();
+}
+
+/**
+ * The format the camera picture is cut to on this frame, width / height, or
+ * null for none: fitted to the other person's screen while that applies,
+ * else the one picked in the settings.  Called by cameraGeometryFilter on
+ * every frame, so it only reads what decideAdaptation() decided.
+ *
+ * @param {settings} settings
+ * @returns {number|null}
+ */
+function cameraAspect(settings) {
+    if(adaptedFormat && !settings.blackboardMode)
+        return SozvonFraming.aspectOf(adaptedFormat);
+    return sendAspect(settings);
+}
+
+/**
+ * Decide the format the picture is fitted to, and show it in the settings.
+ * Called on everything that can change it -- the settings involved, who is
+ * in the call, a report of a screen -- whether or not the camera goes
+ * through the canvas at the moment, so that what the settings say is never
+ * left over from the last time it did.
+ */
+function decideAdaptation() {
+    let settings = getSettings();
+    adaptedFormat = adaptingToPeer(settings) ?
+        SozvonFraming.adapt(adaptPeer(), adaptedFormat) : null;
+    reflectAdaptation();
+}
+
+/**
+ * Show in the settings what fitting to the other person's screen is doing:
+ * the format being sent while it is, a note that it waits for a one-to-one
+ * call while it is not.  The format list is greyed while it is overridden.
+ */
+function reflectAdaptation() {
+    let settings = getSettings();
+    let on = !!settings.adaptToPeer;
+    let filtered = !!userFilter(settings);
+    let active = on && !!adaptedFormat;
+    setVisibility('adapt-status', on && !filtered);
+    setVisibility('adapt-active', active);
+    setVisibility('adapt-idle', !active);
+    setVisibility('format-filter-note', filtered);
+    let f = document.getElementById('adapt-format');
+    if(f)
+        f.textContent = active ? adaptedFormat : '';
+    getSelectElement('sendaspectselect').disabled = active || filtered;
+    getInputElement('adaptpeerbox').disabled = filtered;
+}
+
+/**
+ * Something that decides the adapted format changed: the setting, who is in
+ * the call, or a report of the other person's screen.  The canvas reads the
+ * format on every frame by itself; what has to be done here is putting the
+ * camera through the canvas, or taking it out, when adapting starts or
+ * stops on a device that needs no canvas otherwise.
+ */
+function adaptationChanged() {
+    decideAdaptation();
+    refilterCamera().catch(e => console.error(e));
+}
+
+getInputElement('adaptpeerbox').onchange = function(e) {
+    if(!(this instanceof HTMLInputElement))
+        throw new Error('Unexpected type for this');
+    updateSettings({adaptToPeer: this.checked});
+    adaptationChanged();
+};
+
+/**
+ * The last shape reported to each user, so a relayout that changes nothing
+ * sends nothing.
+ *
+ * @type {Map<string, number>}
+ */
+let viewReported = new Map();
+
+/** @type {ReturnType<typeof setTimeout>|null} */
+let viewReportTimer = null;
+
+/**
+ * Report, a little later, the shape of our view to whoever sends us a
+ * camera.  Called on every relayout; the delay lets a resize, an opening
+ * panel or a turned phone settle into one report.
+ */
+function scheduleViewReport() {
+    if(viewReportTimer)
+        return;
+    viewReportTimer = setTimeout(function() {
+        viewReportTimer = null;
+        reportViews(false);
+    }, 700);
+}
+
+/**
+ * Tell the sender of each camera picture we receive the shape of the box we
+ * show it in.  The receiver reports whatever the sender's settings: the
+ * sender decides whether to use it.
+ *
+ * @param {boolean} force - send even what was sent before (a new stream
+ *     from them: they may have reloaded and forgotten it)
+ * @param {string} [only] - report to this user only
+ */
+function reportViews(force, only) {
+    if(!serverConnection || !serverConnection.socket)
+        return;
+    for(let id in serverConnection.down) {
+        let c = serverConnection.down[id];
+        if(c.label !== 'camera' || !c.source)
+            continue;
+        if(only && c.source !== only)
+            continue;
+        let shape = viewShape(c);
+        if(!shape)
+            continue;
+        let last = viewReported.get(c.source);
+        if(!force && last && Math.abs(Math.log(shape / last)) < 0.02)
+            continue;
+        viewReported.set(c.source, shape);
+        try {
+            serverConnection.userMessage(VIEW_MESSAGE, c.source, {
+                aspect: Math.round(shape * 1000) / 1000,
+            }, true);
+        } catch(e) {
+            console.warn(e);
+        }
+    }
+}
+
+/**
+ * The box a received camera picture is shown in, width / height, or null.
+ *
+ * Not the size of the picture's own element: in the grid that takes the
+ * shape of the picture, and reporting it would only ever confirm the format
+ * already sent.  In the speaker view the picture has the whole stage; in the
+ * grid it has its column's width and the row's height cap.
+ *
+ * @param {Stream} c
+ * @returns {number|null}
+ */
+function viewShape(c) {
+    let stage = document.getElementById('video-container');
+    let peers = document.getElementById('peers');
+    if(!stage || !peers)
+        return null;
+    let w = stage.clientWidth, h = stage.clientHeight;
+    let media = document.getElementById('media-' + c.localId);
+    if(!peers.classList.contains('speaker') && media &&
+       media.offsetParent !== null) {
+        let cs = getComputedStyle(media);
+        let pad = mediaPadding(cs);
+        let maxH = parseFloat(cs.maxHeight);
+        w = media.clientWidth - pad.x;
+        if(isFinite(maxH))
+            h = cs.boxSizing === 'border-box' ? maxH - pad.y : maxH;
+        else
+            h = stage.clientHeight - pad.y;
+    }
+    if(!(w > 0) || !(h > 0))
+        return null;
+    return w / h;
+}
+
+/**
+ * The padding of a picture's element, across and down: the picture is drawn
+ * inside it, so it is not part of the box the picture is framed in.
+ *
+ * @param {CSSStyleDeclaration} cs - the element's computed style
+ * @returns {{x: number, y: number}}
+ */
+function mediaPadding(cs) {
+    return {
+        x: (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0),
+        y: (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0),
+    };
+}
+
+/**
+ * A report of how a user shows our picture.
+ *
+ * @param {string} id
+ * @param {any} message
+ */
+function gotViewReport(id, message) {
+    let a = message && message.aspect;
+    if(typeof a !== 'number' || !(a > 0.2 && a < 5))
+        return;
+    peerViews.set(id, {aspect: a, at: Date.now()});
+    // even the same shape: from another of the person's sessions, it is
+    // now the one that counts (adaptPeer)
+    adaptationChanged();
+}
+
 // Video orientation: a fixed base rotation (to correct devices whose camera is
-// mounted oddly) that the auto-rotation builds on, plus a toggle for the
-// auto-rotation itself.  Both reopen the camera so addLocalMedia re-evaluates
-// whether the orientation canvas should be applied (see mobileOrientationFilter
-// and the gate in addLocalMedia). (Sozvon)
+// mounted oddly), plus a toggle for putting a phone's camera through the
+// canvas that keeps it upright.  Neither closes the camera: refilterCamera()
+// decides the canvas again, and the canvas reads the rotation on every frame
+// (see cameraGeometryFilter and cameraFilterFor). (Sozvon)
 
 /**
  * Sozvon: turn the camera a quarter turn, the direction the arrow points.
@@ -2127,7 +2627,9 @@ function rotateVideo(quarters) {
     // filter switches on the value and addLocalMedia parses it back.
     let next = ((base + delta) % 360 + 360) % 360;
     updateSettings({videoRotation: String(next)});
-    replaceCameraStream();
+    // the canvas reads the rotation on every frame: no need to close the
+    // camera, which Firefox on Windows then refused to open again
+    refilterCamera().catch(e => console.error(e));
 }
 
 getButtonElement('rotate-left').onclick = function(e) {
@@ -2145,7 +2647,7 @@ getInputElement('autorotatebox').onchange = function(e) {
     if(!(this instanceof HTMLInputElement))
         throw new Error('Unexpected type for this');
     updateSettings({autoRotate: this.checked});
-    replaceCameraStream();
+    refilterCamera().catch(e => console.error(e));
 };
 
 /**
@@ -2611,9 +3113,26 @@ function gotBitrateRequest(from, value) {
 function autoThroughput(c, setting, simulcast) {
     let B = bitrateApi();
     let caps = getSendCaps();
-    if(!B || !caps || (simulcast && c.label !== 'screenshare'))
-        return setting;
-    return B.combine(setting, caps.get(c.id, Date.now()));
+    let t = setting;
+    if(B && caps && !(simulcast && c.label !== 'screenshare'))
+        t = B.combine(setting, caps.get(c.id, Date.now()));
+    return withDeviceCeiling(c, t);
+}
+
+/**
+ * Sozvon: a throughput held to what this device's camera may send: on a
+ * phone or a tablet, PHONE_CAMERA_CEILING (bitrate-control.js), however
+ * large its picture and whatever its receivers allow.
+ *
+ * @param {Stream} c
+ * @param {number|null} bps
+ * @returns {number|null}
+ */
+function withDeviceCeiling(c, bps) {
+    let B = bitrateApi();
+    if(!B || c.label !== 'camera' || !pausesWhenHidden())
+        return bps;
+    return B.combine(bps, B.PHONE_CAMERA_CEILING);
 }
 
 /**
@@ -3223,7 +3742,7 @@ async function setUpStream(c, stream) {
             // per-stream frame counter, and we don't split layers.
             simulcast = false;
         if(t.kind === 'video') {
-            let bps = getMaxVideoThroughput();
+            let bps = withDeviceCeiling(c, getMaxVideoThroughput());
             // Firefox doesn't like us setting the RID if we're not
             // simulcasting.
             if(simulcast) {
@@ -3388,7 +3907,7 @@ async function checkCamera(c, published) {
         ua: navigator.userAgent,
         touch: navigator.maxTouchPoints > 0,
         canvas: !f ? 'none' :
-            f.definition === mobileOrientationFilter ? 'orientation' :
+            f.definition === cameraGeometryFilter ? 'orientation' :
             'filter',
         track: {
             readyState: track.readyState,
@@ -3543,6 +4062,17 @@ async function recoverMicrophone(c, lost) {
  * @returns {Promise<Stream>}
  */
 async function replaceUpStream(c) {
+    // Kept on the old stream, so that refilterCamera can wait for a
+    // replacement under way and decide on the stream it leaves. (Sozvon)
+    let p = replaceUpStreamNow(c);
+    c.userdata.replacement = p;
+    return await p;
+}
+
+/**
+ * @param {Stream} c
+ */
+async function replaceUpStreamNow(c) {
     await removeFilter(c);
     let cn = newUpStream(c.localId);
     cn.label = c.label;
@@ -3550,6 +4080,9 @@ async function replaceUpStream(c) {
         cn.userdata.filterDefinition = c.userdata.filterDefinition;
     if(c.userdata.onclose)
         cn.userdata.onclose = c.userdata.onclose;
+    // the same camera, at the size it captures at (resizeCapture)
+    if(c.userdata.captureSize)
+        cn.userdata.captureSize = c.userdata.captureSize;
     let media = /** @type{HTMLVideoElement} */
         (document.getElementById('media-' + c.localId));
     try {
@@ -3971,18 +4504,8 @@ async function addLocalMediaNow(localId, force) {
         return;
     }
 
-    if(video) {
-        let resolution = settings.resolution;
-        if(resolution) {
-            video.width = { ideal: resolution[0] };
-            video.height = { ideal: resolution[1] };
-        } else if(settings.blackboardMode) {
-            video.width = { min: 640, ideal: 1920 };
-            video.height = { min: 400, ideal: 1080 };
-        } else {
-            video.aspectRatio = { ideal: 4/3 };
-        }
-    }
+    if(video)
+        Object.assign(video, captureSize(settings));
 
     if(audio) {
         // The "Noise suppression" checkbox toggles ONLY the browser's noise
@@ -4118,36 +4641,20 @@ async function addLocalMediaNow(localId, force) {
 
     c.label = 'camera';
 
-    if(settings.filter) {
-        let filter = filters[settings.filter];
-        if(filter)
-            c.userdata.filterDefinition = filter;
-        else
-            displayWarning(`Unknown filter ${settings.filter}`);
-    }
+    if(settings.filter && !filters[settings.filter])
+        displayWarning(`Unknown filter ${settings.filter}`);
 
-    // Route the camera through the orientation canvas (mobileOrientationFilter)
-    // when it can help: auto-rotate is on and this looks like a phone/tablet (a
-    // mobile-style facingMode, a touch screen, or the mobile layout), OR a
-    // manual base rotation is set (which also lets a desktop fix a sideways
-    // webcam).  We key off the device/camera, NOT the CSS "mobile layout" alone
-    // -- a tablet uses the desktop layout yet still needs this.  Skip it when
-    // there is no camera track (audio-only -- else we'd send a blank canvas),
-    // when the user already picked a filter (it draws from the same frame, so
-    // orientation is handled anyway), in blackboard mode (a document camera we
-    // must not resample), or when canvas capture is unavailable. (Sozvon)
-    let vtrack = stream.getVideoTracks()[0];
-    let facing = (vtrack && vtrack.getSettings) ?
-        vtrack.getSettings().facingMode : '';
-    let mobileDevice = facing === 'user' || facing === 'environment' ||
-        navigator.maxTouchPoints > 0 || isMobileLayout();
-    let base = parseInt(settings.videoRotation, 10) || 0;
-    let autoRotate = settings.autoRotate !== false;
-    if(!c.userdata.filterDefinition && vtrack &&
-       !settings.blackboardMode &&
-       HTMLCanvasElement.prototype.captureStream &&
-       ((autoRotate && mobileDevice) || base !== 0))
-        c.userdata.filterDefinition = mobileOrientationFilter;
+    // The user's filter, or the canvas that turns the picture upright and
+    // cuts it to the chosen format, or nothing (see cameraFilterFor). (Sozvon)
+    let def = cameraFilterFor(settings, stream.getVideoTracks()[0]);
+    if(def)
+        c.userdata.filterDefinition = def;
+    // the size the camera captures at (resizeCapture); one carried
+    // over from the stream before keeps that stream's
+    if(video && !keep)
+        c.userdata.captureSize = JSON.stringify(captureSize(settings));
+    else if(old && old.userdata.captureSize)
+        c.userdata.captureSize = old.userdata.captureSize;
 
     try {
         await setUpStream(c, stream);
@@ -4522,12 +5029,20 @@ async function setMedia(c, mirror, video) {
         addCustomControls(media, div, c, !!video);
 
         // Recompute fill-vs-fit once the real video dimensions are known and
-        // whenever they change (e.g. the remote rotates their phone). (Sozvon)
+        // whenever they change: the remote rotates their phone, or picks
+        // another format -- and so do we, which reshapes our own tile.
+        // (Sozvon)
+        media.addEventListener('loadedmetadata', applyFraming);
+        media.addEventListener('resize', applyFraming);
         if(!c.up) {
-            media.addEventListener('loadedmetadata', applyRemoteFraming);
-            media.addEventListener('resize', applyRemoteFraming);
             // Send playback to the user's chosen speaker (Sozvon).
             applyAudioOutput(media);
+        }
+        // A new camera picture from somebody: tell them how we show it,
+        // once the layout has placed it (Sozvon).
+        if(!c.up && c.label === 'camera' && c.source) {
+            let source = c.source;
+            setTimeout(() => reportViews(true, source), 300);
         }
     }
 
@@ -5129,71 +5644,70 @@ function refreshTileLabels(id) {
 }
 
 /**
- * Smart framing of the 1-on-1 remote (speaker view). The remote tile already
- * fills the stage; these helpers decide how the *picture* fills its box:
- *   - "fill" (object-fit: cover) edge-to-edge when the stage is narrower than
- *     the picture and filling crops only a little off its sides;
- *   - "fit" (object-fit: contain) showing the whole frame otherwise.
- * Filling never crops the top or the bottom: on a stage wider than the
- * picture that is the forehead and the chin, and in a call the face is the
- * picture. A shared screen is never cropped at all. (Sozvon)
- */
-const FRAMING_MIN_VISIBLE = 0.6;
-
-/**
- * Decide whether the remote picture should fill (cover) the stage. True only
- * when the crop falls on the sides and at least FRAMING_MIN_VISIBLE of the
- * frame's width survives it.
+ * Smart framing: how each picture fills its tile.  Every tile, in every view,
+ * gets the decision SozvonFraming.tile() makes for its box:
+ *   - "fill" (object-fit: cover) edge to edge, when that cuts only a margin --
+ *     at most 40% of the width off the sides, or a quarter of the height
+ *     weighted towards the chest -- placed by object-position so the cut
+ *     misses the face;
+ *   - "fit" (object-fit: contain), the whole frame, otherwise.
+ * A shared screen is never cut, and with auto-framing off in the settings
+ * nothing is.
  *
- * @param {HTMLElement} remote - the .peer-remote container
- * @param {HTMLVideoElement} media - its <video class="media">
- * @returns {boolean}
+ * This used to apply to the 1-on-1 speaker view only, and never cut the top
+ * or the bottom: the cut was centred, and a centred cut takes the forehead
+ * with the chin.  Weighted, a 4:3 picture fills a 16:9 screen with the
+ * forehead still in it.
+ *
+ * Your own tile is also given the shape of what you send, where it floats as
+ * the thumbnail: it is the only preview of the format you picked, and a
+ * fixed 4:3 box would cut a 9:16 picture down to a strip. (Sozvon)
  */
-function decideFill(remote, media) {
-    if(!remote || !media)
-        return false;
-    // A shared screen must stay fully visible — never crop it.
-    if(remote.dataset.label === 'screenshare')
-        return false;
-    let vw = media.videoWidth, vh = media.videoHeight;
-    if(!vw || !vh)
-        return false;   // real dimensions unknown yet → show the whole frame
-    let sw = remote.clientWidth, sh = remote.clientHeight;
-    if(!sw || !sh) {
-        let stage = document.getElementById('video-container');
-        if(stage) {
-            sw = stage.clientWidth;
-            sh = stage.clientHeight;
-        }
-    }
-    if(!sw || !sh)
-        return false;
-    let videoAR = vw / vh, stageAR = sw / sh;
-    // On a stage wider than the picture, filling would cut its top and
-    // bottom: show the whole height instead, with bars at the sides.
-    if(stageAR > videoAR)
-        return false;
-    return stageAR / videoAR >= FRAMING_MIN_VISIBLE;
-}
-
-/**
- * Apply the fill/fit decision to every remote tile. A no-op outside speaker
- * view (the framing CSS is scoped to #peers.speaker, so any stale classes left
- * behind are harmless). Called from resizePeers() and from the remote video's
- * loadedmetadata/resize events. (Sozvon)
- */
-function applyRemoteFraming() {
+function applyFraming() {
     let peers = document.getElementById('peers');
     if(!peers)
         return;
-    let speaker = peers.classList.contains('speaker');
-    peers.querySelectorAll('.peer-remote').forEach(remote => {
-        if(!(remote instanceof HTMLElement))
+    let enabled = getSettings().autoFraming !== false;
+    peers.querySelectorAll('.peer').forEach(tile => {
+        if(!(tile instanceof HTMLElement))
             return;
-        let media = /** @type {HTMLVideoElement} */
-            (remote.querySelector('video.media'));
-        remote.classList.toggle('framing-fill', speaker && decideFill(remote, media));
+        let media = tile.querySelector('video.media');
+        if(!(media instanceof HTMLVideoElement))
+            return;
+        let vw = media.videoWidth, vh = media.videoHeight;
+        if(tile.classList.contains('peer-self'))
+            reflectSelfShape(tile, vw, vh);
+        let pad = mediaPadding(getComputedStyle(media));
+        let d = SozvonFraming.tile(media.clientWidth - pad.x,
+                                   media.clientHeight - pad.y, vw, vh, {
+            enabled: enabled,
+            screen: tile.dataset.label === 'screenshare',
+        });
+        tile.classList.toggle('framing-fill', d.fit === 'fill');
+        media.style.objectPosition = d.fit === 'fill' ? d.position : '';
     });
+}
+
+/**
+ * Sozvon: give your own tile the shape of your picture, for the views where
+ * it floats as a thumbnail (the CSS reads --self-ar only there).  Clamped to
+ * 9:16 .. 16:9, so an odd camera cannot make it a needle; a portrait picture
+ * gets a narrower thumbnail, or it would stand half the stage tall.
+ *
+ * @param {HTMLElement} tile
+ * @param {number} vw
+ * @param {number} vh
+ */
+function reflectSelfShape(tile, vw, vh) {
+    if(!vw || !vh)
+        return;
+    let ar = Math.min(16 / 9, Math.max(9 / 16, vw / vh));
+    let value = String(Math.round(ar * 1000) / 1000);
+    if(tile.style.getPropertyValue('--self-ar') === value)
+        return;
+    tile.style.setProperty('--self-ar', value);
+    tile.classList.toggle('thumb-portrait', ar < 1);
+    clampSelfThumb();
 }
 
 /**
@@ -5650,6 +6164,8 @@ function resizePeers() {
     // Window resize can call this method too early
     if (!serverConnection)
         return;
+    // the shape we show a sender's picture in may have changed (Sozvon)
+    scheduleViewReport();
     let up = Object.keys(serverConnection.up).length;
     let down = Object.keys(serverConnection.down).length;
     // Participants with no stream of their own get a cell too, and it takes
@@ -5727,7 +6243,7 @@ function resizePeers() {
                 m.style['max-height'] = '';
         });
         clampSelfThumb();   // keep a moved self-thumbnail on-screen
-        applyRemoteFraming();   // fill vs fit (Sozvon)
+        applyFraming();   // fill vs fit (Sozvon)
         reflectStageEmpty();
         return;
     }
@@ -5743,6 +6259,7 @@ function resizePeers() {
         peers.style['grid-template-columns'] = '';
         clampSelfThumb();
         reflectStageEmpty();
+        applyFraming();
         return;
     }
     if (useSpeakerMany) {
@@ -5786,8 +6303,10 @@ function resizePeers() {
     } else {
         peers.style['grid-template-columns'] = `repeat(${columns}, 1fr)`;
     }
-    if (count === 1)
+    if (count === 1) {
+        applyFraming();
         return;
+    }
     let max_video_height = (peers.offsetHeight - margins) / rows;
     let media_list = peers.querySelectorAll(".media");
     for(let i = 0; i < media_list.length; i++) {
@@ -5805,7 +6324,7 @@ function resizePeers() {
         if(tile instanceof HTMLElement)
             tile.style['max-height'] = max_video_height + "px";
     });
-    applyRemoteFraming();   // keep framing classes in sync (Sozvon)
+    applyFraming();   // keep framing classes in sync (Sozvon)
 }
 
 /**
@@ -6542,6 +7061,9 @@ function gotUser(id, kind) {
         updateCallTimer();
         if(Object.keys(serverConnection.users).length === 3)
             reconsiderSendParameters();
+        // a third person ends fitting to one screen (Sozvon)
+        if(id !== serverConnection.id)
+            adaptationChanged();
         break;
     case 'delete':
         delUser(id);
@@ -6550,6 +7072,10 @@ function gotUser(id, kind) {
         if(e2eeActive())
             serverConnection.e2ee.delUser(id);
         forgetBitrateRequests(id);
+        peerViews.delete(id);
+        viewReported.delete(id);
+        // back to one-to-one, or alone (Sozvon)
+        adaptationChanged();
         maybeClearChatOnSolo();
         updateCallTimer();
         if(Object.keys(serverConnection.users).length < 3)
@@ -7859,6 +8385,10 @@ function gotUserMessage(id, dest, username, time, privileged, kind, error, messa
     case 'sozvon-bitrate':
         if(id && id !== serverConnection.id)
             gotBitrateRequest(id, message);
+        return;
+    case 'sozvon-view':     // VIEW_MESSAGE
+        if(id && id !== serverConnection.id)
+            gotViewReport(id, message);
         return;
     case 'e2ee':
         if(e2eeActive())
@@ -10249,7 +10779,7 @@ function makePrecheck(prefix) {
 
     /**
      * Show the preview the way the call will show it: the fixed base rotation
-     * the outgoing canvas applies (mobileOrientationFilter draws at
+     * the outgoing canvas applies (cameraGeometryFilter draws at
      * settings.videoRotation), and then the self-view mirror on top — the same
      * order, so the arrow turns the picture the way it points here too.
      *

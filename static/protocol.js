@@ -1036,9 +1036,19 @@ ServerConnection.prototype.newUpStream = function(localId) {
     let oldId = null;
     if(localId) {
         let old = sc.findByLocalId(localId);
-        oldId = old && old.id;
-        if(old)
+        if(old) {
+            // The server learns of an up stream from its first offer, and
+            // replaces the stream that offer names.  A stream replaced
+            // again before it sent one is unknown there, so naming it
+            // replaces nothing, and the stream it was itself replacing goes
+            // on being forwarded to everybody -- a frozen second picture of
+            // the same person.  Take over what it was replacing instead.
+            // Two replacements in a row happen when a third person joins:
+            // simulcast turns on, and fitting the picture to one screen
+            // turns off.  (Sozvon)
+            oldId = old.localDescriptionSent ? old.id : old.replace;
             old.close(true);
+        }
     }
 
     let c = new Stream(this, id, localId || newLocalId(), pc, true);
