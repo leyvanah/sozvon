@@ -230,5 +230,17 @@ test('a call that dropped in the background says so when it is back', async ({br
     await expect.poll(() => awayOf(after)).toBe(false);
     // and that was the session it came back in: it was not ended under it
     expect(await alice.evaluate(() => serverConnection.id)).toBe(after);
+
+    // The session the phone could not resume is left to time out on the
+    // server, and the next spec joins the same room.  There it was a third
+    // person: three sessions turn simulcast on, a sender then ignores
+    // bitrate requests by design, and bitrate.spec.js failed on its start
+    // cap -- whenever it started before this session was gone, which in CI
+    // was most of the time (2026-11-05 to 11-09).  Wait for it here, where
+    // it was made: it also shows that such a session does go.
+    const t0 = Date.now();
+    await expect.poll(() => bob.evaluate(id => id in serverConnection.users, before),
+                      {timeout: 60_000}).toBe(false);
+    console.log(`old session gone after ${((Date.now() - t0) / 1000).toFixed(1)} s`);
     expect(alice.errors).toEqual([]);
 });
