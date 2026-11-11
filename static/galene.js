@@ -838,6 +838,12 @@ let udpGivenUpOn = null;
 /** @type {any} */
 let turnWatcher = null;
 
+/**
+ * Whether and when UDP given up in this call is tried again.
+ * @type {any}
+ */
+let udpRetry = null;
+
 /** @returns {Storage|null} */
 function fallbackStorage() {
     try {
@@ -877,6 +883,9 @@ function giveUpUdpRelay(reason) {
     let s = fallbackStorage();
     if(s)
         F.remember(s, Date.now(), udpGivenUpOn);
+    if(!udpRetry)
+        udpRetry = new F.Retry();
+    udpRetry.gaveUp(reason, Date.now());
     console.warn('TURN over UDP does not work here (' + reason +
                  '), falling back to TCP/TLS');
     reportQuality('transport', '', {udp: false, reason: reason});
@@ -914,8 +923,10 @@ function watchTurnPath(c, report) {
         c.userdata.turnPath = key;
         reportQuality('path', c.id, {type: path.type, relay: path.relay});
     }
-    if(udpGivenUp)
+    if(udpGivenUp) {
+        retryUdpAfterLoss();
         return;
+    }
     // A phone takes the network away from a page in the background, about
     // a minute after it is hidden (away.js), and every path goes down with
     // it.  That is the system's doing, not UDP's, yet on a real phone it
@@ -1017,11 +1028,50 @@ function retryUdp() {
     let s = fallbackStorage();
     if(s && F.remembered(s, Date.now(), sc.network))
         return false;
+    // a new network starts from scratch, second chance included
+    udpRetry = null;
+    console.warn('A new network: trying UDP again');
+    putUdpBack('network');
+    return true;
+}
+
+/**
+ * UDP given up for loss gets one more chance later in the same call
+ * (turn-fallback.js says when): loss may have been a bad ten seconds, and
+ * the TCP relay turns every later hiccup into a stall.  The remembered
+ * decision goes too; if UDP loses packets again, it is given up again,
+ * remembered again, and this time left alone.
+ */
+function retryUdpAfterLoss() {
+    let F = turnFallbackApi();
+    if(!F || !udpGivenUp || !udpRetry || !serverConnection)
+        return;
+    // not behind the back of a phone that has the page in the background:
+    // its paths are down anyway, and would be judged on the way back
+    if(document.visibilityState === 'hidden' && pausesWhenHidden())
+        return;
+    if(!udpRetry.due(Date.now()))
+        return;
+    udpRetry.retried();
+    let s = fallbackStorage();
+    if(s)
+        F.forget(s, Date.now(), udpGivenUpOn);
+    console.warn('Trying UDP again after loss');
+    putUdpBack('retry');
+}
+
+/**
+ * Put UDP back in every connection and restart them, judging the paths
+ * from scratch.
+ *
+ * @param {string} reason - 'network' or 'retry', for the connection log
+ */
+function putUdpBack(reason) {
+    let sc = serverConnection;
     udpGivenUp = false;
     udpGivenUpOn = null;
     turnWatcher = null;
-    console.warn('A new network: trying UDP again');
-    reportQuality('transport', '', {udp: true, reason: 'network'});
+    reportQuality('transport', '', {udp: true, reason: reason});
     let conf = onPeerConnection.call(sc) || sc.rtcConfiguration;
     /** @type {Stream[]} */
     let streams = [];
@@ -1041,7 +1091,6 @@ function retryUdp() {
             console.warn('UDP retry', e);
         }
     }
-    return true;
 }
 
 /**

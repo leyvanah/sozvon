@@ -602,16 +602,20 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 			who, dir, connTag(id), relay)
 	case "transport":
 		// the client gave up TURN over UDP (static/turn-fallback.js),
-		// or takes it up again on a new network
+		// or takes it up again: on a new network, or once more in the
+		// same call after giving it up for loss
 		udp, ok := v["udp"].(bool)
 		if !ok {
 			return ""
 		}
 		if udp {
-			if v["reason"] != "network" {
-				return ""
+			switch v["reason"] {
+			case "network":
+				return who + " tries UDP again on a new network"
+			case "retry":
+				return who + " tries UDP again after loss"
 			}
-			return who + " tries UDP again on a new network"
+			return ""
 		}
 		reason, ok := word(v["reason"], fallbackReasons)
 		if !ok {

@@ -209,6 +209,76 @@ test('a broken direct UDP path falls back to the relay over TCP',
     expect(B2.errors).toEqual([]);
 });
 
+test('a direct UDP path given up for loss is tried again, once',
+     async ({browser}) => {
+    // The same stand as the test above.  Loss that lasts ten seconds may be
+    // a bad ten seconds, and the TCP relay turns every later hiccup into a
+    // stall (2026-11-11: an hour's call on TCP after one burst, the audio
+    // seconds behind the picture).  So UDP comes back a while later; given
+    // up for loss a second time, it stays given up.
+    const ctxA = await browser.newContext();
+    const ctxB = await browser.newContext();
+    for (const c of [ctxA, ctxB])
+        await c.grantPermissions(['camera', 'microphone']);
+
+    const A = await join(ctxA, 'alice');
+    const B = await join(ctxB, 'bob');
+    await expect.poll(async () => await B.locator('#peers video').count(),
+                      {timeout: 30_000}).toBe(2);
+
+    const direct = await A.evaluate(() =>
+        serverConnection.rtcConfiguration.iceTransportPolicy !== 'relay');
+    test.skip(!direct, 'the server forces relaying: run it without -relay-only');
+    const relay = await A.evaluate(() =>
+        SozvonTurnFallback.canDropUdp(serverConnection.rtcConfiguration));
+    test.skip(!relay, 'the server offers no relay over TCP: run it with ' +
+              '-turn <address>:1194');
+
+    const isDirectUdp = p => /^(host|srflx|prflx)\/udp$/.test(p);
+    for (const p of [A, B])
+        await expect.poll(async () => (await paths(p)).every(isDirectUdp),
+                          {timeout: 20_000}).toBe(true);
+    const before = await conns(B);
+
+    // minutes in a real call
+    const RETRY = 15000;
+    await B.evaluate(ms => { SozvonTurnFallback.RETRY_AFTER = ms; }, RETRY);
+
+    // A burst of loss: B goes over to the relay's TCP.
+    await B.evaluate(() => { window.__loss = 0.3; });
+    await expect.poll(() => B.evaluate(() => udpRelayGivenUp()),
+                      {timeout: 40_000, intervals: [200]}).toBe(true);
+    const gaveUp = Date.now();
+    await expect.poll(() => paths(B), {timeout: 40_000})
+        .toEqual(['relay/tcp', 'relay/tcp']);
+    await B.evaluate(() => { window.__loss = 0; });
+
+    // ... and comes back to UDP by itself, not before its time, with the
+    // same connections, and with nothing remembered against the network.
+    await expect.poll(async () => (await paths(B)).every(isDirectUdp),
+                      {timeout: 40_000}).toBe(true);
+    expect(Date.now() - gaveUp).toBeGreaterThanOrEqual(RETRY - 1000);
+    expect(await B.evaluate(() => udpRelayGivenUp())).toBe(false);
+    expect(await conns(B)).toEqual(before);
+    await growing(B);
+    await growing(A);
+
+    // Loss again: TCP again, and this time for good.
+    await B.evaluate(() => { window.__loss = 0.3; });
+    await expect.poll(() => paths(B), {timeout: 40_000})
+        .toEqual(['relay/tcp', 'relay/tcp']);
+    await B.evaluate(() => { window.__loss = 0; });
+    await B.waitForTimeout(RETRY * 2.5);
+    expect(await paths(B)).toEqual(['relay/tcp', 'relay/tcp']);
+    expect(await B.evaluate(() => udpRelayGivenUp())).toBe(true);
+    expect(await conns(B)).toEqual(before);
+    await growing(B);
+    await growing(A);
+
+    expect(A.errors).toEqual([]);
+    expect(B.errors).toEqual([]);
+});
+
 test('with no relay to fall back to, a lossy direct path is kept',
      async ({browser}) => {
     // Needs a server that allows direct paths and offers no relay over TCP,
