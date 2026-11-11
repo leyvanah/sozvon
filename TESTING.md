@@ -24,6 +24,13 @@ node --test 'static/test/*.test.js'
 `-composites=false` silences unkeyed-field warnings from Pion and inherited
 upstream structs; every other analyzer runs.
 
+On Windows, `go test -exec "sh $PWD/test/go-test-exec.sh" ./...` runs the
+tests from fixed paths instead.  The firewall asks about every new program
+that listens on the network, and plain `go test` builds each package's tests
+in a fresh directory, so it asked on every run; this way it asks once per
+package.  `test/browser/run.sh` builds its server at a fixed path for the
+same reason.
+
 The web client is also type-checked through its JSDoc annotations:
 
 ```sh

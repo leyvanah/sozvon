@@ -20,8 +20,15 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 port=${SOZVON_TEST_PORT:-18443}
 work=$(mktemp -d "${TMPDIR:-/tmp}/sozvon-browser.XXXXXX")
-bin="$work/sozvon"
-case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) bin="$bin.exe" ;; esac
+# The server is built at one path per port, not in $work: Windows Firewall
+# asks about each new program that listens on the network and remembers the
+# answer by path, so a server in a fresh directory asked on every run (204
+# times by 2026-11-11); at one path it is asked once.  A run on the same port
+# still going holds that file, and then this one builds in $work as before.
+bindir=${SOZVON_TEST_BIN_DIR:-$HOME/.cache/sozvon-test}
+exe=
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) exe=.exe ;; esac
+bin="$bindir/sozvon-browser-$port$exe"
 
 srv=
 stop() {
@@ -35,7 +42,11 @@ trap stop EXIT
 trap 'exit 130' INT TERM
 
 echo "browser tests: building the server" >&2
-( cd "$root" && CGO_ENABLED=0 go build -o "$bin" . )
+if ! { mkdir -p "$bindir" &&
+	( cd "$root" && CGO_ENABLED=0 go build -o "$bin" . ) 2>/dev/null; }; then
+	bin="$work/sozvon$exe"
+	( cd "$root" && CGO_ENABLED=0 go build -o "$bin" . )
+fi
 
 mkdir -p "$work/data" "$work/recordings"
 # A copy of the rooms, since a test may rewrite one (operator-password changes
