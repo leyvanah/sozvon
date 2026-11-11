@@ -115,13 +115,22 @@ test('an operator room comes back by itself after a long network outage',
 test('a remembered operator opening a client link comes in as the operator',
      async ({browser}) => {
     const hub = await operatorAtHub(browser);
+    // The links already listed: the suite shares one server, and an earlier
+    // test (guest-names) leaves a link of its own in this room.  Taking the
+    // first row took that one whenever it was listed before ours -- a link
+    // this page knows no name for, so no name after '#'.
+    const urls = () => hub.locator('.operator-link .operator-url-input')
+        .evaluateAll(els => els.map(e => e.value));
+    await hub.waitForTimeout(1000);
+    const before = new Set(await urls());
     await hub.click('#operator-advanced-toggle');
     await hub.fill('#operator-clientname', 'Анна Петрова');
     await hub.click('.operator-create-btn');
-    const row = hub.locator('.operator-link').first();
-    await expect(row.locator('.operator-url-input')).toHaveValue(/token=/,
-                                                                 {timeout: 20_000});
-    const url = await row.locator('.operator-url-input').inputValue();
+    let url = null;
+    await expect.poll(async () => {
+        url = (await urls()).find(u => /token=/.test(u) && !before.has(u));
+        return !!url;
+    }, {timeout: 20_000}).toBe(true);
     const state = await hub.context().storageState();
 
     // A cold browser opens the link.
