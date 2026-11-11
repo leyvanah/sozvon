@@ -1243,6 +1243,17 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     needs none of this: ICE never selects the UDP relay. Both the client's
     path and a fallback are reported to the connection log
     (`client path relay via udp`, `gives up UDP (loss)`).
+    **UDP given up for loss gets one more chance in the same call.** Loss is
+    weaker evidence than a path that fails or stays down, and TCP does not
+    cure it, only turns it into delay. On 2026-11-11 a ten-second burst put
+    one side of a call on the TCP relay for the rest of the hour, the other
+    side followed on a lossy mobile uplink, and every stall of the TCP path
+    then left the audio one to three seconds behind the picture. Three
+    minutes after giving UDP up for loss the client puts it back, restarts
+    ICE and forgets the remembered decision (`Retry`, `forget`;
+    `tries UDP again after loss` in the connection log). If UDP loses
+    packets again it is given up as before and stays so for the rest of the
+    call. A path given up as failed or disconnected is not retried.
     The same covers **direct UDP to the server**, when the server allows
     direct paths (no `-relay-only`): a direct path over UDP that breaks
     in the same ways gives UDP up too, and giving up also switches the

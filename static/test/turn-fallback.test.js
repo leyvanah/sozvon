@@ -295,3 +295,41 @@ test('only so many networks are remembered, the latest ones', () => {
     assert.ok(f.remembered(s, 2000, 'n' + (f.NETWORKS + 4)));
     assert.ok(!f.remembered(s, 2000, 'n0'));
 });
+
+test('UDP given up for loss is tried again later, once', () => {
+    const r = new f.Retry();
+    assert.ok(!r.due(0), 'nothing was given up yet');
+    r.gaveUp('loss', 1000);
+    assert.ok(!r.due(1000 + f.RETRY_AFTER - 1));
+    assert.ok(r.due(1000 + f.RETRY_AFTER));
+    r.retried();
+    assert.ok(!r.due(1000 + 10 * f.RETRY_AFTER));
+    // the second time it stays given up
+    r.gaveUp('loss', 500000);
+    assert.ok(!r.due(500000 + 10 * f.RETRY_AFTER));
+});
+
+test('a path that failed or stayed down is not tried again', () => {
+    for (const reason of ['failed', 'disconnected']) {
+        const r = new f.Retry();
+        r.gaveUp(reason, 1000);
+        assert.ok(!r.due(1000 + 10 * f.RETRY_AFTER), reason);
+    }
+});
+
+test('trying again forgets the decision, for that network only', () => {
+    const s = memoryStorage();
+    f.remember(s, 1000, 'home');
+    f.remember(s, 1000, 'vpn');
+    f.forget(s, 2000, 'home');
+    assert.ok(!f.remembered(s, 2000, 'home'));
+    assert.ok(f.remembered(s, 2000, 'vpn'));
+    f.remember(s, 1000);
+    f.forget(s, 2000);
+    assert.ok(!f.remembered(s, 2000));
+    const broken = {
+        getItem() { throw new Error('denied'); },
+        setItem() { throw new Error('denied'); },
+    };
+    f.forget(broken, 0, 'home');
+});

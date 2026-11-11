@@ -40,6 +40,16 @@
 // all -- relay-only and no UDP relay -- none of this does anything, and nor
 // does it with no relay over TCP/TLS to fall back to.
 //
+// Loss alone is weak evidence, though: a path that fails or stays down is
+// broken, a path that loses packets for ten seconds may just have had a bad
+// ten seconds.  And TCP does not cure loss, it turns it into delay.  On
+// 2026-11-11 a ten-second burst put a laptop on the TCP relay for the rest of
+// an hour's call, and a phone followed on an ordinary lossy mobile uplink;
+// every stall of the TCP path then left the audio one to three seconds
+// behind the picture.  So UDP given up for loss gets one more chance later
+// in the same call (Retry below); given up for loss again, it stays given
+// up.
+//
 // This file holds the decisions; galene.js does the restarting.
 
 (function(global) {
@@ -58,6 +68,8 @@
     // How many networks it is remembered for at most.
     const NETWORKS = 16;
     const STORAGE_KEY = 'sozvon-turn-udp-off';
+    // How long after UDP was given up for loss it is tried again, once.
+    const RETRY_AFTER = 3 * 60 * 1000;
 
     /**
      * Whether an ICE server URL is a TURN relay reached over UDP.  A turn:
@@ -305,6 +317,62 @@
     }
 
     /**
+     * Drop the decision for a network: UDP is being tried on it again.
+     *
+     * @param {any} storage
+     * @param {number} now
+     * @param {string|null} [network]
+     */
+    function forget(storage, now, network) {
+        try {
+            let v = load(storage, now);
+            delete v[network || ''];
+            storage.setItem(STORAGE_KEY, JSON.stringify(v));
+        } catch(e) {
+        }
+    }
+
+    /**
+     * Decides whether UDP, once given up, is tried again in the same call.
+     * Only a decision taken for loss is, and only once: a path that failed
+     * or stayed disconnected is broken, and UDP that loses packets a second
+     * time is left alone for good.
+     *
+     * @constructor
+     */
+    function Retry() {
+        /** @type {number|null} */
+        this.at = null;
+        this.used = false;
+    }
+
+    /**
+     * UDP has just been given up.
+     *
+     * @param {string} reason - 'failed', 'disconnected' or 'loss'
+     * @param {number} now
+     */
+    Retry.prototype.gaveUp = function(reason, now) {
+        this.at = (reason === 'loss' && !this.used) ? now : null;
+    };
+
+    /**
+     * Whether it is time to try UDP again.
+     *
+     * @param {number} now
+     * @returns {boolean}
+     */
+    Retry.prototype.due = function(now) {
+        return this.at !== null && now - this.at >= api.RETRY_AFTER;
+    };
+
+    /** UDP has been put back. */
+    Retry.prototype.retried = function() {
+        this.used = true;
+        this.at = null;
+    };
+
+    /**
      * Whether giving UDP up would leave anything to connect through: a
      * relay over TCP or TLS.  Without one, withoutUdp gives a relay-only
      * configuration with no relay in it -- every connection restarted on it
@@ -321,8 +389,9 @@
 
     const api = {
         DISCONNECTED_FOR, LOSS, LOSS_POLLS, REMEMBER, NETWORKS, STORAGE_KEY,
+        RETRY_AFTER,
         isUdpRelay, hasUdpRelay, offersUdp, withoutUdp, canDropUdp,
-        selectedPath, Watcher, remembered, remember,
+        selectedPath, Watcher, remembered, remember, forget, Retry,
     };
 
     global.SozvonTurnFallback = api;
