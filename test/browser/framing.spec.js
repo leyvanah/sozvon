@@ -337,3 +337,60 @@ test('the canvas runs on the worker clock, and hidden keeps the camera\'s rate',
 
     expect(alice.errors).toEqual([]);
 });
+
+test('a camera that will not open at 1280x960 opens small and is raised', async ({browser}) => {
+    // Firefox on Windows would not open a laptop's camera asked for a 4:3
+    // bigger than 640x480 -- "Failed to allocate videosource" -- though the
+    // same camera, once open, went to 1280x960 in place (2026-11-11).  This
+    // camera does the same, and Alice has fitting on before she joins: the
+    // room's camera must still come on, and at 1280x960.
+    const context = await browser.newContext({viewport: {width: 1200, height: 1000}});
+    await context.addInitScript(() => {
+        try {
+            if (!sessionStorage.getItem('settings'))
+                sessionStorage.setItem('settings', JSON.stringify({adaptToPeer: true}));
+        } catch (e) { /* ignore */ }
+        const md = navigator.mediaDevices;
+        const real = md.getUserMedia.bind(md);
+        window.openedAt = [];
+        md.getUserMedia = async c => {
+            const v = c && c.video;
+            const h = v && v.height && (v.height.ideal || v.height.exact || v.height);
+            if (v)
+                window.openedAt.push(typeof h === 'number' ? h : null);
+            if (typeof h === 'number' && h > 480 && h * 16 !== (v.width.ideal || 0) * 9)
+                throw new DOMException('Failed to allocate videosource', 'NotReadableError');
+            return real(c);
+        };
+    });
+    const alice = await context.newPage();
+    alice.errors = [];
+    alice.on('pageerror', e => alice.errors.push(String(e)));
+    await alice.goto(`/group/${ROOM}/`);
+    await alice.fill('#username', 'alice');
+    if (await alice.locator('#password').isVisible())
+        await alice.fill('#password', 'x');
+    await alice.click('#precheck-cam');
+    await expect(alice.locator('#precheck-cam'))
+        .toHaveAttribute('aria-pressed', 'true', {timeout: 45_000});
+    await alice.click('#connectbutton');
+    await expect.poll(() => alice.evaluate(() => getSettings().adaptToPeer)).toBe(true);
+    await expect.poll(() => upCamera(alice).then(u => !!u), {timeout: 30_000}).toBe(true);
+    // opened at 480 lines (the preview, then the room), never asked for 960
+    expect(await alice.evaluate(() => window.openedAt)).not.toContain(960);
+    expect(await alice.evaluate(() => {
+        const c = Object.values(serverConnection.up)
+            .find(c => c.label === 'camera');
+        const f = c.userdata.filter;
+        const t = (f && f.inputStream ? f.inputStream : c.stream).getVideoTracks()[0];
+        const k = t.getConstraints();
+        return [t.readyState, k.height && (k.height.ideal || k.height)];
+    })).toEqual(['live', 960]);
+
+    const bob = await join(browser, 'bob', {width: 1200, height: 1000});
+    await expect.poll(() => remote(bob).then(r => r && r.width > 0)).toBe(true);
+    expect(await alice.locator('.toast-error, .toastify').allTextContents())
+        .not.toContain('Failed to allocate videosource');
+    expect(alice.errors).toEqual([]);
+    expect(bob.errors).toEqual([]);
+});

@@ -2303,13 +2303,58 @@ function captureSize(settings) {
         return {width: {ideal: resolution[0]}, height: {ideal: resolution[1]}};
     if(settings.blackboardMode)
         return {width: {min: 640, ideal: 1920}, height: {min: 400, ideal: 1080}};
-    if(!userFilter(settings) && (sendAspect(settings) || settings.adaptToPeer))
+    if(captureCanBeCut(settings))
         return {aspectRatio: {ideal: 4/3},
                 width: {ideal: 1280}, height: {ideal: 960}};
-    // Spelled out, rather than left to the camera's default: a camera
-    // asked for 4:3 alone after 1280x960 stays there (resizeCapture).
+    return plainCaptureSize();
+}
+
+/**
+ * Sozvon: true while captureSize() asks for the bigger picture a cut needs.
+ *
+ * @param {settings} settings
+ * @returns {boolean}
+ */
+function captureCanBeCut(settings) {
+    return !settings.resolution && !settings.blackboardMode &&
+        !userFilter(settings) &&
+        !!(sendAspect(settings) || settings.adaptToPeer);
+}
+
+/**
+ * Sozvon: 640x480, the size a camera gives when asked for 4:3 alone.
+ * Spelled out, rather than left to the camera's default: a camera asked for
+ * 4:3 alone after 1280x960 stays there (resizeCapture).
+ *
+ * @returns {MediaTrackConstraints}
+ */
+function plainCaptureSize() {
     return {aspectRatio: {ideal: 4/3},
             width: {ideal: 640}, height: {ideal: 480}};
+}
+
+/**
+ * Sozvon: the size to open the camera at, which is not always the size it
+ * captures at.
+ *
+ * Firefox on Windows refused to open a laptop's camera when asked for
+ * 1280x960 ("Failed to allocate videosource"), and for 960x720 and
+ * 1920x1440 alike, while 640x480 and 1280x720 opened; and once open at
+ * 640x480, the same camera went to 1280x960 in place, frames and all
+ * (measured 2026-11-11, a real camera in a fresh Firefox each time).  The
+ * call was left with no camera at all, and the toolbar button could not
+ * bring it back.  A preview open in another tab hid it: the room then
+ * shares a camera already running, which is not opened again.  So the
+ * bigger picture a cut needs is not asked for on opening, only right after
+ * it (resizeCapture, from addLocalMediaNow), which is how a format picked
+ * during a call reaches the camera anyway.
+ *
+ * @param {settings} settings
+ * @returns {MediaTrackConstraints}
+ */
+function openCaptureSize(settings) {
+    return captureCanBeCut(settings) ?
+        plainCaptureSize() : captureSize(settings);
 }
 
 /**
@@ -4554,7 +4599,7 @@ async function addLocalMediaNow(localId, force) {
     }
 
     if(video)
-        Object.assign(video, captureSize(settings));
+        Object.assign(video, openCaptureSize(settings));
 
     if(audio) {
         // The "Noise suppression" checkbox toggles ONLY the browser's noise
@@ -4700,10 +4745,17 @@ async function addLocalMediaNow(localId, force) {
         c.userdata.filterDefinition = def;
     // the size the camera captures at (resizeCapture); one carried
     // over from the stream before keeps that stream's
-    if(video && !keep)
-        c.userdata.captureSize = JSON.stringify(captureSize(settings));
-    else if(old && old.userdata.captureSize)
+    if(video && !keep) {
+        c.userdata.captureSize = JSON.stringify(openCaptureSize(settings));
+        // the size it was opened at may be short of the one wanted
+        // (openCaptureSize); raised before anything is sent, so the other
+        // side does not see the picture change size as it starts
+        let vtrack = stream.getVideoTracks()[0];
+        if(vtrack)
+            await resizeCapture(c, vtrack, settings);
+    } else if(old && old.userdata.captureSize) {
         c.userdata.captureSize = old.userdata.captureSize;
+    }
 
     try {
         await setUpStream(c, stream);
