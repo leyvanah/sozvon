@@ -59,6 +59,8 @@ class DeployError extends Error {
     super(message);
     this.name = 'DeployError';
     this.code = opts.code || 'error';
+    // why the installer stopped, as its state file names it (tasks#19)
+    this.reason = opts.reason;
     this.detail = opts.detail;
   }
 }
@@ -384,7 +386,8 @@ class Deployer {
         if (state.status === 'failed') {
           throw new DeployError(
             state.error || state.message || 'The install failed.',
-            { code: 'install', detail: await this.tail().catch(() => '') });
+            { code: 'install', reason: state.code || undefined,
+              detail: await this.tail().catch(() => '') });
         }
       }
 

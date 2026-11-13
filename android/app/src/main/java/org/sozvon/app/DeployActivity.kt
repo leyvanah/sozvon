@@ -23,6 +23,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 import org.sozvon.app.deploy.CertPins
+import org.sozvon.app.deploy.INSTALL_ERRORS
 import org.sozvon.app.deploy.SshDeployer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -436,7 +437,7 @@ class DeployActivity : AppCompatActivity() {
                 ) { progress -> runOnUiThread { onProgress(progress) } }
                 runOnUiThread { onSuccess(res) }
             } catch (e: SshDeployer.DeployException) {
-                runOnUiThread { onFailure(e.message, e.detail) }
+                runOnUiThread { onFailure(e.message, e.detail, e.reason) }
             } catch (e: Exception) {
                 runOnUiThread { onFailure(e.message, null) }
             } finally {
@@ -518,7 +519,7 @@ class DeployActivity : AppCompatActivity() {
                 deployer.uninstall(purge) { p -> runOnUiThread { onProgress(p) } }
                 runOnUiThread { onRemoved(purge) }
             } catch (e: SshDeployer.DeployException) {
-                runOnUiThread { onFailure(e.message, e.detail) }
+                runOnUiThread { onFailure(e.message, e.detail, e.reason) }
             } catch (e: Exception) {
                 runOnUiThread { onFailure(e.message, null) }
             } finally {
@@ -739,15 +740,19 @@ class DeployActivity : AppCompatActivity() {
         show(viewDone)
     }
 
-    private fun onFailure(message: String?, detail: String?) {
+    private fun onFailure(message: String?, detail: String?, reason: String? = null) {
+        // What the installer itself said stays, below, for a bug report.
+        val text = reason?.let { INSTALL_ERRORS[it] }?.let { getString(it) }
         findViewById<TextView>(R.id.error_message).text =
-            message ?: getString(R.string.deploy_failed)
+            text ?: message ?: getString(R.string.deploy_failed)
+        val more = listOfNotNull(if (text != null) message else null, detail)
+            .filter { it.isNotBlank() }.joinToString("\n\n")
         val d = findViewById<TextView>(R.id.error_detail)
-        if (detail.isNullOrBlank()) {
+        if (more.isEmpty()) {
             d.visibility = View.GONE
         } else {
             d.visibility = View.VISIBLE
-            d.text = detail
+            d.text = more
         }
         show(viewError)
     }

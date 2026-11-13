@@ -138,7 +138,9 @@ blocked, group and operator names, ports, uninstall).
 The script is also meant to be driven by a program: `--detach` runs it in the
 background and every stage reports progress as JSON in
 `/var/lib/sozvon-install/state.json`, so a caller whose connection drops can
-reconnect and read the state rather than holding the session open.
+reconnect and read the state rather than holding the session open. A failure
+carries a stable `code` (`port-in-use`, `download-failed`, …) next to the
+human-readable `error`, so a program can explain it in its own words.
 
 ## Getting the app
 

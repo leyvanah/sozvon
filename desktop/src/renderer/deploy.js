@@ -130,10 +130,15 @@ $('go').addEventListener('click', async () => {
     show('done');
   } else {
     markFailed();
-    $('e-msg').textContent = (res && res.message) || 'Неизвестная ошибка.';
-    if (res && res.detail) {
+    // What the installer itself said stays, below, for a bug report.
+    const said = (res && res.message) || '';
+    const text = res && installErrorText(res.reason);
+    $('e-msg').textContent = text || said || 'Неизвестная ошибка.';
+    const detail = [text ? said : '', (res && res.detail) || '']
+      .filter(Boolean).join('\n\n');
+    if (detail) {
       $('e-detail').hidden = false;
-      $('e-detail').textContent = res.detail;
+      $('e-detail').textContent = detail;
     }
     show('error');
   }

@@ -1438,6 +1438,7 @@ handleOurs('deploy:start', async (_e, opts) => {
     return {
       ok: false,
       code: e.code || 'error',
+      reason: e.reason,
       message: e.message || String(e),
       detail: e.detail,
     };
