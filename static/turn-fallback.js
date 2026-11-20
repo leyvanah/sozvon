@@ -63,6 +63,11 @@
     // consecutive polls (of about 2 s) it must persist.
     const LOSS = 0.15;
     const LOSS_POLLS = 5;
+    // A packet counter that stops is only a fault if the server is still
+    // forwarding audio. Give it two normal quality intervals to recover.
+    const AUDIO_STALL_FOR = 4000;
+    const AUDIO_PROBE_MAX_GAP = 6000;
+    const MIN_FORWARDED_AUDIO = 20;
     // How long the decision is remembered, for the network it was taken on.
     const REMEMBER = 6 * 3600 * 1000;
     // How many networks it is remembered for at most.
@@ -188,33 +193,66 @@
      * @constructor
      */
     function Watcher() {
-        /** @type {Map<string, {path: any, disconnectedSince: number|null, lossPolls: number}>} */
+        /** @type {Map<string, {path: any, disconnectedSince: number|null, lossPolls: number, audio: any}>} */
         this.streams = new Map();
+        this.audioProbes = new AudioProbes();
     }
+
+    // Revisit each batch on the next quality poll, before moving to another
+    // batch. Even a large call then gets two samples close together.
+    function AudioProbes() {
+        this.last = null;
+        this.repeat = [];
+    }
+
+    AudioProbes.prototype.next = function(ids) {
+        let batch = this.repeat.filter(id => ids.includes(id));
+        this.repeat = [];
+        if(batch.length || !ids.length)
+            return batch;
+        let start = (ids.indexOf(this.last) + 1) % ids.length;
+        let end = start + Math.min(16, ids.length);
+        batch = ids.slice(start, end).concat(ids.slice(0, Math.max(0, end - ids.length)));
+        this.last = batch[batch.length - 1];
+        this.repeat = batch;
+        return batch;
+    };
 
     /**
      * Feed one poll of one connection.  Returns null, or the reason to give
-     * up UDP: 'failed', 'disconnected' or 'loss'.
+     * up UDP.
      *
      * @param {string} id
      * @param {Object} o
      * @param {string} o.ice - iceConnectionState
      * @param {{type: string, relay: string|null}|null} o.path
      * @param {number|null} [o.loss] - loss over the last poll, 0..1
+     * @param {{id: string, packets: number}|null} [o.audio] - inbound audio
      * @param {number} now
      * @returns {string|null}
      */
     Watcher.prototype.update = function(id, o, now) {
         let s = this.streams.get(id);
         if(!s) {
-            s = {path: null, disconnectedSince: null, lossPolls: 0};
+            s = {path: null, disconnectedSince: null, lossPolls: 0, audio: null};
             this.streams.set(id, s);
         }
         // remember the last path seen while connected: once ICE is down,
         // the stats may no longer say which pair it was
-        if(o.path && (o.ice === 'connected' || o.ice === 'completed'))
+        let connected = o.ice === 'connected' || o.ice === 'completed';
+        if(o.path && connected)
             s.path = o.path;
         let onUdp = !!s.path && s.path.relay === 'udp';
+        let audio = connected && o.path && o.path.relay === 'udp' ? o.audio : null;
+        if(!audio) {
+            s.audio = null;
+        } else if(!s.audio || s.audio.id !== audio.id || s.audio.packets !== audio.packets ||
+                  now - s.audio.sampled > AUDIO_STALL_FOR) {
+            s.audio = {id: audio.id, packets: audio.packets, since: now, sampled: now,
+                       forwarded: null};
+        } else {
+            s.audio.sampled = now;
+        }
 
         if(o.ice === 'disconnected') {
             if(s.disconnectedSince === null)
@@ -238,7 +276,31 @@
             return 'disconnected';
         if(s.lossPolls >= LOSS_POLLS)
             return 'loss';
+        if(s.audio && s.audio.forwarded?.confirmed &&
+           now - s.audio.forwarded.at <= AUDIO_PROBE_MAX_GAP &&
+           now - s.audio.since >= AUDIO_STALL_FOR)
+            return 'audio-stalled';
         return null;
+    };
+
+    Watcher.prototype.needsAudioProbe = function(id) {
+        let audio = this.streams.get(id)?.audio;
+        return !!audio && audio.sampled > audio.since;
+    };
+
+    Watcher.prototype.confirmAudio = function(id, packets, requestedAt) {
+        let audio = this.streams.get(id)?.audio;
+        if(!audio || requestedAt <= audio.since || !Number.isSafeInteger(packets))
+            return;
+        let prev = audio.forwarded;
+        if(prev && requestedAt <= prev.at)
+            return;
+        audio.forwarded = {
+            packets: packets,
+            at: requestedAt,
+            confirmed: !!prev && requestedAt - prev.at <= AUDIO_PROBE_MAX_GAP &&
+                packets - prev.packets >= MIN_FORWARDED_AUDIO,
+        };
     };
 
     /** @param {string} id */
@@ -349,7 +411,7 @@
     /**
      * UDP has just been given up.
      *
-     * @param {string} reason - 'failed', 'disconnected' or 'loss'
+     * @param {string} reason
      * @param {number} now
      */
     Retry.prototype.gaveUp = function(reason, now) {

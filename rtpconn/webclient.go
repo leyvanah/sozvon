@@ -80,8 +80,9 @@ type webClient struct {
 	up   map[string]*rtpUpConnection
 
 	// rate limit on quality reports, see connlog.go (Sozvon)
-	qualityTokens float64
-	qualityTime   time.Time
+	qualityTokens  float64
+	qualityTime    time.Time
+	audioProbeTime time.Time
 
 	// signalling resume, see resume.go; both are set before the
 	// session's goroutines start and never change (Sozvon)
@@ -2397,6 +2398,9 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 	case "pong":
 		// nothing
 	case "sozvon-quality":
+		if m.Kind == "audio-probe" {
+			return probeAudio(c, m)
+		}
 		gotQualityReport(c, m)
 	case "ping":
 		return c.write(clientMessage{
