@@ -1243,6 +1243,13 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     needs none of this: ICE never selects the UDP relay. Both the client's
     path and a fallback are reported to the connection log
     (`client path relay via udp`, `gives up UDP (loss)`).
+    **Stalled incoming audio on UDP** can be detected even while ICE says
+    connected. For a negotiated, unmuted audio track, the browser compares its
+    receive counter with fresh packet counts from the SFU. If the SFU keeps
+    sending and the browser receives nothing, only that receive connection
+    tries TURN over TCP/TLS. It keeps the relay once audio packets arrive,
+    or restores the earlier configuration after ten seconds. This decision
+    is not remembered for future calls.
     **UDP given up for loss gets one more chance in the same call.** Loss is
     weaker evidence than a path that fails or stays down, and TCP does not
     cure it, only turns it into delay. On 2026-11-11 a ten-second burst put

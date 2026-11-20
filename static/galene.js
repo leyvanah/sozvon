@@ -868,7 +868,7 @@ function udpRelayGivenUp() {
  * Take TURN over UDP out of every connection and restart ICE on each, so
  * that they come back over TLS.
  *
- * @param {string} reason - 'failed', 'disconnected' or 'loss'
+ * @param {string} reason
  */
 function giveUpUdpRelay(reason) {
     let F = turnFallbackApi();
@@ -898,6 +898,7 @@ function giveUpUdpRelay(reason) {
     for(let c of streams) {
         if(!c.pc)
             continue;
+        clearAudioRelay(c);
         try {
             c.pc.setConfiguration(F.withoutUdp(c.pc.getConfiguration()));
             c.restartIce();
@@ -923,6 +924,12 @@ function watchTurnPath(c, report) {
         c.userdata.turnPath = key;
         reportQuality('path', c.id, {type: path.type, relay: path.relay});
     }
+    let trial = c.userdata.audioRelay;
+    if(trial) {
+        if(trial.timer !== null)
+            checkAudioRelay(c, report, path);
+        return;
+    }
     if(udpGivenUp) {
         retryUdpAfterLoss();
         return;
@@ -942,13 +949,151 @@ function watchTurnPath(c, report) {
     if(!turnWatcher)
         turnWatcher = new F.Watcher();
     let q = c.userdata.quality;
+    let retry = c.userdata.audioRelayRetry;
+    let canTryAudio = !retry || retry.network !== c.sc.network || Date.now() >= retry.at;
+    let audio = !c.up && c.label === 'camera' && path?.relay === 'udp' &&
+        canTryAudio && F.canDropUdp(serverConnection.rtcConfiguration) ?
+        inboundAudio(c, report) : null;
     let reason = turnWatcher.update(c.id, {
         ice: c.pc.iceConnectionState,
         path: path,
         loss: q && q.last ? q.last.loss : null,
+        audio: audio,
     }, Date.now());
-    if(reason)
+    if(reason === 'audio-stalled')
+        tryAudioRelay(c);
+    else if(reason)
         giveUpUdpRelay(reason);
+}
+
+function inboundAudio(c, report) {
+    // The published stream list is inferred from ontrack. Use the negotiated
+    // receiver here so a track with no inbound RTP stats can start at zero.
+    if(c.sc.users[c.source]?.data?.muted)
+        return null;
+    let tracks = c.pc.getTransceivers().filter(t =>
+        (t.currentDirection === 'recvonly' || t.currentDirection === 'sendrecv') &&
+        t.receiver.track.kind === 'audio' && t.receiver.track.readyState === 'live');
+    if(!tracks.length)
+        return null;
+    let ids = [];
+    let packets = 0;
+    for(let r of report.values()) {
+        if(r.type === 'inbound-rtp' && (r.kind || r.mediaType) === 'audio') {
+            ids.push(r.id);
+            packets += r.packetsReceived || 0;
+        }
+    }
+    let trackIds = tracks.map(t => t.receiver.track.id).sort().join(' ');
+    return {id: trackIds + ':' + ids.sort().join(' '), packets: packets};
+}
+
+// A failed relay attempt must not leave an otherwise working call relay-only.
+const audioRelayTimeout = 10000;
+const audioRelayCooldown = 30000;
+
+function tryAudioRelay(c) {
+    if(c.sc.resuming || c.sc.socket?.readyState !== WebSocket.OPEN)
+        return;
+    let F = turnFallbackApi();
+    let configuration = c.pc.getConfiguration();
+    if(!F.canDropUdp(configuration) || !F.offersUdp(configuration))
+        return;
+    let trial = {pc: c.pc, configuration: configuration, network: c.sc.network,
+                 sample: null, timer: null};
+    c.userdata.audioRelay = trial;
+    turnWatcher.forget(c.id);
+    trial.timer = setTimeout(() => {
+        if(c.userdata.audioRelay === trial)
+            restoreAudioUdp(c);
+    }, audioRelayTimeout);
+    reportQuality('audio-relay', c.id, {phase: 'trying'});
+    try {
+        c.pc.setConfiguration(F.withoutUdp(configuration));
+        c.restartIce();
+    } catch(e) {
+        console.warn('Audio relay restart', e);
+        restoreAudioUdp(c);
+    }
+}
+
+function checkAudioRelay(c, report, path) {
+    let trial = c.userdata.audioRelay;
+    let audio = path?.relay === 'tcp' || path?.relay === 'tls' ?
+        inboundAudio(c, report) : null;
+    let previous = trial.sample;
+    trial.sample = audio;
+    if(!audio || previous?.id !== audio.id || audio.packets <= previous.packets)
+        return;
+    clearTimeout(trial.timer);
+    trial.timer = null;
+    reportQuality('audio-relay', c.id, {phase: 'receiving'});
+}
+
+function clearAudioRelay(c) {
+    let trial = c.userdata.audioRelay;
+    if(trial) {
+        clearTimeout(trial.timer);
+        delete c.userdata.audioRelay;
+    }
+    return trial;
+}
+
+function restoreAudioUdp(c) {
+    let trial = clearAudioRelay(c);
+    if(!trial || c.sc !== serverConnection || c.pc !== trial.pc ||
+       c.sc.down[c.id] !== c || c.pc.signalingState === 'closed')
+        return;
+    c.userdata.audioRelayRetry = {at: Date.now() + audioRelayCooldown,
+                                  network: trial.network};
+    turnWatcher?.forget(c.id);
+    reportQuality('audio-relay', c.id, {phase: 'restoring'});
+    try {
+        c.pc.setConfiguration(trial.configuration);
+        c.restartIce();
+        iceRecovery?.restarted(c.id, Date.now());
+    } catch(e) {
+        console.warn('Restoring UDP after the audio relay attempt', e);
+    }
+}
+
+// Ask the server only when packets have stopped arriving. Comparing two
+// replies distinguishes a dead receive path from a quiet or stopped sender.
+let pendingAudioProbe = null;
+
+function probeStalledAudio(sc) {
+    if(!turnWatcher?.audioProbes ||
+       udpGivenUp || sc.resuming || !sc.socket ||
+       sc.socket.readyState !== WebSocket.OPEN ||
+       (document.visibilityState === 'hidden' && pausesWhenHidden()))
+        return;
+    let ids = Object.keys(sc.down).filter(id => turnWatcher.needsAudioProbe(id));
+    if(!ids.length)
+        return;
+    let now = Date.now();
+    if(pendingAudioProbe && pendingAudioProbe.sc === sc &&
+       now - pendingAudioProbe.now < qualityInterval)
+        return;
+    let id = String(now);
+    let batch = turnWatcher.audioProbes.next(ids);
+    pendingAudioProbe = {sc, id, now, network: sc.network};
+    try {
+        sc.send({type: 'sozvon-quality', kind: 'audio-probe', id, value: batch});
+    } catch(e) {
+        pendingAudioProbe = null;
+    }
+}
+
+/** @this {ServerConnection} */
+function gotAudioProbe(id, counts) {
+    let p = pendingAudioProbe;
+    if(!p || p.sc !== this || p.id !== id || p.network !== this.network ||
+       Date.now() - p.now > qualityInterval ||
+       !turnWatcher || !counts || typeof counts !== 'object')
+        return;
+    pendingAudioProbe = null;
+    for(let stream of Object.keys(counts))
+        turnWatcher.confirmAudio(stream, counts[stream], p.now);
 }
 
 // ice-recovery.js decides when a connection whose path went away is
@@ -971,7 +1116,7 @@ let iceRecovery = null;
  */
 function recoverIce(c) {
     let R = iceRecoveryApi();
-    if(!R || !c.pc)
+    if(!R || !c.pc || c.userdata.audioRelay?.timer != null)
         return;
     if(!iceRecovery)
         iceRecovery = new R.Recovery();
@@ -1006,8 +1151,13 @@ function gotResumed() {
         return;
     for(let id in this.up)
         recoverIce(this.up[id]);
-    for(let id in this.down)
-        recoverIce(this.down[id]);
+    for(let id in this.down) {
+        let c = this.down[id];
+        if(c.userdata.audioRelay && c.userdata.audioRelay.network !== this.network)
+            restoreAudioUdp(c);
+        else
+            recoverIce(c);
+    }
 }
 
 /**
@@ -1370,6 +1520,7 @@ async function rejoinAfterReconnect() {
  */
 function gotDownStream(c) {
     c.onclose = function(replace) {
+        clearAudioRelay(c);
         releaseBitrateCap(c);
         if(!replace)
             delMedia(c.localId);
@@ -1389,7 +1540,12 @@ function gotDownStream(c) {
     }
     c.onstatus = function(status) {
         setMediaStatus(c);
+        if(status === 'failed' && c.userdata.audioRelay) {
+            restoreAudioUdp(c);
+            return false;
+        }
         recoverIce(c);
+        return true;
     };
     c.onstats = gotDownStats;
     if(getSettings().activityDetection)
@@ -3024,6 +3180,7 @@ async function pollQuality() {
     let Q = qualityApi();
     if(!Q || !serverConnection || !serverConnection.socket)
         return;
+    let sc = serverConnection;
     /** @type {Stream[]} */
     let streams = [];
     for(let id in serverConnection.up)
@@ -3042,6 +3199,8 @@ async function pollQuality() {
         } catch(e) {
             console.warn('getStats failed', e);
         }
+        if(sc !== serverConnection)
+            return;
         feedQuality(c, pc.iceConnectionState, snap);
         if(report) {
             feedBitrate(c, report);
@@ -3049,6 +3208,9 @@ async function pollQuality() {
         }
         recoverIce(c);
     }));
+    if(sc !== serverConnection)
+        return;
+    probeStalledAudio(sc);
     if(turnWatcher)
         for(let id of [...turnWatcher.streams.keys()])
             if(!serverConnection.up[id] && !serverConnection.down[id])
@@ -12009,6 +12171,7 @@ async function serverConnect() {
     serverConnection.onbeforeclose = noteSentMedia;
     serverConnection.onclose = gotClose;
     serverConnection.onresumed = gotResumed;
+    serverConnection.onaudioprobe = gotAudioProbe;
     serverConnection.ondownstream = gotDownStream;
     serverConnection.onuser = gotUser;
     serverConnection.onknock = gotKnock;

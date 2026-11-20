@@ -237,6 +237,8 @@ function ServerConnection() {
      * @type{(this: ServerConnection) => void}
      */
     this.onresumed = null;
+    /** @type{(this: ServerConnection, id: string, counts: Object) => void} */
+    this.onaudioprobe = null;
     /**
      * onclose is called when the connection is closed
      *
@@ -677,6 +679,10 @@ ServerConnection.prototype.connect = function(url) {
         case 'sozvon-network':
             if(typeof m.value === 'string')
                 sc.network = m.value;
+            break;
+        case 'sozvon-audio-probe':
+            if(sc.onaudioprobe)
+                sc.onaudioprobe.call(sc, m.id, m.value);
             break;
         case 'sozvon-resumed': {
             if(!sc.resuming)
@@ -1213,9 +1219,9 @@ ServerConnection.prototype.gotOffer = async function(id, label, source, username
         };
 
         pc.oniceconnectionstatechange = e => {
-            if(c.onstatus)
-                c.onstatus.call(c, pc.iceConnectionState);
-            if(pc.iceConnectionState === 'failed') {
+            let state = pc.iceConnectionState;
+            let handled = c.onstatus?.call(c, state) === false;
+            if(state === 'failed' && !handled) {
                 sc.send({
                     type: 'renegotiate',
                     id: id,
@@ -1563,7 +1569,8 @@ function Stream(sc, id, localId, pc, up) {
     /**
      * onstatus is called whenever the status of the stream changes.
      *
-     * @type{(this: Stream, status: string) => void}
+     * Returning false suppresses the default ICE restart on a down stream.
+     * @type{(this: Stream, status: string) => void | boolean}
      */
     this.onstatus = null;
     /**

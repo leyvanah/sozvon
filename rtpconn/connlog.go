@@ -635,6 +635,19 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		}
 		return fmt.Sprintf("%v %v=%v restarts ICE %v",
 			who, dir, connTag(id), why)
+	case "audio-relay":
+		if dir, ok := streamKind(c, id); !ok || dir != "down" {
+			return ""
+		}
+		switch v["phase"] {
+		case "trying":
+			return fmt.Sprintf("%v down=%v tries TURN after audio stalled", who, connTag(id))
+		case "receiving":
+			return fmt.Sprintf("%v down=%v receives audio over TURN", who, connTag(id))
+		case "restoring":
+			return fmt.Sprintf("%v down=%v restores UDP after trying TURN", who, connTag(id))
+		}
+		return ""
 	case "camera":
 		dir, ok := streamKind(c, id)
 		if !ok || dir != "up" {

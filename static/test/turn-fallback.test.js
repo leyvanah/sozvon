@@ -101,6 +101,101 @@ test('reads the path in use, Chrome and Firefox style', () => {
 const onUdp = {type: 'relay', relay: 'udp'};
 const onTls = {type: 'relay', relay: 'tls'};
 
+function audioPoll(watcher, time, packets, id = 'audio') {
+    return watcher.update('down', {
+        ice: 'connected',
+        path: onUdp,
+        audio: packets === null ? null : {id, packets},
+    }, time);
+}
+
+test('a stopped inbound audio counter needs two reports that prove the server is still sending', () => {
+    const w = new f.Watcher();
+    audioPoll(w, 0, 100);
+    assert.equal(w.needsAudioProbe('down'), false);
+    audioPoll(w, 2000, 100);
+    assert.equal(w.needsAudioProbe('down'), true);
+    w.confirmAudio('down', 110, 2000);
+    assert.equal(audioPoll(w, 4000, 100), null);
+    w.confirmAudio('down', 180, 4000);
+    assert.equal(audioPoll(w, 6000, 100), 'audio-stalled');
+});
+
+test('quiet or muted audio and short gaps leave the UDP path in place', () => {
+    const w = new f.Watcher();
+    audioPoll(w, 0, 100);
+    audioPoll(w, 2000, 100);
+    w.confirmAudio('down', 110, 2000);
+    audioPoll(w, 4000, 100);
+    w.confirmAudio('down', 114, 4000);
+    assert.equal(audioPoll(w, 6000, 100), null);
+    w.confirmAudio('down', 170, 6000);
+    assert.equal(audioPoll(w, 8000, 140), null);
+    assert.equal(w.needsAudioProbe('down'), false);
+    assert.equal(audioPoll(w, 10000, null), null);
+    w.confirmAudio('down', 200, 8000);
+    assert.equal(w.needsAudioProbe('down'), false);
+});
+
+test('a new track or a gap in samples discards stale audio probe results', () => {
+    const w = new f.Watcher();
+    audioPoll(w, 0, 100);
+    audioPoll(w, 2000, 100);
+    w.confirmAudio('down', 110, 2000);
+    audioPoll(w, 4000, 100, 'new audio');
+    w.confirmAudio('down', 180, 3000);
+    assert.equal(audioPoll(w, 6000, 100, 'new audio'), null);
+    w.confirmAudio('down', 240, 6000);
+    assert.equal(audioPoll(w, 12000, 100, 'new audio'), null);
+    assert.equal(w.needsAudioProbe('down'), false);
+});
+
+test('a late server count after a signalling gap starts a new audio probe', () => {
+    const w = new f.Watcher();
+    audioPoll(w, 0, 100);
+    audioPoll(w, 2000, 100);
+    w.confirmAudio('down', 110, 2000);
+    for(let now = 4000; now <= 12000; now += 2000)
+        assert.equal(audioPoll(w, now, 100), null);
+    w.confirmAudio('down', 240, 12000);
+    assert.equal(audioPoll(w, 14000, 100), null);
+    w.confirmAudio('down', 300, 14000);
+    assert.equal(audioPoll(w, 16000, 100), 'audio-stalled');
+});
+
+test('a negotiated track with zero packets can get a forwarding confirmation', () => {
+    const w = new f.Watcher();
+    assert.equal(audioPoll(w, 0, 0), null);
+    assert.equal(audioPoll(w, 2000, 0), null);
+    assert.equal(w.needsAudioProbe('down'), true);
+    w.confirmAudio('down', 100, 2000);
+    assert.equal(audioPoll(w, 4000, 0), null);
+    w.confirmAudio('down', 200, 4000);
+    assert.equal(audioPoll(w, 6000, 0), 'audio-stalled');
+});
+
+test('64 stalled connections all get a pair of fresh forwarding samples', () => {
+    const w = new f.Watcher();
+    const ids = Array.from({length: 64}, (_, i) => 'down-' + i);
+    const detected = new Set();
+    for(let now = 0; now <= 18000; now += 2000) {
+        for(let id of ids) {
+            if(detected.has(id))
+                continue;
+            const reason = w.update(id, {ice: 'connected', path: onUdp,
+                audio: {id: 'audio', packets: 100}}, now);
+            if(reason === 'audio-stalled')
+                detected.add(id);
+        }
+        const batch = w.audioProbes.next(ids.filter(id =>
+            !detected.has(id) && w.needsAudioProbe(id)));
+        assert.ok(batch.length <= 16);
+        for(let id of batch)
+            w.confirmAudio(id, now / 20, now);
+    }
+    assert.equal(detected.size, ids.length);
+});
+
 test('ICE failing on a UDP relay gives UDP up at once', () => {
     let w = new f.Watcher();
     assert.strictEqual(w.update('a', {ice: 'connected', path: onUdp}, 0), null);

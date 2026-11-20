@@ -14,6 +14,7 @@
 // flowing.
 
 import {test, expect} from '@playwright/test';
+import net from 'node:net';
 
 test.afterEach(async ({browser}) => {
     for (const c of browser.contexts())
@@ -29,22 +30,36 @@ async function join(context, name) {
     await page.addInitScript(() => {
         try { localStorage.setItem('sozvon-lang', 'ru'); } catch(e) {}
         window.__loss = 0;
+        window.__stalledAudio = null;
+        window.__stalledAudioSamples = 0;
+        window.__missingAudio = false;
         const orig = RTCPeerConnection.prototype.getStats;
         RTCPeerConnection.prototype.getStats = async function(...args) {
             const report = await orig.apply(this, args);
-            if (args.length || !window.__loss)
+            if (args.length || (!window.__loss && !window.__stalledAudio &&
+                                !window.__missingAudio))
                 return report;
             this.__lost = this.__lost || {};
             const out = new Map();
             for (const [k, r] of report) {
-                if (r.type === 'inbound-rtp') {
+                if (window.__missingAudio && r.type === 'inbound-rtp' &&
+                    (r.kind || r.mediaType) === 'audio')
+                    continue;
+                if (r.type === 'inbound-rtp' && (r.kind || r.mediaType) === 'audio' &&
+                    window.__stalledAudio) {
+                    const counts = window.__stalledAudio;
+                    window.__stalledAudioSamples++;
+                    if (!counts.has(k))
+                        counts.set(k, r.packetsReceived);
+                    out.set(k, {...r, packetsReceived: counts.get(k)});
+                } else if (r.type === 'inbound-rtp' && window.__loss) {
                     // add lost packets in proportion to those received
                     const e = this.__lost[k] ||
                         (this.__lost[k] = {base: r.packetsReceived, extra: 0});
                     e.extra = Math.round((r.packetsReceived - e.base) *
                                          window.__loss / (1 - window.__loss));
                     out.set(k, {...r, packetsLost: (r.packetsLost || 0) + e.extra});
-                } else if (r.type === 'remote-inbound-rtp') {
+                } else if (r.type === 'remote-inbound-rtp' && window.__loss) {
                     // what the other end reports about what we send
                     out.set(k, {...r, fractionLost: window.__loss});
                 } else {
@@ -98,6 +113,27 @@ async function growing(page) {
     await expect.poll(() => received(page), {timeout: 20_000})
         .toBeGreaterThan(before + 20000);
 }
+
+const downstream = page => page.evaluate(() => {
+    const [stream] = Object.values(serverConnection.down);
+    const trial = stream?.userdata.audioRelay;
+    return {
+        trial: trial ? (trial.timer === null ? 'receiving' : 'trying') : null,
+        path: stream?.userdata.turnPath,
+        policy: stream?.pc.getConfiguration().iceTransportPolicy,
+        rolledBack: !!stream?.userdata.audioRelayRetry,
+    };
+});
+
+const audioPackets = page => page.evaluate(async () => {
+    const [stream] = Object.values(serverConnection.down);
+    if(!stream?.pc)
+        return 0;
+    const stats = await stream.pc.getStats();
+    return [...stats.values()].filter(r => r.type === 'inbound-rtp' &&
+        (r.kind || r.mediaType) === 'audio')
+        .reduce((sum, r) => sum + r.packetsReceived, 0);
+});
 
 test('a broken UDP relay falls back to TCP and the call goes on',
      async ({browser}) => {
@@ -207,6 +243,127 @@ test('a broken direct UDP path falls back to the relay over TCP',
 
     expect(A.errors).toEqual([]);
     expect(B2.errors).toEqual([]);
+});
+
+test('a direct UDP path with stalled audio falls back only while its sender is active',
+     async ({browser}) => {
+    const ctxA = await browser.newContext();
+    const ctxB = await browser.newContext();
+    for (const c of [ctxA, ctxB])
+        await c.grantPermissions(['camera', 'microphone']);
+
+    const A = await join(ctxA, 'alice');
+    const B = await join(ctxB, 'bob');
+    const conf = await A.evaluate(() => serverConnection.rtcConfiguration);
+    test.skip(conf.iceTransportPolicy === 'relay' ||
+        !await A.evaluate(() => SozvonTurnFallback.canDropUdp(serverConnection.rtcConfiguration)),
+        'requires direct paths and a TURN relay over TCP/TLS');
+    const relay = await A.evaluate(() => {
+        const conf = serverConnection.rtcConfiguration;
+        const urls = conf.iceServers.flatMap(s => s.urls);
+        return urls.some(u => /^turn:/i.test(u) && /transport=tcp/i.test(u)) ?
+            'relay/tcp' : 'relay/tls';
+    });
+    const onDirectUdp = async page => {
+        const route = await paths(page);
+        return route.length === 2 && route.every(p => /^(host|srflx|prflx)\/udp$/.test(p));
+    };
+    await expect.poll(() => onDirectUdp(A)).toBe(true);
+    await expect.poll(() => onDirectUdp(B)).toBe(true);
+    await expect.poll(() => B.evaluate(async () => {
+        const [stream] = Object.values(serverConnection.down);
+        return [...(await stream.pc.getStats()).values()].some(r =>
+            r.type === 'inbound-rtp' && (r.kind || r.mediaType) === 'audio' &&
+            r.packetsReceived > 0);
+    })).toBe(true);
+
+    const toggleMic = page =>
+        page.evaluate(() => document.getElementById('mutebutton').click());
+    const source = await A.evaluate(() => serverConnection.id);
+    await toggleMic(A);
+    await expect.poll(() => B.evaluate(id => micSilent(id), source)).toBe(true);
+    await B.evaluate(() => { window.__stalledAudio = new Map(); });
+    await expect.poll(() => B.evaluate(() => window.__stalledAudioSamples))
+        .toBeGreaterThanOrEqual(5);
+    expect((await downstream(B)).trial).toBeNull();
+    expect(await onDirectUdp(B)).toBe(true);
+
+    const session = await B.evaluate(() => serverConnection.id);
+    const streams = await conns(B);
+    await toggleMic(A);
+    await expect.poll(() => downstream(B), {timeout: 20_000})
+        .toMatchObject({trial: 'trying', policy: 'relay'});
+    await B.evaluate(() => { window.__stalledAudio = null; });
+    await expect.poll(() => downstream(B))
+        .toMatchObject({trial: 'receiving', path: relay, policy: 'relay'});
+    const route = await paths(B);
+    expect(route).toContain(relay);
+    expect(route.some(p => /^(host|srflx|prflx)\/udp$/.test(p))).toBe(true);
+    expect(await conns(B)).toEqual(streams);
+    await growing(B);
+    expect(await B.evaluate(() => serverConnection.id)).toBe(session);
+    expect(A.errors).toEqual([]);
+    expect(B.errors).toEqual([]);
+});
+
+test('a direct UDP path is restored when the audio relay does not answer', async ({browser}) => {
+    const sockets = new Set();
+    const deadRelay = net.createServer(socket => {
+        sockets.add(socket);
+        socket.on('close', () => sockets.delete(socket));
+        socket.on('error', () => {});
+    });
+    await new Promise(resolve => deadRelay.listen(0, '127.0.0.1', resolve));
+    try {
+        const ctxA = await browser.newContext();
+        const ctxB = await browser.newContext();
+        for (const c of [ctxA, ctxB])
+            await c.grantPermissions(['camera', 'microphone']);
+        const A = await join(ctxA, 'alice');
+        const B = await join(ctxB, 'bob');
+        const canTest = await B.evaluate(() => {
+            const conf = serverConnection.rtcConfiguration;
+            return conf.iceTransportPolicy !== 'relay' && SozvonTurnFallback.canDropUdp(conf);
+        });
+        test.skip(!canTest, 'requires direct paths and a TURN relay over TCP/TLS');
+        await expect.poll(() => audioPackets(B)).toBeGreaterThan(10);
+        await expect.poll(() => downstream(B)).toMatchObject({
+            trial: null, policy: 'all', path: expect.stringMatching(/^(host|srflx|prflx)\/udp$/),
+        });
+        const session = await B.evaluate(port => {
+            const setConfiguration = RTCPeerConnection.prototype.setConfiguration;
+            RTCPeerConnection.prototype.setConfiguration = function(conf) {
+                if(conf.iceTransportPolicy === 'relay') {
+                    conf = {...conf, iceServers: [{
+                        urls: [`turn:127.0.0.1:${port}?transport=tcp`],
+                        username: 'test', credential: 'test',
+                    }]};
+                }
+                return setConfiguration.call(this, conf);
+            };
+            window.__missingAudio = true;
+            return serverConnection.id;
+        }, deadRelay.address().port);
+        const streams = await conns(B);
+        await expect.poll(() => downstream(B)).toMatchObject({trial: 'trying'});
+        await B.evaluate(() => { window.__missingAudio = false; });
+        const heard = await audioPackets(A);
+        await expect.poll(() => audioPackets(A)).toBeGreaterThan(heard + 50);
+        expect((await downstream(B)).trial).toBe('trying');
+        expect(await B.evaluate(() => Object.values(serverConnection.up)[0]
+            .pc.getConfiguration().iceTransportPolicy)).toBe('all');
+        await expect.poll(() => downstream(B), {timeout: 15_000})
+            .toMatchObject({trial: null, policy: 'all', rolledBack: true});
+        const received = await audioPackets(B);
+        await expect.poll(() => audioPackets(B)).toBeGreaterThan(received + 50);
+        expect(await conns(B)).toEqual(streams);
+        expect(await B.evaluate(() => serverConnection.id)).toBe(session);
+        expect([...A.errors, ...B.errors]).toEqual([]);
+    } finally {
+        for (const socket of sockets)
+            socket.destroy();
+        await new Promise(resolve => deadRelay.close(resolve));
+    }
 });
 
 test('a direct UDP path given up for loss is tried again, once',
