@@ -1,6 +1,7 @@
 package rtpconn
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -302,21 +303,102 @@ func TestQualityRateLimit(t *testing.T) {
 	now := time.Unix(1000, 0)
 	n := 0
 	for i := 0; i < 100; i++ {
-		if qualityAllowed(c, now) {
+		if c.qualityLogLimit.allow(now, qualityBurst, qualityRefill) {
 			n++
 		}
 	}
 	if n != qualityBurst {
 		t.Errorf("burst: %v accepted, want %v", n, qualityBurst)
 	}
+	if !c.mediaIncidentLogLimit.allow(now, mediaIncidentBurst, mediaIncidentRefill) {
+		t.Error("ordinary quality reports exhausted the incident budget")
+	}
 	now = now.Add(10 * qualityRefill)
 	n = 0
 	for i := 0; i < 100; i++ {
-		if qualityAllowed(c, now) {
+		if c.qualityLogLimit.allow(now, qualityBurst, qualityRefill) {
 			n++
 		}
 	}
 	if n != 10 {
 		t.Errorf("after 10 refills: %v accepted, want 10", n)
+	}
+}
+
+func TestMediaIncidentLine(t *testing.T) {
+	c := qualityClient()
+	who := "c=" + connTag("client-q")
+	up := who + " up=" + connTag("u1") + " media incident "
+	down := who + " down=" + connTag("d1") + " media incident "
+	tests := []struct {
+		name, id string
+		value    map[string]interface{}
+		want     string
+	}{
+		{
+			"ICE transition", "u1",
+			map[string]interface{}{"event": "gray-on", "ice": "disconnected", "hidden": false,
+				"path": "tls", "age": 2000.0, "source": 30.0, "encoded": 28.0, "packets": 150.0},
+			up + "gray-on ice=disconnected hidden=false path=tls age=2000ms packets=150 source=30 encoded=28",
+		},
+		{
+			"freeze with private extras", "d1",
+			map[string]interface{}{"event": "freeze", "ice": "connected", "hidden": false,
+				"path": "udp", "ms": 120000.0, "packets": 1e7, "lost": -3.0,
+				"received": 50.0, "decoded": 41.0, "presented": 0.0,
+				"ip": "203.0.113.7", "sdp": "raw-session-description", "room": "private-room",
+				"deviceId": "physical-camera", "frames": []interface{}{"encoded-frame"}},
+			down + "freeze ice=connected hidden=false path=udp duration=120000ms packets=10000000 lost=-3 received=50 decoded=41 presented=0",
+		},
+		{
+			"invalid optional fields", "d1",
+			map[string]interface{}{"event": "stalled", "ice": "connected", "hidden": true,
+				"path": "203.0.113.7", "age": -1.0, "ms": 120001.0, "packets": 1e7 + 1,
+				"lost": -1e7 - 1, "source": 120001.0, "encoded": 1.5, "received": "sdp",
+				"decoded": nil, "presented": true},
+			down + "stalled ice=connected hidden=true",
+		},
+		{
+			"unowned stream", "another-client-stream",
+			map[string]interface{}{"event": "resumed", "ice": "completed", "hidden": false},
+			"",
+		},
+		{
+			"free-form event", "u1",
+			map[string]interface{}{"event": "gray-off\nforged-line", "ice": "completed", "hidden": false},
+			"",
+		},
+		{
+			"unknown ICE state", "u1",
+			map[string]interface{}{"event": "gray-off", "ice": "private SDP", "hidden": false},
+			"",
+		},
+		{
+			"missing hidden state", "u1",
+			map[string]interface{}{"event": "gray-off", "ice": "completed"},
+			"",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := qualityLine(c, "media-incident", test.id, test.value); got != test.want {
+				t.Errorf("log line = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestMediaIncidentCapability(t *testing.T) {
+	previous := LogConnections
+	t.Cleanup(func() { LogConnections = previous })
+	for _, enabled := range []bool{false, true} {
+		LogConnections = enabled
+		payload, err := json.Marshal(serverHandshake())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if advertised := strings.Contains(string(payload), `"mediaIncidents":true`); advertised != enabled {
+			t.Errorf("handshake %s with connection logging enabled=%t", payload, enabled)
+		}
 	}
 }

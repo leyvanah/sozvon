@@ -236,10 +236,7 @@ func resumeClient(conn *websocket.Conn, addr net.Addr, m clientMessage) error {
 	// The reply to the handshake goes out before the session's writer
 	// owns the connection, so nothing else writes to it yet.
 	conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-	err := conn.WriteJSON(clientMessage{
-		Type:    "handshake",
-		Version: []string{protocolVersion},
-	})
+	err := conn.WriteJSON(serverHandshake())
 	if err == nil {
 		// the new connection may come from a new network
 		if tag := networkTag(addr); tag != "" {

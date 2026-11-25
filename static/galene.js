@@ -1140,6 +1140,7 @@ function recoverIce(c) {
  * @this {ServerConnection}
  */
 function gotResumed() {
+    flushMediaIncidents(this);
     let R = iceRecoveryApi();
     if(R && !iceRecovery)
         iceRecovery = new R.Recovery();
@@ -3176,6 +3177,108 @@ function reportQuality(kind, id, value) {
     }
 }
 
+// Automatic call diagnostics use only counters and fixed event names. Video
+// frame callbacks provide the displayed-frame counter without reading pixels.
+const mediaIncidentMaxAge = 120000;
+const mediaIncidentQueueSize = 32;
+
+/** @param {ServerConnection} sc */
+function flushMediaIncidents(sc) {
+    let queue = sc.mediaIncidentQueue;
+    if(!sc.mediaIncidents) {
+        queue.length = 0;
+        return;
+    }
+    if(sc.resuming || sc.socket?.readyState !== WebSocket.OPEN)
+        return;
+    while(queue.length) {
+        let {id, at, value} = queue[0];
+        let age = Math.round(performance.now() - at);
+        if(age <= mediaIncidentMaxAge) {
+            try {
+                sc.send({type: 'sozvon-quality', kind: 'media-incident', id,
+                         value: {...value, age}});
+            } catch(e) {
+                return;
+            }
+        }
+        queue.shift();
+    }
+}
+
+/** @param {Stream} c @param {Record<string, any>} value @param {number} now */
+function reportMediaIncident(c, value, now) {
+    let queue = c.sc.mediaIncidentQueue;
+    if(queue.length >= mediaIncidentQueueSize)
+        queue.shift();
+    queue.push({id: c.id, value, at: now});
+    flushMediaIncidents(c.sc);
+}
+
+/** @param {Stream} c @param {HTMLElement|null} media */
+function mediaIncidentTile(c, media) {
+    if(!c.sc?.mediaIncidents || !c.pc || c.label !== 'camera' ||
+       !(media instanceof HTMLVideoElement))
+        return null;
+    let track = c.stream?.getVideoTracks()[0];
+    let D = /** @type {any} */ (window).SozvonMediaIncidents;
+    if(!D || !track)
+        return null;
+    let tile = c.userdata.mediaIncident;
+    if(!tile || tile.track !== track || tile.media !== media) {
+        tile = {track, media, frames: undefined, tracker: new D.Tracker()};
+        c.userdata.mediaIncident = tile;
+        if(media.requestVideoFrameCallback) {
+            let count = (_now, metadata) => {
+                if(c.userdata.mediaIncident !== tile || !c.pc || !media.isConnected ||
+                   !c.sc?.mediaIncidents)
+                    return;
+                tile.frames = metadata.presentedFrames;
+                media.requestVideoFrameCallback(count);
+            };
+            media.requestVideoFrameCallback(count);
+        }
+    }
+    return tile;
+}
+
+/**
+ * @param {Stream} c
+ * @param {HTMLVideoElement} media
+ * @param {MediaStreamTrack} track
+ * @param {number|undefined} frames
+ */
+function mediaIncidentObservation(c, media, track, frames) {
+    let presented = frames;
+    if(!media.requestVideoFrameCallback && media.getVideoPlaybackQuality) {
+        let q = media.getVideoPlaybackQuality();
+        if(q.totalVideoFrames > 0)
+            presented = q.totalVideoFrames - q.droppedVideoFrames;
+    }
+    return {
+        up: c.up,
+        ice: c.pc.iceConnectionState,
+        path: c.userdata.turnPath?.split('/')[1],
+        hidden: document.hidden,
+        active: track.enabled && track.readyState === 'live' && !media.closest('.peer-away'),
+        presented: media.closest('.peer-hidden, .self-hidden .peer-self') ? undefined : presented,
+    };
+}
+
+/** @param {Stream} c @param {RTCStatsReport} report */
+function sampleMediaIncidents(c, report) {
+    if(!c.sc?.mediaIncidents || c.label !== 'camera')
+        return;
+    let media = document.getElementById('media-' + c.localId);
+    let tile = mediaIncidentTile(c, media);
+    if(!tile)
+        return;
+    let now = performance.now();
+    let observation = mediaIncidentObservation(c, tile.media, tile.track, tile.frames);
+    for(let value of tile.tracker.sample(report.values(), observation, now))
+        reportMediaIncident(c, value, now);
+}
+
 async function pollQuality() {
     let Q = qualityApi();
     if(!Q || !serverConnection || !serverConnection.socket)
@@ -3199,17 +3302,19 @@ async function pollQuality() {
         } catch(e) {
             console.warn('getStats failed', e);
         }
-        if(sc !== serverConnection)
+        if(sc !== serverConnection || c.pc !== pc)
             return;
         feedQuality(c, pc.iceConnectionState, snap);
         if(report) {
             feedBitrate(c, report);
             watchTurnPath(c, report);
+            sampleMediaIncidents(c, report);
         }
         recoverIce(c);
     }));
     if(sc !== serverConnection)
         return;
+    flushMediaIncidents(sc);
     probeStalledAudio(sc);
     if(turnWatcher)
         for(let id of [...turnWatcher.streams.keys()])
@@ -5772,6 +5877,14 @@ function setMediaStatus(c) {
     if(!media) {
         console.warn('Setting status of unknown media.');
         return;
+    }
+    let tile = mediaIncidentTile(c, media);
+    if(tile && !media.closest('.peer-hidden, .self-hidden .peer-self')) {
+        let now = performance.now();
+        let observation = mediaIncidentObservation(c, tile.media, tile.track, tile.frames);
+        let value = tile.tracker.gray(!good, observation, now);
+        if(value)
+            reportMediaIncident(c, value, now);
     }
     if(good) {
         media.classList.remove('media-failed');

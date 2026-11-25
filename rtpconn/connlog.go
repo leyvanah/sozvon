@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"strings"
 	"time"
@@ -197,8 +198,10 @@ func selectedPair(pc *webrtc.PeerConnection) string {
 // qualityBurst reports are accepted at once, then one every
 // qualityRefill.  A bad call changes level a few times a minute.
 const (
-	qualityBurst  = 20
-	qualityRefill = 3 * time.Second
+	qualityBurst        = 20
+	qualityRefill       = 3 * time.Second
+	mediaIncidentBurst  = 20
+	mediaIncidentRefill = time.Second
 )
 
 var qualityLevels = map[string]bool{
@@ -255,23 +258,33 @@ var iceStates = map[string]bool{
 	"disconnected": true, "failed": true, "closed": true,
 }
 
-// qualityAllowed implements the rate limit, a token bucket kept in the
-// client.  It is only called from the client's own loop.
-func qualityAllowed(c *webClient, now time.Time) bool {
-	if c.qualityTime.IsZero() {
-		c.qualityTokens = qualityBurst
+var mediaIncidentEvents = map[string]bool{
+	"gray-on": true, "gray-off": true, "freeze": true, "stalled": true,
+	"resumed": true,
+}
+
+var mediaIncidentPaths = map[string]bool{
+	"udp": true, "tcp": true, "tls": true, "unknown": true,
+}
+
+// connLogLimiter is a token bucket kept in the client.  It is only used
+// from the client's own loop.
+type connLogLimiter struct {
+	tokens float64
+	at     time.Time
+}
+
+func (limit *connLogLimiter) allow(now time.Time, burst float64, refill time.Duration) bool {
+	if limit.at.IsZero() {
+		limit.tokens = burst
 	} else {
-		c.qualityTokens += float64(now.Sub(c.qualityTime)) /
-			float64(qualityRefill)
-		if c.qualityTokens > qualityBurst {
-			c.qualityTokens = qualityBurst
-		}
+		limit.tokens = min(burst, limit.tokens+float64(now.Sub(limit.at))/float64(refill))
 	}
-	c.qualityTime = now
-	if c.qualityTokens < 1 {
+	limit.at = now
+	if limit.tokens < 1 {
 		return false
 	}
-	c.qualityTokens--
+	limit.tokens--
 	return true
 }
 
@@ -482,6 +495,43 @@ func cameraLine(who, id string, v map[string]interface{}) string {
 		who, connTag(id), int64(after), strings.Join(parts, "; "))
 }
 
+// mediaIncidentLine only writes fields from the diagnostic schema.  The
+// stream has already been checked against the reporting client's connections.
+func mediaIncidentLine(who, dir, id string, v map[string]interface{}) string {
+	event, eventOK := word(v["event"], mediaIncidentEvents)
+	ice, iceOK := word(v["ice"], iceStates)
+	hidden, hiddenOK := v["hidden"].(bool)
+	if !eventOK || !iceOK || !hiddenOK {
+		return ""
+	}
+	var line strings.Builder
+	fmt.Fprintf(&line, "%s %s=%s media incident %s ice=%s hidden=%t",
+		who, dir, connTag(id), event, ice, hidden)
+	if path, ok := word(v["path"], mediaIncidentPaths); ok {
+		fmt.Fprintf(&line, " path=%s", path)
+	}
+	for _, field := range []struct {
+		key, name, unit string
+		min, max        float64
+	}{
+		{"age", "age", "ms", 0, 120000},
+		{"ms", "duration", "ms", 0, 120000},
+		{"packets", "packets", "", 0, 1e7},
+		{"lost", "lost", "", -1e7, 1e7},
+		{"source", "source", "", 0, 120000},
+		{"encoded", "encoded", "", 0, 120000},
+		{"received", "received", "", 0, 120000},
+		{"decoded", "decoded", "", 0, 120000},
+		{"presented", "presented", "", 0, 120000},
+	} {
+		n, ok := v[field.key].(float64)
+		if ok && n >= field.min && n <= field.max && n == math.Trunc(n) {
+			fmt.Fprintf(&line, " %s=%d%s", field.name, int64(n), field.unit)
+		}
+	}
+	return line.String()
+}
+
 // qualityLine turns a report into a log line, or "" if it is malformed.
 func qualityLine(c *webClient, kind, id string, value interface{}) string {
 	v, _ := value.(map[string]interface{})
@@ -490,6 +540,12 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 	}
 	who := "c=" + connTag(c.id)
 	switch kind {
+	case "media-incident":
+		dir, ok := streamKind(c, id)
+		if !ok {
+			return ""
+		}
+		return mediaIncidentLine(who, dir, id, v)
 	case "level":
 		dir, ok := streamKind(c, id)
 		if !ok {
@@ -671,7 +727,15 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 // reports are dropped silently: this is a log, not a protocol a client may
 // get wrong.
 func gotQualityReport(c *webClient, m clientMessage) {
-	if !LogConnections || !qualityAllowed(c, time.Now()) {
+	if !LogConnections {
+		return
+	}
+	now := time.Now()
+	if m.Kind == "media-incident" {
+		if !c.mediaIncidentLogLimit.allow(now, mediaIncidentBurst, mediaIncidentRefill) {
+			return
+		}
+	} else if !c.qualityLogLimit.allow(now, qualityBurst, qualityRefill) {
 		return
 	}
 	line := qualityLine(c, m.Kind, m.Id, m.Value)
