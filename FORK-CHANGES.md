@@ -1227,6 +1227,18 @@ Fork point: upstream commit `ba29f3d`; merged with upstream through
     applies, and the "own link degraded" judgement. Only changes are sent;
     the server checks every field, drops free text, and rate-limits reports
     to a burst of 20 and one per 3 s. Nothing is logged without the flag.
+  * **Automatic video incident diagnostics** with `-log-connections`.
+    For a camera that was already showing video, the browser reports brief
+    greying, detected freezes and recovery. Its report contains fixed event
+    and ICE states, transport protocol, and available changes in frame and
+    RTP packet counters. These separate an interface effect from a lack of
+    video reception, decoding, or display. The browser neither reads pixels
+    nor records media. It sends no raw WebRTC statistics, candidate addresses,
+    device IDs, room names, or usernames. A short, bounded in-memory queue can
+    bridge a signalling interruption. The server checks stream ownership and
+    allowed fields, and rate-limits incidents separately from quality reports.
+    Incident lines use the same salted tags and journal retention as the
+    other connection logs.
   * **Falling back from TURN over UDP** (`static/turn-fallback.js`). A relay
     reached over UDP carries a call much better than one over TCP/TLS, where
     one lost packet holds up everything behind it; but some networks drop or

@@ -79,10 +79,10 @@ type webClient struct {
 	down map[string]*rtpDownConnection
 	up   map[string]*rtpUpConnection
 
-	// rate limit on quality reports, see connlog.go (Sozvon)
-	qualityTokens  float64
-	qualityTime    time.Time
-	audioProbeTime time.Time
+	// rate limits on client diagnostics, see connlog.go (Sozvon)
+	qualityLogLimit       connLogLimiter
+	mediaIncidentLogLimit connLogLimiter
+	audioProbeTime        time.Time
 
 	// signalling resume, see resume.go; both are set before the
 	// session's goroutines start and never change (Sozvon)
@@ -162,6 +162,7 @@ func (c *webClient) PushClient(group, kind, id string, username string, perms []
 type clientMessage struct {
 	Type             string                   `json:"type"`
 	Version          []string                 `json:"version,omitempty"`
+	MediaIncidents   bool                     `json:"mediaIncidents,omitempty"`
 	Kind             string                   `json:"kind,omitempty"`
 	Error            string                   `json:"error,omitempty"`
 	Id               string                   `json:"id,omitempty"`
@@ -184,6 +185,14 @@ type clientMessage struct {
 	Label            string                   `json:"label,omitempty"`
 	Request          interface{}              `json:"request,omitempty"`
 	RTCConfiguration *webrtc.Configuration    `json:"rtcConfiguration,omitempty"`
+}
+
+func serverHandshake() clientMessage {
+	return clientMessage{
+		Type:           "handshake",
+		Version:        []string{protocolVersion},
+		MediaIncidents: LogConnections,
+	}
 }
 
 type closeMessage struct {
@@ -1047,10 +1056,7 @@ func clientLoop(c *webClient, ws *websocket.Conn, versionError bool) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	err := c.write(clientMessage{
-		Type:    "handshake",
-		Version: []string{protocolVersion},
-	})
+	err := c.write(serverHandshake())
 	if err != nil {
 		return err
 	}

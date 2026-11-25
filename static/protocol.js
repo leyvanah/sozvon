@@ -112,6 +112,10 @@ function ServerConnection() {
      * @type {string}
      */
     this.version = null;
+    // The server advertises that it writes automatic media incident reports.
+    this.mediaIncidents = false;
+    /** @type {Array<{id: string, at: number, value: Record<string, any>}>} */
+    this.mediaIncidentQueue = [];
     /**
      * The set of all up streams, indexed by their id.
      *
@@ -333,6 +337,7 @@ function ServerConnection() {
   * @typedef {Object} message
   * @property {string} type
   * @property {Array<string>} [version]
+  * @property {boolean} [mediaIncidents]
   * @property {string} [kind]
   * @property {string} [error]
   * @property {string} [id]
@@ -660,6 +665,7 @@ ServerConnection.prototype.connect = function(url) {
         case 'handshake': {
             if((m.version instanceof Array) && m.version.includes('2')) {
                 sc.version = '2';
+                sc.mediaIncidents = m.mediaIncidents === true;
             } else {
                 sc.version = null;
                 sc.error(new Error(`Unknown protocol version ${m.version}`));
