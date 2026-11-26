@@ -545,7 +545,12 @@ func qualityLine(c *webClient, kind, id string, value interface{}) string {
 		if !ok {
 			return ""
 		}
-		return mediaIncidentLine(who, dir, id, v)
+		line := mediaIncidentLine(who, dir, id, v)
+		if line != "" && dir == "down" {
+			line += mediaIncidentPacketGaps(getDownConn(c, id), v,
+				time.Since(packetGapEpoch))
+		}
+		return line
 	case "level":
 		dir, ok := streamKind(c, id)
 		if !ok {
