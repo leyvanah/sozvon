@@ -70,6 +70,9 @@ func readLoop(track *rtpUpTrack) {
 			continue
 		}
 
+		if LogConnections {
+			track.packetGaps.record(time.Since(packetGapEpoch))
+		}
 		track.jitter.Accumulate(packet.Timestamp)
 
 		kf, kfKnown := codecs.Keyframe(codec.MimeType, &packet)

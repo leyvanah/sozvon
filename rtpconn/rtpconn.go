@@ -93,6 +93,7 @@ type rtpDownTrack struct {
 	stats          *receiverStats
 	atomics        *downTrackAtomics
 	cname          atomic.Value
+	packetGaps     packetGapHistory
 }
 
 func (down *rtpDownTrack) SetTimeOffset(ntp uint64, rtp uint32) {
@@ -311,6 +312,9 @@ func (down *rtpDownTrack) write(buf []byte) (int, error) {
 	n, err := down.track.Write(buf)
 	if err == nil {
 		down.rate.Accumulate(uint32(n))
+		if LogConnections && n > 0 {
+			down.packetGaps.record(time.Since(packetGapEpoch))
+		}
 	}
 	return n, err
 }
@@ -396,13 +400,14 @@ func (down *rtpDownConnection) flushICECandidates() error {
 }
 
 type rtpUpTrack struct {
-	track    *webrtc.TrackRemote
-	receiver *webrtc.RTPReceiver
-	conn     *rtpUpConnection
-	rate     *estimator.Estimator
-	cache    *packetcache.Cache
-	jitter   *jitter.Estimator
-	cname    atomic.Value
+	track      *webrtc.TrackRemote
+	receiver   *webrtc.RTPReceiver
+	conn       *rtpUpConnection
+	rate       *estimator.Estimator
+	cache      *packetcache.Cache
+	jitter     *jitter.Estimator
+	cname      atomic.Value
+	packetGaps packetGapHistory
 
 	actions    *unbounded.Channel[trackAction]
 	readerDone chan struct{}

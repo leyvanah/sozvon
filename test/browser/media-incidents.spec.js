@@ -84,5 +84,7 @@ test('reports a gray tile with flowing video and a later playback stall', async 
     await expect.poll(log).toMatch(/c=[0-9a-f]{6} down=[0-9a-f]{6} media incident gray-on ice=disconnected/);
     await expect.poll(log).toMatch(/media incident gray-off[^\n]*presented=[1-9]\d*/);
     await expect.poll(log).toMatch(/media incident stalled[^\n]*presented=0/);
+    await expect.poll(log).toMatch(
+        /media incident stalled[^\n]*rtp_window=4s[^\n]*video_in_idle=\d+ms[^\n]*video_out_idle=\d+ms/);
     await expect.poll(log).toMatch(/media incident resumed[^\n]*presented=[1-9]\d*/);
 });
