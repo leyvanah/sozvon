@@ -29,7 +29,7 @@ async function join(context, name, reports) {
     return page;
 }
 
-test('reports a gray tile with flowing video and a later playback stall', async ({browser}) => {
+test('keeps flowing video in colour while reporting an ICE interruption and a later stall', async ({browser}) => {
     test.skip(!SERVER_LOG, 'needs the server log: run through run.sh');
     const mark = fs.statSync(SERVER_LOG).size;
     const senderReports = [];
@@ -52,7 +52,11 @@ test('reports a gray tile with flowing video and a later playback stall', async 
         });
         stream.pc.dispatchEvent(new Event('iceconnectionstatechange'));
     });
-    await expect(video).toHaveClass(/\bmedia-failed\b/);
+    await expect(video).toHaveCSS('filter', 'none');
+    const indicator = receiver.locator('.peer-remote .conn-quality');
+    await expect(indicator).toHaveAttribute('data-level', 'lost');
+    await expect(indicator).toBeVisible();
+    await expect(video).toHaveCSS('filter', 'none');
     await video.evaluate(el => new Promise(resolve => el.requestVideoFrameCallback(() =>
         el.requestVideoFrameCallback(() => resolve()))));
     await receiver.evaluate(() => {
@@ -60,8 +64,8 @@ test('reports a gray tile with flowing video and a later playback stall', async 
         delete stream.pc.iceConnectionState;
         stream.pc.dispatchEvent(new Event('iceconnectionstatechange'));
     });
-    await expect(video).not.toHaveClass(/\bmedia-failed\b/);
-    await expect.poll(() => receiverReports.map(m => m.value.event)).toEqual(['gray-on', 'gray-off']);
+    await expect(indicator).toBeHidden();
+    await expect.poll(() => receiverReports.map(m => m.value.event)).toEqual(['ice-down', 'ice-up']);
     expect(receiverReports[1].value.presented).toBeGreaterThan(0);
 
     // Pausing the receiver's element leaves the sender and its transport live.
@@ -81,8 +85,8 @@ test('reports a gray tile with flowing video and a later playback stall', async 
         expect(Object.keys(message.value).filter(key => !allowedFields.has(key))).toEqual([]);
     }
     const log = () => fs.readFileSync(SERVER_LOG).subarray(mark).toString('utf8');
-    await expect.poll(log).toMatch(/c=[0-9a-f]{6} down=[0-9a-f]{6} media incident gray-on ice=disconnected/);
-    await expect.poll(log).toMatch(/media incident gray-off[^\n]*presented=[1-9]\d*/);
+    await expect.poll(log).toMatch(/c=[0-9a-f]{6} down=[0-9a-f]{6} media incident ice-down ice=disconnected/);
+    await expect.poll(log).toMatch(/media incident ice-up[^\n]*presented=[1-9]\d*/);
     await expect.poll(log).toMatch(/media incident stalled[^\n]*presented=0/);
     await expect.poll(log).toMatch(
         /media incident stalled[^\n]*rtp_window=4s[^\n]*video_in_idle=\d+ms[^\n]*video_out_idle=\d+ms/);

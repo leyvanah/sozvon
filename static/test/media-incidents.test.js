@@ -10,21 +10,21 @@ function inbound(fields) {
     return [{type: 'inbound-rtp', kind: 'video', ...fields}];
 }
 
-test('a short gray transition can leave the rendered frames flowing', () => {
+test('an ICE interruption can leave the rendered frames flowing', () => {
     const tracker = new Tracker();
     const disconnected = {...visible, ice: 'disconnected'};
     const checking = {...visible, ice: 'checking', up: true};
     tracker.sample([], {...checking, presented: 1}, 0);
     tracker.sample([], {...checking, presented: 30}, 2000);
-    assert.equal(tracker.gray(true, {...checking, presented: 31}, 2010), null);
-    assert.equal(tracker.gray(false, visible, 2100), null);
+    assert.equal(tracker.iceInterrupted(true, {...checking, presented: 31}, 2010), null);
+    assert.equal(tracker.iceInterrupted(false, visible, 2100), null);
     tracker.sample([], {...visible, up: true, presented: 94}, 4000);
-    assert.deepEqual(tracker.gray(true, {...disconnected, presented: 100}, 4500), {
-        event: 'gray-on', ice: 'disconnected', path: 'udp', hidden: false,
+    assert.deepEqual(tracker.iceInterrupted(true, {...disconnected, presented: 100}, 4500), {
+        event: 'ice-down', ice: 'disconnected', path: 'udp', hidden: false,
     });
-    assert.equal(tracker.gray(true, {...disconnected, presented: 120}, 4750), null);
-    assert.deepEqual(tracker.gray(false, {...visible, presented: 129}, 5500), {
-        event: 'gray-off', ice: 'connected', path: 'udp', hidden: false,
+    assert.equal(tracker.iceInterrupted(true, {...disconnected, presented: 120}, 4750), null);
+    assert.deepEqual(tracker.iceInterrupted(false, {...visible, presented: 129}, 5500), {
+        event: 'ice-up', ice: 'connected', path: 'udp', hidden: false,
         ms: 1000, presented: 29,
     });
 });

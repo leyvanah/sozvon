@@ -5882,22 +5882,17 @@ function setMediaStatus(c) {
     if(tile && !media.closest('.peer-hidden, .self-hidden .peer-self')) {
         let now = performance.now();
         let observation = mediaIncidentObservation(c, tile.media, tile.track, tile.frames);
-        let value = tile.tracker.gray(!good, observation, now);
+        let value = tile.tracker.iceInterrupted(!good, observation, now);
         if(value)
             reportMediaIncident(c, value, now);
     }
-    if(good) {
-        media.classList.remove('media-failed');
-        if(c.userdata.play) {
-            if(media instanceof HTMLMediaElement)
-                media.play().catch(e => {
-                    console.error(e);
-                    displayError(e);
-                });
-            delete(c.userdata.play);
-        }
-    } else {
-        media.classList.add('media-failed');
+    if(good && c.userdata.play) {
+        if(media instanceof HTMLMediaElement)
+            media.play().catch(e => {
+                console.error(e);
+                displayError(e);
+            });
+        delete(c.userdata.play);
     }
 
     // A failed or recovered path is news now, not at the next poll.
