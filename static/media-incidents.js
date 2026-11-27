@@ -91,28 +91,28 @@
             this.ready = false;
             this.last = null;
             this.stall = null;
-            this.dimmed = null;
+            this.interrupted = null;
         }
 
-        // Read at the actual CSS transition, even between the stats polls.
-        // On recovery include how many frames were presented while gray.
-        gray(gray, options, now) {
-            if(gray) {
-                if(!options.active || !this.ready || this.dimmed)
+        // Read at the ICE transition, even between the stats polls. On
+        // recovery include how many frames were presented during the interruption.
+        iceInterrupted(interrupted, options, now) {
+            if(interrupted) {
+                if(!options.active || !this.ready || this.interrupted)
                     return null;
-                this.dimmed = {at: now, presented: options.presented};
-                return packet('gray-on', options, {});
+                this.interrupted = {at: now, presented: options.presented};
+                return packet('ice-down', options, {});
             }
-            if(!this.dimmed)
+            if(!this.interrupted)
                 return null;
-            let dimmed = this.dimmed;
-            this.dimmed = null;
+            let previous = this.interrupted;
+            this.interrupted = null;
             let presented = Number.isSafeInteger(options.presented) &&
-                Number.isSafeInteger(dimmed.presented) ?
-                options.presented - dimmed.presented : undefined;
-            return packet('gray-off', options, {
+                Number.isSafeInteger(previous.presented) ?
+                options.presented - previous.presented : undefined;
+            return packet('ice-up', options, {
                 presented: presented,
-            }, now - dimmed.at);
+            }, now - previous.at);
         }
 
         sample(report, options, now) {

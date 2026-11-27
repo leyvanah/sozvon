@@ -259,8 +259,8 @@ var iceStates = map[string]bool{
 }
 
 var mediaIncidentEvents = map[string]bool{
-	"gray-on": true, "gray-off": true, "freeze": true, "stalled": true,
-	"resumed": true,
+	"ice-down": true, "ice-up": true, "freeze": true, "stalled": true, "resumed": true,
+	"gray-on": true, "gray-off": true, // reports from clients predating the indicator-only UI
 }
 
 var mediaIncidentPaths = map[string]bool{

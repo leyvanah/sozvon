@@ -946,10 +946,6 @@ h1 {
     object-fit: contain;
 }
 
-.media-failed {
-    filter: grayscale(0.5) contrast(0.5);
-}
-
 .mirror {
     transform: scaleX(-1);
 }
